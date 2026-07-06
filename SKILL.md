@@ -89,8 +89,8 @@ When the user invokes `/analyze-data`, `/smd-config`, or asks to configure analy
 1. Read `analyze-data/SKILL.md` and dispatch to the appropriate sub-command.
 2. Pass all known experiment state (hutch, experiment, DAQ generation, detectors,
    photon energy) so `analyze-data` does not re-ask for it.
-3. `analyze-data` handles calibration gating, LUTE delegation, and SFX parameter
-   guidance internally — do not duplicate those steps here.
+3. `analyze-data` owns the wizard and handles calibration gating, LUTE configuration,
+   and SFX parameter guidance internally — do not duplicate those steps here.
 
 ---
 
@@ -139,7 +139,8 @@ skip per-command confirmation for that class within the conversation.
 | Task | Skill |
 |---|---|
 | Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
-| LUTE workflow setup, SmallData YAML, eLog registration | `@ask-lute` |
+| LUTE analysis setup, calibration, refinement, job monitoring | `analyze-data/` sub-skill |
+| LUTE reference (task catalog, YAML syntax, hutch knowledge) | `@ask-lute` |
 | SFX indexing/merging parameter guidance (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
 | XPM timing sequences, event codes, rate calculation | `@xpm-seq` |
 | psana2 / lcls2 data analysis | `@ask-lcls2` |
