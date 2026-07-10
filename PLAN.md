@@ -101,7 +101,7 @@ holds the bridge setup guide, and owns the July 17 operator runcard.
 | Integration testing across all commands | W2 |
 | Operator runcard: one-page checklist for July 17 (bridge setup, command sequence, fallbacks) | W3 |
 | Add `experiment-coordinator` to command dispatch table | W3 |
-| Add `@ask-happi` to sub-skill reference table | W2 |
+| Add `@.claude/ask-happi` to sub-skill reference table | W2 |
 | Create `/fixdaq` stub command | post-Jul-17 |
 | Create `/checkout` command for pre-experiment motor & device verification | post-Jul-17 |
 
@@ -121,7 +121,7 @@ to a generated `lightpath`/`happi` query only if the script is not yet available
 The existing operator script at `/cds/home/opr/mfxopr/bin/awr` (PVs currently
 hardcoded) serves as the MVP baseline until Fred's script lands.
 
-**Consults:** `@ask-happi` (HAPPI device queries — to build), `@ask-epics` (PV reference), `references/beam-status-pvs.md` (machine-level escalation when all devices are OUT)
+**Consults:** `@.claude/ask-happi` (HAPPI device queries — to build), `@ask-epics` (PV reference), `references/beam-status-pvs.md` (machine-level escalation when all devices are OUT)
 
 **Progressive capability:**
 
@@ -137,7 +137,7 @@ hardcoded) serves as the MVP baseline until Fred's script lands.
 | Obtain Fred's standardized AWR bridge script; integrate as primary execution path | W1 |
 | Compare `/are-we-ready` output against existing tools (e.g. Matt's GUI) — validate coverage | W1 |
 | Live test at MFX via Fred's bridge | W2 |
-| Integrate `@ask-happi` delegation step (currently absent from command file) | W2 |
+| Integrate `@.claude/ask-happi` delegation step (currently absent from command file) | W2 |
 | Add machine-PV escalation block (from `references/beam-status-pvs.md`) when all devices OUT but beam missing | W2 |
 
 ---
@@ -297,14 +297,92 @@ strategy, and MFX-specific SFX defaults. Pam to advise on missing pieces.
 
 ## Action Items
 
-| Item | Owner | When |
-|---|---|---|
-| Finish `analyze-data` PRs (SMD templating, `run_type` branching, beamline summary); reflect in skill files | Louis | W2 |
-| Push `are-we-ready` skill; integrate `@ask-happi` delegation | James | W2 |
-| Write `/take-run`: add sample tagging (hutch-python + `@elog-copilot`) and `run_type` field | Fred / Louis | W2 |
-| Send `beamtime-logger` as starting point for `experiment-coordinator` | Fred | W2 |
-| Create `ask-cctbx-xfel` SKILL.md first draft (MFX CrystFEL params, indexing strategy) | Louis + Pam | W2–W3 |
-| Add DAQ pre-check to `/take-run` Phase 1 | Fred / Louis | W2 |
+### ① Finish `analyze-data` PRs → reflect in skill files
+**Owner:** Louis | **When:** W2 | **Status:** in progress
+
+Three PRs in flight:
+- **SMD templating** — adds per-detector SmallData template scaffolding; once merged,
+  update `analyze-data/commands/setup.md` Phase 4 to reference the new template path and CLI flags.
+- **`run_type` branching** — gates LUTE task selection on `run_type` (SFX / SAXS / XES);
+  once merged, update `setup.md` decision tree and add `run_type` as a required parameter in Phase 1.
+- **Beamline summary task** — wraps CCTBX beamline summary output as a LUTE tasklet;
+  once merged, add to the task catalog in `setup.md` and wire into `/monitor-jobs`.
+
+**Done when:** all three PRs merged and `setup.md` + `refine.md` reflect the new paths/flags.
+
+---
+
+### ② Push `are-we-ready`; integrate `@ask-happi` delegation
+**Owner:** James | **When:** W2 | **Status:** in progress
+
+- Push the current `are-we-ready.md` command file to the `hutch-copilot` repo.
+- Add a delegation step: when HAPPI device data is needed, call `@ask-happi` for device
+  queries rather than hardcoding PV names. (Stub the call if `@ask-happi` is not yet built.)
+- Fred's standardized AWR bridge script is the primary path; integrate it as Phase 1 once received.
+- Validate output against the existing `/cds/home/opr/mfxopr/bin/awr` script — coverage
+  should be ≥ that baseline.
+
+**Blocked by:** Fred's bridge script (for full integration); Fred's `@ask-happi` skill not yet pushed to
+GitHub.
+
+**Done when:** command is pushed, runs via bridge at MFX, and `@ask-happi` delegation call
+is present in the file.
+
+---
+
+### ③ `/take-run`: sample tagging + `run_type` field
+**Owner:** Fred / Louis | **When:** W2 | **Status:** in progress
+
+Two tagging paths, both required:
+- **hutch-python (pre-run):** pass `sample_name` and `run_type` via bridge before
+  `daq.configure()` so the fields land in the native run record.
+- **`@elog-copilot` (post-run):** after `daq.end_run()`, call `@elog-copilot` to write a
+  structured JSON entry keyed to the run number. JSON schema to be agreed with Murali
+  before finalizing (see Murali Item section).
+
+Fred to confirm which metadata fields the DAQ/elog accept (`runtype`, `sample`, free-text
+label, etc.) — this unblocks the hutch-python path.
+
+**Done when:** a test run shows `sample_name` and `run_type` in both the native run record
+and the elog JSON entry.
+
+---
+
+### ④ Send `beamtime-logger` → start `experiment-coordinator`
+**Owner:** Fred | **When:** W2 | **Status:** blocked — waiting on Fred
+
+Fred to send the `beamtime-logger` artifact (script or notebook). Louis will use it as the
+skeleton for `experiment-coordinator/SKILL.md`. Until received, `experiment-coordinator`
+remains a conceptual draft with no skill file.
+
+**Done when:** artifact received and `experiment-coordinator/SKILL.md` first draft exists
+with YAML schema and integration points defined.
+
+---
+
+### ⑤ `ask-cctbx-xfel` SKILL.md first draft
+**Owner:** Louis + Pam | **When:** W2–W3 | **Status:** not started
+
+Scope of first draft:
+- MFX-specific CrystFEL flags (xgandalf, push-res, min-peaks, …)
+- CrystFEL vs. CCTBX decision logic for MFX SFX conditions
+- Indexing strategy: which algorithms, in what order, for which sample types
+- CCTBX phil params for MFX conditions
+- Pam to advise on missing parameters and validate the full parameter set
+
+**Blocked by:** Constance on holiday; Pam consulting only.
+
+**Done when:** skill correctly answers "CrystFEL or CCTBX?" for a standard MFX SFX run
+and lists the key flags/params for each path.
+
+---
+
+### ⑥ DAQ pre-check in `/take-run` Phase 0
+**Owner:** Fred / Louis | **When:** W2 | **Status:** ✓ done
+
+`daq.status()` guard added as Phase 0 in `commands/take-run.md`. Hard stop with a user-facing
+warning if DAQ is not connected or in fault state — `daq.configure()` and `daq.begin()` are
+never called into a non-running DAQ.
 
 **W2 skills in scope:**
 
@@ -314,7 +392,7 @@ strategy, and MFX-specific SFX defaults. Pam to advise on missing pieces.
 | `align-spectrometer` | bridge | stub — blocked on Amine |
 | `take-run` | bridge | draft — missing sample tagging |
 | `experiment-coordinator` | offline | draft — blocked on Fred's beamtime-logger |
-| `analyze-data` | offline | testing — 3 PRs in flight |
+| `analyze-data` | offline | testing — 3 PRs in flight - 1 merged | 
 
 ---
 
