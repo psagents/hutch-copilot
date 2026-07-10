@@ -4,6 +4,26 @@ Triggered by: `/takerun`, "take a run", "start collecting", "begin a run", "take
 
 ---
 
+## Phase 0: Verify DAQ is Running
+
+Before resolving any run parameters, confirm the DAQ is live via the bridge.
+
+```python
+daq.status()
+```
+
+Parse the response:
+- If state is `Running`, `Configured`, or `Open` — proceed to Phase 1.
+- If state shows **not connected**, **disconnected**, **unconnected**, or any **fault** — stop and warn the user:
+
+> "DAQ does not appear to be running or is in a fault state (`{state}`).
+> Resolve the DAQ issue before attempting configure/begin.
+> You may want to run `/fixdaq`, or ask the operator to restart the DAQ manually."
+
+**Do not call `daq.configure()` or `daq.begin()` into a non-running DAQ.** Hard stop here.
+
+---
+
 ## Phase 1: Resolve Run Parameters
 
 Pull what you already know from the session state. Ask only for what is missing.

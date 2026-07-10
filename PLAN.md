@@ -1,6 +1,6 @@
 # hutch-copilot — Development Plan
 
-**Last updated:** July 6, 2026
+**Last updated:** July 10, 2026
 **Repository:** https://github.com/psagents/hutch-copilot
 
 **Goal:** Run a complete SFX experiment at MFX on **July 17, 2026** using agents
@@ -17,7 +17,7 @@ hutch-copilot/
 ├── SKILL.md                  ← top-level skill: orchestrator instructions
 ├── commands/                 ← one file per live bridge command
 │   ├── are-we-ready.md
-│   ├── align-beam.md
+│   ├── align-spectrometer.md
 │   └── take-run.md
 ├── analyze-data/             ← offline sub-skill (owns its own SKILL.md)
 │   ├── SKILL.md
@@ -93,11 +93,17 @@ Sibling skills and `analyze-data` work in planning mode from any terminal.
 The top-level skill. Routes user intent to the right command or sub-skill,
 holds the bridge setup guide, and owns the July 17 operator runcard.
 
+**Consults:** `@.claude/cds-bridge` (bridge setup + device control), and makes to every possible skills available through session and in local `.claude/` 
+
 | Task | When |
 |---|---|
 | Bridge setup guide: SSH tunnel steps, verification command | W1 |
 | Integration testing across all commands | W2 |
 | Operator runcard: one-page checklist for July 17 (bridge setup, command sequence, fallbacks) | W3 |
+| Add `experiment-coordinator` to command dispatch table | W3 |
+| Add `@ask-happi` to sub-skill reference table | W2 |
+| Create `/fixdaq` stub command | post-Jul-17 |
+| Create `/checkout` command for pre-experiment motor & device verification | post-Jul-17 |
 
 ---
 
@@ -115,6 +121,8 @@ to a generated `lightpath`/`happi` query only if the script is not yet available
 The existing operator script at `/cds/home/opr/mfxopr/bin/awr` (PVs currently
 hardcoded) serves as the MVP baseline until Fred's script lands.
 
+**Consults:** `@ask-happi` (HAPPI device queries — to build), `@ask-epics` (PV reference), `references/beam-status-pvs.md` (machine-level escalation when all devices are OUT)
+
 **Progressive capability:**
 
 | Level | Description |
@@ -129,22 +137,29 @@ hardcoded) serves as the MVP baseline until Fred's script lands.
 | Obtain Fred's standardized AWR bridge script; integrate as primary execution path | W1 |
 | Compare `/are-we-ready` output against existing tools (e.g. Matt's GUI) — validate coverage | W1 |
 | Live test at MFX via Fred's bridge | W2 |
+| Integrate `@ask-happi` delegation step (currently absent from command file) | W2 |
+| Add machine-PV escalation block (from `references/beam-status-pvs.md`) when all devices OUT but beam missing | W2 |
 
 ---
-
-### /align-spectrometer  *(renamed from /align-beam; owner changed to Louis)*
+### /align-spectrometer
 
 **Status:** stub | **Owner:** Louis
 
 Drives Amine's VH auto-alignment routine via the bridge, exposes Amine's routine and run the script.
 Routines are at `https://github.com/pcdshub/mfx/tree/vonhamos_automation/mfx/optimize`.
-Agent could setup AMI to run those routines.
-Covers the "Auto align VH" step in the July 17 scenario.
+Agent should make sure bridge is on and can communicate with hutch-python session.
+Agent should make sure the AMI graph is already setup and set AMI graph parameters 
+(averaging of epix100 images mainly) (through PVs).
+Once everything is ready, run the commands.
+
+**Consults:** `@experimental-hutch-python` (bridge execution + device moves), `@ask-ami` (AMI graph setup + PV configuration), `@ask-epics` (AMI PV documentation)
 
 | Task | When |
 |---|---|
-| Rename command file `align-beam.md` → `align-spectrometer.md` | W1 |
 | Get VH alignment function name/signature from Amine | W1 |
+| Add AMI graph verification + set averaging PVs on epix100 before routine | W2 |
+| Scaffold Phase 3 (Execute) with `vonhamos_automation` repo invocation pattern | W2 |
+| Implement motor restore-on-failure logic | W2 |
 | Complete command (bridge calls + geometry validation step) | W2 |
 | Live test | W2 |
 
@@ -155,7 +170,7 @@ Covers the "Auto align VH" step in the July 17 scenario.
 
 DAQ run control + XTC2 file verification. Enhanced with sample tagging and
 cumulative data aggregation.
-Should use `autorun.py` command while checking data is being recorded. 
+DAQ is assumed to be running — a pre-check verifies it is live before proceeding.
 Handle sample tagging and `run_type` definition.
 
 **Sample tagging** uses both mechanisms:
@@ -167,9 +182,12 @@ Handle sample tagging and `run_type` definition.
 **Cumulative Data Aggregation:** filter on sample → merge → aggregate → append to
 run summary. Enables per-sample tracking across multiple runs.
 
+**Consults:** `@experimental-hutch-python` (DAQ control + bridge execution), `@elog-copilot` (post-run structured JSON tag), `@lcls-catalog` (XTC2 file verification), `@daq-logs` (DAQ error diagnosis)
+
 | Task | When |
 |---|---|
 | Research: what metadata fields can be written into a run (`runtype`, etc.)? | W1 |
+| Add DAQ pre-check (verify DAQ is running before Phase 1 proceeds) | W2 |
 | Add sample tagging via hutch-python (bridge call before DAQ start) | W1 |
 | Add sample tagging via `@elog-copilot` (structured JSON post-run log) | W1 |
 | Implement cumulative aggregation logic + run summary output | W2 |
@@ -177,10 +195,22 @@ run summary. Enables per-sample tracking across multiple runs.
 
 ---
 ### experiment-coordinator
+
+**Status:** draft | **Owner:** 
+
+Starts with beamtime-logger.
 Checks the experiment status every time a call is made to whatever commands:
 Bookkeeping check for sample change, write YAMLs with configuration, etc... 
-Keeps track of the “current” experiment context and translates that to the various skills’ contexts.
+Keeps track of the "current" experiment context and translates that to the various skills' contexts.
 Something that @hutch-copilot would run in the background. 
+
+**Consults:** `@elog-copilot` (write structured eLog entries), `@ask-lcls2` (run metadata inspection), `@lcls-catalog` (experiment file inventory)
+
+| Task | Owner | When |
+|---|---|---|
+| Fred sends `beamtime-logger` artifact | Fred | W2 |
+| Define YAML schema for experiment state (sample, config, run mapping) | Louis + Fred | W2 |
+| Define integration points with `/take-run`, `analyze-data`, `@elog-copilot` | Louis | W3 |
 
 ---
 
@@ -197,15 +227,18 @@ is **ready**. Currently in testing. Three PRs in flight (Louis):
 | `run_type` branching | next |
 | Beamline summary task | next |
 
-The beamline summary PR delivers the hit/indexing rate vs. time/shot output
-in `/monitor-jobs`.
+**Consults:** `@ask-lute` (LUTE reference brain: task catalog, YAML, hutch refs), `@ask-cctbx-xfel` (SFX indexing/merging params), `@ask-smalldata` (SmallData detector params), `@ask-slurm-s3df` (job submission + monitoring), `@lcls-catalog` (file finding, XTC2 inventory), `@ask-lcls2` (psana2 data inspection + calibration check)
 
 | Task | Owner | When |
 |---|---|---|
 | Centralize LUTE install path decision | Louis | W1 |
 | Add `@ask-smalldata` delegation at Step 3.4 Tier 2 | Louis | W1 |
 | Add `@ask-cctbx-xfel` delegation at Step 3.4 Tier 2 | Louis | W1 |
-| `/calibrate`: validate dark run procedure and BayFAI integration | Louis *(Constance on holiday)* | W2 |
+| Reflect SMD templating PR in `setup.md` Phase 4 | Louis | W2 |
+| Reflect `run_type` branching PR in `setup.md` | Louis | W2 |
+| Add beamline summary task to task catalog in `setup.md` | Louis | W2 |
+| Add hit/indexing rate vs. time/shot display to `monitor-jobs.md` | Louis | W2–W3 |
+| Verify `/calibrate` geometry pool path is current for S3DF | Louis | W2 |
 | Full MFX SFX walkthrough test (LCLS-II, ePix10k2M, CheetahRunner → CrystFEL) | Louis + Pam | W2 |
 
 ---
@@ -216,7 +249,9 @@ in `/monitor-jobs`.
 
 Pure reference brain: LUTE task catalog, YAML syntax, hutch-specific knowledge.
 The wizard was moved out into `analyze-data/commands/setup.md` and `refine.md`.
-Consulted by `analyze-data /setup` and `/refine` for LUTE internals.
+`analyze-data` owns the wizard and consults `@ask-lute` for LUTE internals.
+
+**Consults:** none — pure reference, consulted by others, no sub-delegation
 
 No active development tasks for July 17 — kept up to date as LUTE evolves.
 
@@ -230,11 +265,13 @@ SFX parameter expert consulted by `analyze-data /setup` (Step 3.4 Tier 2) and
 `/refine`. Covers CrystFEL vs. CCTBX decision logic, xgandalf flags, indexing
 strategy, and MFX-specific SFX defaults. Pam to advise on missing pieces.
 
+**Consults:** `@confluence-doc` (LCLS SFX documentation) — pure reference skill, no bridge, no sub-delegation
+
 | Task | Owner | When |
 |---|---|---|
-| SKILL.md first draft (MFX CrystFEL params, xgandalf flags, CCTBX path) | Louis + Pam | W1 |
+| SKILL.md first draft (MFX CrystFEL params, xgandalf flags, CCTBX path) | Louis + Pam | W2 |
 | Flesh out full MFX SFX parameter set (CrystFEL flag reference, CCTBX phil params, when-to-use logic) | Louis + Pam | W2 |
-| Validate: skill correctly answers "CrystFEL or CCTBX?" for MFX SFX | Louis + Pam | W2 |
+| Validate: skill correctly answers "CrystFEL or CCTBX?" for MFX SFX | Louis + Pam | W3 |
 
 > **Note — hit/indexing rate vs. time/shot (CCTBX beamline summary):**
 > The feature (hit rate + indexing rate vs. time/shot)
@@ -246,19 +283,38 @@ strategy, and MFX-specific SFX defaults. Pam to advise on missing pieces.
 
 ## Timeline
 
-| Week | Dates | Focus | Exit gate |
-|---|---|---|---|
-| **W1** | Jun 30 – Jul 4 | Foundation: renames, architecture, and `lute` code | — |
-| **W2** | Jul 7 – Jul 10 | Write 5 skills individually testable; bridge confirmed at MFX | All skills pass solo test |
-| **W3** | Jul 14 – Jul 16 | Test on previous experiments | Dry run pass |
-| **Jul 17** | Fri | **Beamtime** | SFX experiment run end-to-end with agents |
+| Week | Dates | Status | Focus | Exit gate |
+|---|---|---|---|---|
+| **W1** | Jun 30 – Jul 4 | complete | Foundation: renames, architecture, and `lute` code | — |
+| **W2** | Jul 7 – Jul 10 | **in progress (ends today)** | Write 5 skills individually testable; bridge confirmed at MFX | All skills pass solo test |
+| **W3** | Jul 14 – Jul 16 | upcoming | Integrate & test on previous experiments | Dry run pass |
+| **Jul 17** | Fri | **beamtime** | SFX experiment run end-to-end with agents | — |
+
+**W2 highlights:**
+- `run_type` branching tested with `/take-run` (soon to be done)
+- `experiment-coordinator`: starts from `beamtime-logger` — Fred to send (pending)
+- `are-we-ready`: integrate `ask-happi` reference (pending)
+
+## Action Items
+
+| Item | Owner | When |
+|---|---|---|
+| Finish `analyze-data` PRs (SMD templating, `run_type` branching, beamline summary); reflect in skill files | Louis | W2 |
+| Push `are-we-ready` skill; integrate `@ask-happi` delegation | James | W2 |
+| Write `/take-run`: add sample tagging (hutch-python + `@elog-copilot`) and `run_type` field | Fred / Louis | W2 |
+| Send `beamtime-logger` as starting point for `experiment-coordinator` | Fred | W2 |
+| Create `ask-cctbx-xfel` SKILL.md first draft (MFX CrystFEL params, indexing strategy) | Louis + Pam | W2–W3 |
+| Add DAQ pre-check to `/take-run` Phase 1 | Fred / Louis | W2 |
 
 **W2 skills in scope:**
-- `/are-we-ready` — HAPPI/lightpath beam readiness check `[bridge]`
-- `/align-spectrometer` — VH auto-alignment + Amine's routine `[bridge]`
-- `/take-run` — DAQ run control + sample tagging + cumulative aggregation `[bridge]`
-- `/coordinate-experiment` — bookkeeping experiment change and updates eLog
-- `analyze-data/` — data analysis sub-skill (offline, no bridge)
+
+| Skill | Mode | Status |
+|---|---|---|
+| `are-we-ready` | bridge | in progress |
+| `align-spectrometer` | bridge | stub — blocked on Amine |
+| `take-run` | bridge | draft — missing sample tagging |
+| `experiment-coordinator` | offline | draft — blocked on Fred's beamtime-logger |
+| `analyze-data` | offline | testing — 3 PRs in flight |
 
 ---
 
@@ -290,11 +346,15 @@ DAQ generation: **LCLS-II / psana2 / `.xtc2`** confirmed.
 | Gap | Risk | Owner |
 |---|---|---|
 | Amine's VH alignment function name/signature unknown | High — `/align-spectrometer` is a stub | Louis + Amine |
-| What metadata fields can be written into a run (`runtype`?)  | High — blocks `/take-run` sample aggregation | Fred |
+| What metadata fields can be written into a run (`runtype`?) | High — blocks `/take-run` sample aggregation | Fred |
+| `/take-run` missing sample tagging (hutch-python + `@elog-copilot` paths) | High — blocks run metadata for July 17 | Fred / Louis |
 | Fred's HAPPI bridge not yet integrated | Medium — `/are-we-ready` falls back to docs mode | Claire + Fred |
 | `/are-we-ready` output not yet validated against existing tools | Medium — could miss beam path gaps | Claire |
 | `ask-cctbx-xfel` skill does not exist yet; Constance on holiday | Medium — `analyze-data /setup` Step 3.4 Tier 2 falls back to user prompt | Louis + Pam |
 | No second dry run scheduled after July 10 | Medium — July 14–16 is fix-only buffer | All |
+| `experiment-coordinator` has no skill file; blocked on beamtime-logger from Fred | Medium — experiment bookkeeping will not work without it | Fred |
+| `/fixdaq` referenced in error handling but does not exist | Low — operators know the manual fix | Louis |
+| `/checkout` has no command file; referenced in `mfx.md` | Low — operators do this manually today | Louis (post-Jul-17) |
 
 ---
 
@@ -323,6 +383,8 @@ been moved into `analyze-data/commands/setup.md` and `analyze-data/commands/refi
 - Add hutch references for TMO, RIX, CXI to `hutch-copilot/references/hutches/`
 - Generalize `analyze-data/references/sfx-analysis-defaults.md` for other
   techniques (TR-SAXS, XES)
+- Build `/checkout` command for pre-experiment motor & device verification (MFX beam path + sample area motors)
+- Build `/fixdaq` command stub for DAQ recovery guidance
 
 ---
 

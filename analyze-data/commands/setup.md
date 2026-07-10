@@ -78,7 +78,7 @@ Record the commands to run in Phase 5:
 git clone https://github.com/slac-lcls/lute.git {results_dir}/lute
 cd {results_dir}/lute && git checkout {version}
 ./build.sh -e
-chmod -R 765 {results_dir}/lute
+chmod -R 775 {results_dir}/lute
 ```
 
 > IMPORTANT: Clone directly to `{results_dir}/lute`. Target directory must not pre-exist.
@@ -222,25 +222,36 @@ For DAG YAML syntax, `!branch_daq2` usage, and `slurm_params` defaults, read
 
 **DAG YAML syntax:**
 
+Write the correct `slurm_params` for every task directly from the table below.
+**Do NOT include `--partition` or `--account`** — `install_lute.py` appends those
+at registration time from its `--partition` / `--account` arguments.
+
 ```yaml
 !LUTE_DAG
-task_name: "FirstManagedTaskName"
-slurm_params: "--nodes=1 --ntasks=1"
+task_name: "SmallDataProducer2"
+slurm_params: "--nodes=4 --ntasks-per-node=50 --exclusive"
 next:
-- task_name: "NextManagedTaskName"
-  slurm_params: "--nodes=1 --ntasks=1"
+- task_name: "SmallDataXESAnalyzer"
+  slurm_params: "--nodes=1 --ntasks-per-node=1"
   next: []
 ```
 
-**`slurm_params` defaults per task:**
+**`slurm_params` per task (write these values verbatim into the DAG):**
 
-| Managed Task Name | Nodes | ntasks-per-node | Extra flags |
-|---|---|---|---|
-| `SmallDataProducer` | 4 | 50 | `--exclusive` |
-| `SmallDataProducer2` | 4 | 50 | `--exclusive` |
-| `BayFAIOptimizer` | 1 | 120 | — |
-| `BayFAIOptimizer2` | 1 | 120 | — |
-| All other tasks | 1 (or user override) | 1 (or user override) | — |
+| Managed Task Name | `slurm_params` to write |
+|---|---|
+| `SmallDataProducer` | `--nodes=4 --ntasks-per-node=50 --exclusive` |
+| `SmallDataProducer2` | `--nodes=4 --ntasks-per-node=50 --exclusive` |
+| `BayFAIOptimizer` | `--nodes=1 --ntasks-per-node=120` |
+| `BayFAIOptimizer2` | `--nodes=1 --ntasks-per-node=120` |
+| All other tasks | `--nodes=1 --ntasks-per-node=1` |
+
+> **CRITICAL — production task names only.**
+> Always use the exact Managed Task names above (`SmallDataProducer2`, not
+> `SmallDataProducer2Test` or any other `...Test` variant). Test-suffixed tasks
+> are development stubs; using them in a production DAG causes silent resource
+> misallocation. If in doubt, verify against `managed_tasks.py` on GitHub.
+> To change resources for a specific task after setup, edit the `.dag` file directly.
 
 Default SLURM globals (ask only if user wants to override):
 - `--partition=milano`
@@ -271,6 +282,7 @@ DAG YAML:
 
 install_lute.py (will be run at end of Phase 5):
   python ask-lute/scripts/install_lute.py -e {experiment} -v {version} \
+    [-f]                          # only when fresh install (Phase 2 Option B) \
     -W {wf1} [{wf2}] --trigger {spec1} [{spec2}]
 ──────────────────────────────────────────
 Proceed to YAML configuration? (yes / adjust)
@@ -316,7 +328,7 @@ Ask each field explicitly. For variable substitution syntax see
 2. **experiment** — already known from Phase 1; confirm with user
 3. **run** — leave empty (`""`); filled automatically at runtime
 4. **date** — today's date (`YYYY/MM/DD`)
-5. **task_timeout** — "Maximum runtime per task in seconds? [600]"
+5. **task_timeout** — "Maximum runtime per task in seconds? [3600]"
 6. **work_dir** — already known (`{lute_output_dir}`); confirm
 
 > **Checkpoint — header block.** Correct? (yes / adjust)
@@ -392,7 +404,7 @@ The user has approved the plan (Phase 3) and the YAML (Phase 4). Execute in orde
 git clone https://github.com/slac-lcls/lute.git {results_dir}/lute
 cd {results_dir}/lute && git checkout {version}
 ./build.sh -e
-chmod -R 765 {results_dir}/lute
+chmod -R 775 {results_dir}/lute
 ```
 
 ### Step 5.2 — Create output directory
@@ -426,12 +438,17 @@ chmod 666 {config_path}
 python ask-lute/scripts/install_lute.py \
   -e {experiment} \
   -v {version}    \
+  [-f]                          \   # include when fresh install (Phase 2 Option B)
+  [-D {directory}]             \
   -W {wf1} {wf2} ...           \
   --trigger {spec1} {spec2} ... \
   [--partition {partition}]     \
-  [--account {account}]         \
-  [--nodes {N}] [--ntasks-per-node {N}]
+  [--account {account}]
 ```
+
+> **Important:** Always pass `-D {directory}` when a subdirectory was chosen in Phase 1.
+> Omitting it causes `install_lute.py` to default to `results/lute_output/` and create
+> a spurious workspace there instead of the correct `results/{directory}/lute_output/`.
 
 `--trigger` specs (one per `-W` workflow, in matching order):
 
