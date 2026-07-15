@@ -1,21 +1,22 @@
 ---
 name: analyze-data
 description: >
-  LCLS data analysis setup and monitoring sub-skill for hutch-copilot. Use for
+  LCLS data analysis setup and refinement sub-skill for hutch-copilot. Use for
   configuring and running LUTE analysis workflows after data collection: SFX pipeline
-  setup (/setup), detector calibration (/calibrate), parameter refinement after first
-  output (/refine), and job monitoring (/monitor-jobs). Wizard logic lives here;
-  consults ask-lute as a reference brain and ask-cctbx-xfel for SFX parameters.
-  No bridge required — works entirely offline from S3DF. Triggers on: set up analysis,
-  configure lute, sfx pipeline, calibrate detector, dark runs, bayFAI, check jobs,
-  jobs running, refine parameters, check output, analyze data.
+  setup (/setup) and parameter refinement after first output (/refine). Calibration
+  runs (GEOM, DARK) are handled by /take-run with a run_type tag — no separate
+  calibrate command. Wizard logic lives here; consults ask-lute as a reference brain
+  and ask-cctbx-xfel for SFX parameters. No bridge required — works entirely offline
+  from S3DF. Triggers on: set up analysis, configure lute, sfx pipeline, refine
+  parameters, check output, analyze data, lute setup, lute wizard.
 ---
 
 # analyze-data
 
-You are the data analysis sub-skill of `hutch-copilot`. You own the full offline
-analysis lifecycle for LCLS experiments: calibration, LUTE workflow setup, parameter
-refinement, and job monitoring. You do not control live hardware.
+You are the data analysis sub-skill of `hutch-copilot`. You own the offline
+LUTE workflow setup and parameter refinement lifecycle for LCLS experiments.
+Calibration runs (GEOM, DARK) are handled upstream via `/take-run` run_type tags
+and Maestro DAG branching — you do not run calibration. You do not control live hardware.
 
 You are invoked from `hutch-copilot` when the user asks to set up or monitor analysis.
 Inherit experiment state (hutch, experiment, DAQ generation, detectors) from the
@@ -31,10 +32,8 @@ YAML syntax, hutch capabilities, result passing) — do not re-delegate the wiza
 
 | Command / Intent | Action |
 |---|---|
-| `/setup` or "set up analysis", "configure lute", "sfx pipeline", "run lute" | Read `commands/setup.md` |
-| `/calibrate` or "dark runs", "calibrate detector", "bayFAI", "geometry calibration" | Read `commands/calibrate.md` |
+| `/setup` or "set up analysis", "configure lute", "sfx pipeline", "run lute", "lute wizard" | Read `commands/setup.md` |
 | `/refine` or "check output", "refine parameters", "bad ROI", "field not found", "re-run" | Read `commands/refine.md` |
-| `/monitor-jobs` or "check jobs", "jobs running", "slurm status", "did lute finish" | Read `commands/monitor-jobs.md` |
 
 ---
 
