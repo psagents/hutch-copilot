@@ -3,32 +3,45 @@
 This is the single script to run after the skill has written DAG files and the
 YAML configuration. It handles everything end-to-end:
 
-  1. Optional fresh LUTE install (git clone + build) if -f is passed
+  1. LUTE installation: create two isolated Python virtual environments and
+     pip-install lute-lcls into each (always recreates if already present)
   2. Workspace setup: create lute_output_dir and lute.db
-  3. Patch slurm_params in each pre-written DAG file
+  3. Inject --account and --partition into each pre-written DAG file
   4. Register each workflow in the LCLS eLog (requires Kerberos ticket)
+
+Virtual environments created:
+    {results_dir}/lute_envs/lute_env_py39/    (Python 3.9)
+    {results_dir}/lute_envs/lute_env_py311/   (Python 3.11)
+
+Python interpreters used:
+    Python 3.9:  /sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9
+    Python 3.11: /sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11
+
+Entry points (arp_executable, launch_executable) come from lute_env_py39/bin/.
 
 Usage
 -----
-The skill writes {lute_output_dir}/{wf_name}.dag and
-{lute_output_dir}/{hutch}_lute.yaml, then calls:
+The skill writes {lute_output_dir}/{wf_name}.dag (with correct per-task
+slurm_params already set) and {lute_output_dir}/{hutch}_lute.yaml, then calls:
 
     python install_lute.py \\
         -e {experiment} \\
         -v {version}    \\
         -W {wf1} [{wf2} ...] \\
-        [--partition {partition}] \\
-        [--account   {account}]  \\
-        [--nodes     {N}]        \\
-        [--ntasks-per-node {N}]  \\
-        [-f]   # fresh install   \\
+        --trigger {spec1} [{spec2} ...] \\
+        [--partition {partition}]   \\
+        [--account   {account}]     \\
         [-D {subdirectory}]
 
 Notes
 -----
 - Does NOT write or overwrite the YAML config — the skill owns that file.
 - Does NOT copy DAG files from workflows/common/ — DAGs must already exist.
-- Re-run safe: will not fail if the workspace directory or database already exist.
+- Workspace creation is idempotent: will not fail if the directory or database
+  already exist.
+- Per-task resource requirements (--nodes, --ntasks-per-node, --exclusive, etc.)
+  are the skill's responsibility and must be written into the DAG at creation time.
+  To change resources for a specific task, edit the .dag file directly.
 """
 
 __author__ = "Gabriel Dorlhiac"
@@ -36,6 +49,7 @@ __author__ = "Gabriel Dorlhiac"
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional
@@ -47,29 +61,15 @@ from krtc import KerberosTicket  # type: ignore
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger: logging.Logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Python interpreter paths for virtual env creation (-fi mode)
+# ---------------------------------------------------------------------------
+
+_PYTHON39_PATH = "/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9"
+_PYTHON311_PATH = "/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11"
 
 # ---------------------------------------------------------------------------
-# Task-specific SLURM resource overrides.
-# Tasks listed here receive fixed node/task counts regardless of user defaults.
-# ---------------------------------------------------------------------------
-DEFAULT_CONFIG: Dict[str, Dict[str, Any]] = {
-    "SmallDataProducer": {"nodes": 4, "ntasks_per_node": 50, "exclusive": True},
-    "SmallDataProducer2": {"nodes": 4, "ntasks_per_node": 50, "exclusive": True},
-    "BayFAIOptimizer": {"nodes": 1, "ntasks_per_node": 120},
-    "BayFAIOptimizer2": {"nodes": 1, "ntasks_per_node": 120},
-}
-
-# ---------------------------------------------------------------------------
-# Trigger spec parsing.
-# Triggers are determined by the skill during analysis planning (Phase 3) and
-# passed explicitly via --trigger.  No name-based lookup is performed here.
-#
-# Accepted --trigger formats (one per -W workflow, in matching order):
-#   START_OF_RUN                                — fires at the start of every DAQ run
-#   END_OF_RUN                                  — fires after every DAQ run
-#   MANUAL                                      — fires only when user triggers from eLog
-#   RUN_PARAM_IS_VALUE:<param_name>:<value>     — fires when a run param reaches a value
-#       e.g.  RUN_PARAM_IS_VALUE:SmallData:done
+# Trigger spec parsing
 # ---------------------------------------------------------------------------
 
 
@@ -116,7 +116,7 @@ def parse_trigger(spec: str) -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Subprocess helper
 # ---------------------------------------------------------------------------
 
 
@@ -139,46 +139,57 @@ def _run(cmd: List[str], cwd: Optional[str] = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fresh install
+# Mode 1: fresh virtual env install (-fi)
 # ---------------------------------------------------------------------------
 
 
-def git_clone(repo: str, location: str, tag: str) -> None:
-    """Clone a GitHub repository to `location` and check out `tag`.
+def create_virtual_envs(lute_envs_dir: str, version: str = "dev") -> None:
+    """Create (or recreate) lute_env_py39 and lute_env_py311 under lute_envs_dir.
 
-    Skips if `location` already exists (idempotent).
-
-    Args:
-        repo:     Repository slug, e.g. "slac-lcls/lute".
-        location: Absolute path to clone into.
-        tag:      Branch or tag to check out after cloning.
-    """
-    if os.path.exists(location):
-        logger.info(f"Directory already exists at {location} — skipping clone.")
-        return
-    logger.info(f"Cloning {repo} → {location} (tag: {tag}) …")
-    _run(["git", "clone", f"https://github.com/{repo}.git", location])
-    _run(["git", "checkout", tag], cwd=location)
-
-
-def run_build_script(lute_path: str) -> None:
-    """Run LUTE's build.sh -e inside `lute_path`.
+    If lute_envs_dir already exists, it is deleted entirely before recreation
+    so the caller always ends up with a clean state.
 
     Args:
-        lute_path: Root of the cloned LUTE repository.
+        lute_envs_dir: Absolute path to the directory that will hold both
+                       virtual environments, e.g.
+                       /sdf/data/lcls/ds/mfx/mfxl1013621/results/lute_envs
+        version:       LUTE version to pip-install. Use "dev" (default) for the
+                       latest published release; any other value is passed as a
+                       version pin (e.g. "0.2.0" → pip install lute-lcls==0.2.0).
     """
-    logger.info(f"Building LUTE at {lute_path} — this may take a few minutes …")
-    _run(["./build.sh", "-e"], cwd=lute_path)
+    if os.path.exists(lute_envs_dir):
+        logger.info(
+            f"lute_envs/ already exists at {lute_envs_dir} — removing for clean install."
+        )
+        shutil.rmtree(lute_envs_dir)
 
+    os.makedirs(lute_envs_dir, mode=0o775)
+    logger.info(f"Created lute_envs directory: {lute_envs_dir}")
 
-def set_permissions(path: str, mode: int = 0o765) -> None:
-    """Recursively apply `mode` to `path` and everything under it."""
-    os.chmod(path, mode)
-    for root, dirs, files in os.walk(path):
-        for d in dirs:
-            os.chmod(os.path.join(root, d), mode)
-        for f in files:
-            os.chmod(os.path.join(root, f), mode)
+    package_spec = "lute-lcls" if version == "dev" else f"lute-lcls=={version}"
+
+    envs = [
+        ("lute_env_py39", _PYTHON39_PATH),
+        ("lute_env_py311", _PYTHON311_PATH),
+    ]
+
+    for env_name, python_exe in envs:
+        env_path = os.path.join(lute_envs_dir, env_name)
+        logger.info(f"Creating virtual env {env_name} using {python_exe} …")
+
+        if not os.path.isfile(python_exe):
+            logger.error(
+                f"Python interpreter not found: {python_exe}\n"
+                "  Ensure the LCLS conda stack is present on this system."
+            )
+            sys.exit(1)
+
+        _run([python_exe, "-m", "venv", env_path])
+        pip = os.path.join(env_path, "bin", "pip")
+        logger.info(f"  pip install {package_spec} into {env_name} …")
+        _run([pip, "install", "--upgrade", "pip"])
+        _run([pip, "install", package_spec])
+        logger.info(f"  {env_name}: done.")
 
 
 # ---------------------------------------------------------------------------
@@ -212,70 +223,49 @@ def setup_workspace(lute_output_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def patch_dag_slurm_params(
-    dag_path: str,
-    partition: str,
-    account: str,
-    default_nodes: int,
-    default_ntasks: int,
-) -> None:
-    """Patch every slurm_params field in a DAG file in-place.
+def patch_dag_slurm_params(dag_path: str, partition: str, account: str) -> None:
+    """Append --account and --partition to every slurm_params field in a DAG file.
 
-    Tasks in DEFAULT_CONFIG receive their fixed resource counts.
-    All other tasks receive the user-supplied defaults.
+    Per-task resource requirements (--nodes, --ntasks-per-node, --exclusive, ...)
+    are the skill's responsibility and must already be present in the DAG when
+    this function is called.  This function only injects the two environment-
+    specific values that are not known at DAG-creation time.
 
     Args:
-        dag_path:      Path to the .dag YAML file.
-        partition:     SLURM partition name (e.g. "milano").
-        account:       SLURM account (e.g. "lcls:mfxl1013621").
-        default_nodes: Node count for tasks not in DEFAULT_CONFIG.
-        default_ntasks: ntasks-per-node for tasks not in DEFAULT_CONFIG.
+        dag_path:  Path to the .dag YAML file.
+        partition: SLURM partition name (e.g. "milano").
+        account:   SLURM account (e.g. "lcls:mfxl1013621").
     """
     with open(dag_path) as fh:
         lines = fh.readlines()
 
     patched: List[str] = []
-    current_task: Optional[str] = None
+    found: int = 0
 
     for line in lines:
         stripped = line.lstrip()
-
-        # Track the most recently declared task_name so we know which task
-        # the following slurm_params line belongs to.
-        raw: Optional[str] = None
-        if stripped.startswith("- task_name:"):
-            raw = stripped[2:]  # strip leading "- "
-        elif stripped.startswith("task_name:"):
-            raw = stripped
-        if raw is not None:
-            current_task = raw.split(":", 1)[1].strip().strip("\"'")
-
         if stripped.startswith("slurm_params:"):
             indent = line[: len(line) - len(stripped)]
-            cfg = DEFAULT_CONFIG.get(current_task or "")
-            if cfg:
-                exclusive = " --exclusive" if cfg.get("exclusive") else ""
-                params = (
-                    f"--account={account} --partition={partition}"
-                    f" --nodes={cfg['nodes']}"
-                    f" --ntasks-per-node={cfg['ntasks_per_node']}"
-                    f"{exclusive}"
-                )
-            else:
-                params = (
-                    f"--account={account} --partition={partition}"
-                    f" --nodes={default_nodes}"
-                    f" --ntasks-per-node={default_ntasks}"
-                )
-            patched.append(f"{indent}slurm_params: '{params}'\n")
+            existing = stripped[len("slurm_params:") :].strip().strip("'\"")
+            new_params = f"{existing} --account={account} --partition={partition}"
+            patched.append(f"{indent}slurm_params: '{new_params}'\n")
+            found += 1
         else:
             patched.append(line)
+
+    if found == 0:
+        logger.warning(
+            f"No slurm_params lines found in {dag_path}. "
+            "The DAG may be missing resource specifications — check the file."
+        )
 
     with open(dag_path, "w") as fh:
         fh.writelines(patched)
 
     os.chmod(dag_path, 0o666)
-    logger.info(f"Patched slurm_params: {dag_path}")
+    logger.info(
+        f"Injected account/partition into {found} slurm_params block(s): {dag_path}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -341,18 +331,9 @@ def main() -> None:
         "--version",
         type=str,
         default="dev",
-        help="LUTE version tag or 'dev'. Default: dev.",
+        help="LUTE version to install. 'dev' (default) installs the latest published lute-lcls; any other value is used as a version pin (e.g. '0.2.0' → pip install lute-lcls==0.2.0).",
     )
-    parser.add_argument(
-        "-f",
-        "--fresh_install",
-        action="store_true",
-        help=(
-            "Clone and build LUTE locally in the experiment results folder. "
-            "Use this for local code modifications; otherwise the central "
-            "installation at /sdf/group/lcls/ds/tools/lute/ is used."
-        ),
-    )
+
     parser.add_argument(
         "-D",
         "--directory",
@@ -396,19 +377,6 @@ def main() -> None:
         default="",
         help="SLURM account. Default: lcls:<experiment>.",
     )
-    parser.add_argument(
-        "--nodes",
-        type=int,
-        default=1,
-        help="Default node count for tasks not in DEFAULT_CONFIG. Default: 1.",
-    )
-    parser.add_argument(
-        "--ntasks-per-node",
-        type=int,
-        default=1,
-        dest="ntasks_per_node",
-        help="Default ntasks-per-node for tasks not in DEFAULT_CONFIG. Default: 1.",
-    )
     args = parser.parse_args()
 
     if args.debug:
@@ -424,18 +392,12 @@ def main() -> None:
     lute_output_dir: str = os.path.join(results_dir, "lute_output")
     config_path: str = os.path.join(lute_output_dir, f"{hutch}_lute.yaml")
 
-    # --- 1. Fresh install (optional) ---
-    if args.fresh_install:
-        lute_path = os.path.join(results_dir, "lute")
-        git_clone("slac-lcls/lute", lute_path, args.version)
-        run_build_script(lute_path)
-        set_permissions(lute_path)
-        arp_executable = f"{lute_path}/install/bin/submit_launch_slurm.sh"
-        launch_executable = f"{lute_path}/install/bin/launch_slurm"
-    else:
-        lute_path = f"/sdf/group/lcls/ds/tools/lute/{args.version}/lute"
-        arp_executable = f"{lute_path}/install/bin/submit_launch_slurm.sh"
-        launch_executable = f"{lute_path}/install/bin/launch_slurm"
+    # --- 1. Install LUTE (always virtual envs) ---
+    lute_envs_dir = os.path.join(results_dir, "lute_envs")
+    create_virtual_envs(lute_envs_dir, version=args.version)
+    venv_py39 = os.path.join(lute_envs_dir, "lute_env_py39")
+    arp_executable = os.path.join(venv_py39, "bin", "submit_launch_slurm.sh")
+    launch_executable = os.path.join(venv_py39, "bin", "launch_slurm")
 
     # --- 2. Workspace setup ---
     setup_workspace(lute_output_dir)
@@ -455,8 +417,6 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Parse trigger specs, aligned positionally with workflow_names.
-    # Any workflow without a matching spec defaults to END_OF_RUN.
     trigger_specs: List[str] = args.trigger or []
     triggers: List[Dict[str, str]] = []
     for i, wf_name in enumerate(workflow_names):
@@ -484,8 +444,6 @@ def main() -> None:
             dag_path=dag_path,
             partition=args.partition,
             account=account,
-            default_nodes=args.nodes,
-            default_ntasks=args.ntasks_per_node,
         )
 
         param_string = (

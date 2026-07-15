@@ -9,8 +9,8 @@ Consult `ask-lute` as the reference brain throughout: use `ask-lute/references/`
 for LUTE internals (task catalog, YAML syntax, hutch knowledge). The wizard logic
 and experiment-level orchestration live here.
 
-**Scripts referenced** (paths relative to `ask-lute/`):
-- `ask-lute/scripts/install_lute.py` — workspace setup, DAG patching, eLog registration
+**Scripts referenced:**
+- `analyze-data/scripts/install_lute.py` — virtual env / build setup, DAG patching, eLog registration
 - Templates: `ask-lute/templates/` — one YAML block per task
 
 ---
@@ -53,52 +53,28 @@ Re-run `klist` to verify before continuing.
 
 ---
 
-## Phase 2 — LUTE Install Type Decision
+## Phase 2 — LUTE Version
 
 **Decision only — nothing is installed or executed yet.**
 
-Ask the user whether they want a **central install** (default, read-only) or a
-**fresh install** (local clone, allows code modifications).
+Ask the user which LUTE version to use. Default: `dev`.
 
-### Option A — Central install (recommended for most users)
+`install_lute.py` always creates two isolated Python virtual environments and
+pip-installs `lute-lcls` into each. Record these derived paths for Phase 5:
 
-No build step required. Record these paths for Phase 5:
 ```
-lute_path         = /sdf/group/lcls/ds/tools/lute/{version}/lute
-arp_executable    = {lute_path}/install/bin/submit_launch_slurm.sh
-launch_executable = {lute_path}/install/bin/launch_slurm
-hutch_config      = {lute_path}/config/{hutch}.yaml
-test_config       = {lute_path}/config/test.yaml
-```
-
-### Option B — Fresh install (for local code modifications)
-
-Record the commands to run in Phase 5:
-```bash
-git clone https://github.com/slac-lcls/lute.git {results_dir}/lute
-cd {results_dir}/lute && git checkout {version}
-./build.sh -e
-chmod -R 775 {results_dir}/lute
+lute_envs_dir     = {results_dir}/lute_envs
+venv_py39         = {lute_envs_dir}/lute_env_py39
+venv_py311        = {lute_envs_dir}/lute_env_py311
+arp_executable    = {venv_py39}/bin/submit_launch_slurm.sh
+launch_executable = {venv_py39}/bin/launch_slurm
 ```
 
-> IMPORTANT: Clone directly to `{results_dir}/lute`. Target directory must not pre-exist.
-> `./build.sh -e` installs entry points and takes several minutes.
-> If not working: `source /sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh`
+Python interpreters used:
+- Python 3.9:  `/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9`
+- Python 3.11: `/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11`
 
-Fresh-install paths to record:
-```
-lute_path         = {results_dir}/lute
-arp_executable    = {lute_path}/install/bin/submit_launch_slurm.sh
-launch_executable = {lute_path}/install/bin/launch_slurm
-hutch_config      = {lute_path}/install/lib/python{X.Y}/site-packages/config/{hutch}.yaml
-test_config       = {lute_path}/install/lib/python{X.Y}/site-packages/config/test.yaml
-```
-(`python{X.Y}` = Python version in the active environment, e.g. `python3.9`)
-
-> **Development vs. production note:** Currently LUTE is deployed as a managed
-> git + conda installation at S3DF. In the future, LUTE will be a standard pip or conda
-> package — the install phase will be unnecessary for experiment data analysis.
-> Phase 2 Option B will remain relevant for **developers** modifying LUTE source code.
+> If `lute_envs/` already exists, `install_lute.py` will delete and recreate it.
 
 ---
 
@@ -281,8 +257,7 @@ DAG YAML:
 {full DAG YAML content}
 
 install_lute.py (will be run at end of Phase 5):
-  python ask-lute/scripts/install_lute.py -e {experiment} -v {version} \
-    [-f]                          # only when fresh install (Phase 2 Option B) \
+  python analyze-data/scripts/install_lute.py -e {experiment} -v {version} \
     -W {wf1} [{wf2}] --trigger {spec1} [{spec2}]
 ──────────────────────────────────────────
 Proceed to YAML configuration? (yes / adjust)
@@ -339,6 +314,38 @@ Ask: "Where should SmallData HDF5 files be written? Default:
 `/sdf/data/lcls/ds/{hutch}/{experiment}/hdf5/smalldata`"
 
 > **Checkpoint — directory field.** Correct? (yes / adjust)
+
+### Step 4.2b — SubmitSMD: producer and template config
+
+These two fields are **always required**. Ask each explicitly.
+
+1. **`producer`** — path to the smalldata producer script.
+   > "What is the path to your `smd_producer.py`?
+   > Typical location: `{{ work_dir }}/smalldata_tools/lcls2_producers/smd_producer.py`
+   > (for LCLS-I/psana1 use `lcls1_producers/smd_producer.py`)"
+
+2. **`lute_template_cfg.template_name`** — derived from DAQ generation (do not ask; set silently):
+   - LCLS-II / psana2 → `"smd2_prod_config_template.py"`
+   - LCLS-I / psana1  → `"smd1_prod_config_template.py"`
+
+3. **`lute_template_cfg.output_path`** — where the rendered producer config is written.
+   > "Where should the rendered producer config be written?
+   > Default: `{{ work_dir }}/smalldata_tools/lcls2_producers/prod_config_{hutch}.py`"
+
+Assemble the block:
+
+```yaml
+SubmitSMD:
+  producer: "<path/to/smd_producer.py>"
+  lute_template_cfg:
+    template_name: "smd2_prod_config_template.py"   # or smd1_... for LCLS-I
+    output_path: "<path/to/prod_config_{hutch}.py>"
+  directory: "<hdf5_output_dir>"
+  producer_parameters:
+    ...
+```
+
+> **Checkpoint — producer / template block.** Correct? (yes / adjust)
 
 ### Step 4.3 — SubmitSMD: producer_parameters
 
@@ -398,13 +405,19 @@ Shall I proceed to Phase 5 (execution)? (yes / adjust)
 
 The user has approved the plan (Phase 3) and the YAML (Phase 4). Execute in order.
 
-### Step 5.1 — Fresh install build (Option B only)
+### Step 5.1 — Install LUTE (handled by `install_lute.py` — shown here for reference)
+
+`install_lute.py` always creates two virtual envs and pip-installs `lute-lcls`
+into each (recreates if already present):
 
 ```bash
-git clone https://github.com/slac-lcls/lute.git {results_dir}/lute
-cd {results_dir}/lute && git checkout {version}
-./build.sh -e
-chmod -R 775 {results_dir}/lute
+# Python 3.9 venv
+/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9 -m venv {results_dir}/lute_envs/lute_env_py39
+{results_dir}/lute_envs/lute_env_py39/bin/pip install lute-lcls
+
+# Python 3.11 venv
+/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11 -m venv {results_dir}/lute_envs/lute_env_py311
+{results_dir}/lute_envs/lute_env_py311/bin/pip install lute-lcls
 ```
 
 ### Step 5.2 — Create output directory
@@ -435,12 +448,11 @@ chmod 666 {config_path}
 ### Step 5.5 — Run install_lute.py
 
 ```bash
-python ask-lute/scripts/install_lute.py \
+python analyze-data/scripts/install_lute.py \
   -e {experiment} \
   -v {version}    \
-  [-f]                          \   # include when fresh install (Phase 2 Option B)
-  [-D {directory}]             \
-  -W {wf1} {wf2} ...           \
+  [-D {directory}]              \
+  -W {wf1} {wf2} ...            \
   --trigger {spec1} {spec2} ... \
   [--partition {partition}]     \
   [--account {account}]
@@ -457,13 +469,21 @@ python ask-lute/scripts/install_lute.py \
 | `END_OF_RUN` | Workflow processes raw data offline |
 | `START_OF_RUN` | SmallData in live mode |
 | `MANUAL` | Calibration or one-time computation |
-| `RUN_PARAM_IS_VALUE:SmallData:done` | Workflow depends on SmallData completing |
 
 ### Step 5.6 — Verify
 
 ```bash
 ls -la {lute_output_dir}/
 # Expected: lute.db (664), {hutch}_lute.yaml (666), {wf_name}.dag (666)
+```
+
+For `-fi` mode, also confirm virtual envs were created:
+```bash
+ls {results_dir}/lute_envs/
+# Expected: lute_env_py39/  lute_env_py311/
+
+{results_dir}/lute_envs/lute_env_py39/bin/python -c "import lute; print(lute.__version__)"
+# Should print a version string without error
 ```
 
 ---
@@ -486,7 +506,7 @@ the workspace and DAG patching steps are idempotent.
 
 ```
 Phase 1  Gather info          → experiment name, hutch, paths
-Phase 2  Install type         → central or fresh (decide only)
+Phase 2  LUTE version         → ask for version tag (default: dev)
 Phase 3  Analysis & DAG plan  → task chain, DAG YAML, triggers   ← user approves
 Phase 4  YAML configuration   → alias pre-flight, ask every param ← user approves each block
 Phase 5  Execute              → mkdir, write DAGs, write YAML, install_lute.py
