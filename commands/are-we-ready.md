@@ -28,25 +28,49 @@ Pull from session state. If not set, ask once: "Which hutch? (e.g. `mfx`, `tmo`,
 
 ---
 
-## Phase 2: Run Fred's Bridge Script  *(primary path)*
+## Phase 2: Run Hutch-Specific AWR Script  *(primary path for MFX)*
 
-> **Pending:** Fred is providing a standardized AWR bridge script.
-> Once available, this is the **primary execution path** — run it before
-> falling back to the generated scripts in Phase 3.
->
-> Script location and invocation TBD — Fred to confirm.
+For **MFX**, a tested beam-readiness script is available. Deploy it to the
+experiment results directory (accessible from mfx-daq), then run it via
+the bridge.
 
-Run via the hutch-python bridge:
+### Deploy
 
-```python
-# Fred's standardized AWR bridge script — path TBD
-exec(open('/path/to/fred_awr_{hutch}.py').read())
+```bash
+# From S3DF — copy canonical script to a path mfx-daq can reach
+cp ~/hutch-copilot/references/check_beam_ready_mfx.py \
+   /sdf/data/lcls/ds/mfx/<experiment>/results/<user>/check_beam_ready.py
 ```
 
-If the bridge is not connected, provide the script path for the user to run
-manually in their hutch-python session.
+### Run via bridge (from S3DF)
 
-If Fred's script is not yet available, proceed to Phase 3.
+```bash
+echo '{"code": "exec(open(\"/sdf/data/lcls/ds/mfx/<experiment>/results/<user>/check_beam_ready.py\").read()); check_beam_ready()"}' \
+    | nc -w 30 localhost 9999
+```
+
+### Run directly in hutch-python (on mfx-daq)
+
+```python
+%run /sdf/data/lcls/ds/mfx/<experiment>/results/<user>/check_beam_ready.py
+check_beam_ready()
+```
+
+### What it checks
+
+| # | Check | Type | Pass condition |
+|---|-------|------|----------------|
+| 1 | **Beam destination** | CRITICAL | `mr1l4_homs.pitch` within 10 µrad of −562.035 |
+| 2 | **Imagers / YAGs** | WARNING | yag0, yag1, yag2, dg1_pim, dg2_pim, dia_pim all `.removed` |
+| 3 | **Valves** | INFO | dg1×2, dia×2, dvd, mxt valve states reported |
+| 4 | **Energy** | CRITICAL | `beam_status` pulse energy > 0.05 mJ; DCCM reported |
+| 5 | **Undulator pointing** | INFO | X/Y from `BPMS:UNDH:4690:XOFF.D` / `YOFF.D` |
+| 6 | **Slits** | INFO | sl1l0, dg1_slits, dg2_upstream_slits x/y widths |
+| 7 | **DAQ** | INFO | Current run number from `get_run()` |
+
+Returns `True` if all CRITICAL checks pass.
+
+For other hutches, proceed to Phase 3.
 
 ---
 
