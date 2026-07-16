@@ -56,6 +56,11 @@ echo '{"code": "True"}' | nc -w 2 localhost 9999
 - **Not connected**: documentation/planning mode only. Offer to walk the user through
   the bridge setup (see `@experimental-hutch-python` Bridge Setup Walkthrough).
 
+> **Two distinct bridges exist.** The IPython bridge (`nc localhost 9999`) runs
+> hutch-python commands on the DAQ machine. The CDS bridge (`ssh psdev` /
+> `ssh mfx-control`) reads `/cds/` config files (happi DB, conf.yml, presets) or
+> runs scripts on controls machines. See `bridge-to-cds/SKILL.md` for the latter.
+
 Live commands use:
 ```bash
 echo '{"code": "PYTHON_CODE"}' | nc -w TIMEOUT localhost 9999
@@ -72,7 +77,7 @@ Route based on the user's slash command or closest natural-language intent:
 | Command / Intent | Action |
 |---|---|
 | `/take-run` or "take a run", "start collecting", "begin run" | Read `commands/take-run.md` |
-| `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `commands/are-we-ready.md` |
+| `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
 | `/align-beam` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-beam.md` |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data" | Read `analyze-data/SKILL.md` |
 | `/smd-config` or "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` → `/setup` |
@@ -139,6 +144,7 @@ skip per-command confirmation for that class within the conversation.
 | Task | Skill |
 |---|---|
 | Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
+| CDS config files (`/cds/`), happi DB, conf.yml, presets, controls machines | `bridge-to-cds/SKILL.md` |
 | LUTE analysis setup, calibration, refinement, job monitoring | `analyze-data/` sub-skill |
 | LUTE reference (task catalog, YAML syntax, hutch knowledge) | `@ask-lute` |
 | SFX indexing/merging parameter guidance (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |

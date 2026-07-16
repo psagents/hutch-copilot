@@ -30,29 +30,52 @@ Pull from session state. If not set, ask once: "Which hutch? (e.g. `mfx`, `tmo`,
 
 ## Phase 2: Run Hutch-Specific AWR Script  *(primary path for MFX)*
 
-For **MFX**, a tested beam-readiness script is available. Deploy it to the
-experiment results directory (accessible from mfx-daq), then run it via
-the bridge.
+For **MFX**, a tested beam-readiness script is available under
+`are-we-ready/scripts/check_beam_ready_mfx.py` (co-located with this skill file).
 
-### Deploy
+### Bridge Prerequisites
 
-```bash
-# From S3DF — copy canonical script to a path mfx-daq can reach
-cp ~/hutch-copilot/references/check_beam_ready_mfx.py \
-   /sdf/data/lcls/ds/mfx/<experiment>/results/<user>/check_beam_ready.py
-```
+The hutch-python IPython bridge (`nc localhost 9999`) must be active.
+
+- **Tunnel setup** — see `@experimental-hutch-python` Bridge Setup Walkthrough.
+- **Network topology** — see `bridge-to-cds/SKILL.md` for why `/sdf/home/` is not
+  reachable from mfx-daq and how S3DF ↔ CDS ↔ controls paths are separated.
 
 ### Run via bridge (from S3DF)
 
+The script is located on S3DF (where the skill filesystem is accessible) and sent
+inline to mfx-daq — **no file copy required**.
+
 ```bash
-echo '{"code": "exec(open(\"/sdf/data/lcls/ds/mfx/<experiment>/results/<user>/check_beam_ready.py\").read()); check_beam_ready()"}' \
-    | nc -w 30 localhost 9999
+SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \
+    -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+python3 -c "
+import json, pathlib
+code = pathlib.Path('$SCRIPT').read_text() + '\ncheck_beam_ready()'
+print(json.dumps({'code': code}))
+" | nc -w 30 localhost 9999
 ```
 
-### Run directly in hutch-python (on mfx-daq)
+### Optional: persistent install on mfx-daq
+
+For repeated use directly from the hutch console, write the script once to `/tmp/`
+on mfx-daq via the bridge:
+
+```bash
+SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \
+    -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+python3 -c "
+import json, pathlib
+content = pathlib.Path('$SCRIPT').read_text()
+code = 'with open(\"/tmp/check_beam_ready_mfx.py\",\"w\") as _f: _f.write(' + repr(content) + ')'
+print(json.dumps({'code': code}))
+" | nc -w 10 localhost 9999
+```
+
+Then from the hutch console directly:
 
 ```python
-%run /sdf/data/lcls/ds/mfx/<experiment>/results/<user>/check_beam_ready.py
+exec(open('/tmp/check_beam_ready_mfx.py').read())
 check_beam_ready()
 ```
 
@@ -156,7 +179,7 @@ for name, state, prefix in results:
     print(f"{name:<35} {state:<15} {prefix}{flag}")
 ```
 
-Save the script to `/tmp/awr_{hutch}.py` and run it via the bridge:
+Send inline via the bridge:
 
 ```python
 exec(open('/tmp/awr_{hutch}.py').read())

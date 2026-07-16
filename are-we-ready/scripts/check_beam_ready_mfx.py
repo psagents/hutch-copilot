@@ -1,28 +1,44 @@
 """
 check_beam_ready_mfx.py — MFX beam readiness checker
 =====================================================
-Canonical source: ~/hutch-copilot/references/check_beam_ready_mfx.py
+Canonical source: are-we-ready/scripts/check_beam_ready_mfx.py
+                  (within the hutch-copilot skill tree)
 
-To run from S3DF via the IPython bridge:
-    echo '{"code": "exec(open(\\"/sdf/data/lcls/ds/mfx/<exp>/results/<user>/check_beam_ready.py\\").read()); check_beam_ready()"}' \\
-        | nc -w 30 localhost 9999
+This script runs inside a hutch-python session on mfx-daq where all device
+objects (mr1l4_homs, yag0, beam_status, …) are already in the namespace.
+It is NOT meant to be imported from a plain Python environment.
 
-To run directly in hutch-python on mfx-daq:
-    %run /sdf/data/lcls/ds/mfx/<exp>/results/<user>/check_beam_ready.py
-    check_beam_ready()
+Recommended usage — send inline from S3DF via the hutch-python IPython bridge:
 
-Note: mfx-daq cannot reach /sdf/home paths. Copy this file to the experiment
-results directory (e.g. /sdf/data/lcls/ds/mfx/mfx101609126/results/fpoitevi/)
-before using it via the bridge.
+    SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \\
+        -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+    python3 -c "
+    import json, pathlib
+    code = pathlib.Path('$SCRIPT').read_text() + '\\ncheck_beam_ready()'
+    print(json.dumps({'code': code}))
+    " | nc -w 30 localhost 9999
+
+Optional persistent install on mfx-daq (write once, reuse from hutch console):
+
+    SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \\
+        -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+    python3 -c "
+    import json, pathlib
+    content = pathlib.Path('$SCRIPT').read_text()
+    code = 'with open(\"/tmp/check_beam_ready_mfx.py\",\"w\") as _f: _f.write(' + repr(content) + ')'
+    print(json.dumps({'code': code}))
+    " | nc -w 10 localhost 9999
+    # Then from the hutch console:
+    # exec(open('/tmp/check_beam_ready_mfx.py').read()); check_beam_ready()
 """
 
 import epics
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-MFX_PITCH   = -562.035   # mr1l4_homs pitch (µrad) when beam → MFX
-MEC_PITCH   =  819.2     # mr1l4_homs pitch (µrad) when beam → MEC
-PITCH_TOL   =  10.0      # µrad tolerance for destination check
-MIN_BEAM_MJ =  0.05      # mJ threshold — below this = "no beam"
+MFX_PITCH = -562.035  # mr1l4_homs pitch (µrad) when beam → MFX
+MEC_PITCH = 819.2  # mr1l4_homs pitch (µrad) when beam → MEC
+PITCH_TOL = 10.0  # µrad tolerance for destination check
+MIN_BEAM_MJ = 0.05  # mJ threshold — below this = "no beam"
 
 # ANSI colour codes
 _PASS = "\033[32m✓ PASS\033[0m"
@@ -64,12 +80,14 @@ def check_beam_ready():
         if dist_mfx < PITCH_TOL:
             _row("mr1l4 pitch", _PASS, f"{pitch:.3f} µrad  → MFX")
         elif dist_mec < PITCH_TOL:
-            _row("mr1l4 pitch", _FAIL,
-                 f"{pitch:.3f} µrad  → beam is at MEC (need {MFX_PITCH} for MFX)")
+            _row(
+                "mr1l4 pitch",
+                _FAIL,
+                f"{pitch:.3f} µrad  → beam is at MEC (need {MFX_PITCH} for MFX)",
+            )
             all_pass = False
         else:
-            _row("mr1l4 pitch", _WARN,
-                 f"{pitch:.3f} µrad  (unrecognised destination)")
+            _row("mr1l4 pitch", _WARN, f"{pitch:.3f} µrad  (unrecognised destination)")
     except Exception as exc:
         _row("mr1l4 pitch", _FAIL, f"ERROR: {exc}")
         all_pass = False
@@ -77,12 +95,12 @@ def check_beam_ready():
     # ── 2. Imagers / YAGs ─────────────────────────────────────────────────────
     print("\n[2] Imagers / YAGs")
     imagers = [
-        ("yag0",      yag0),
-        ("yag1",      yag1),
-        ("yag2",      yag2),
-        ("dg1_pim",   mfx_dg1_pim),
-        ("dg2_pim",   mfx_dg2_pim),
-        ("dia_pim",   mfx_dia_pim),
+        ("yag0", yag0),
+        ("yag1", yag1),
+        ("yag2", yag2),
+        ("dg1_pim", mfx_dg1_pim),
+        ("dg2_pim", mfx_dg2_pim),
+        ("dia_pim", mfx_dia_pim),
     ]
     for label, dev in imagers:
         try:
@@ -96,12 +114,12 @@ def check_beam_ready():
     # ── 3. Valves ──────────────────────────────────────────────────────────────
     print("\n[3] Valves  (OUT = open/clear, IN = blocking)")
     valves = [
-        ("dg1_valve_1",  mfx_dg1_valve_1),
-        ("dg1_valve_2",  mfx_dg1_valve_2),
+        ("dg1_valve_1", mfx_dg1_valve_1),
+        ("dg1_valve_2", mfx_dg1_valve_2),
         ("dia_valve_01", mfx_dia_valve_01),
         ("dia_valve_02", mfx_dia_valve_02),
-        ("dvd_valve",    mfx_dvd_valve),
-        ("mxt_valve",    mfx_mxt_valve),
+        ("dvd_valve", mfx_dvd_valve),
+        ("mxt_valve", mfx_mxt_valve),
     ]
     for label, dev in valves:
         try:
@@ -122,14 +140,16 @@ def check_beam_ready():
         _row("beam photon energy", _INFO, f"{bs.ev:.1f} eV  (beam_status)")
         avg_mj = (bs.mj1 + bs.mj2 + bs.mj3 + bs.mj4) / 4
         if avg_mj < MIN_BEAM_MJ:
-            _row("beam pulse energy", _FAIL,
-                 f"{avg_mj * 1000:.1f} µJ avg — no beam?")
+            _row("beam pulse energy", _FAIL, f"{avg_mj * 1000:.1f} µJ avg — no beam?")
             all_pass = False
         else:
-            _row("beam pulse energy", _PASS,
-                 f"{avg_mj * 1000:.1f} µJ avg  "
-                 f"(mj1={bs.mj1*1000:.0f} mj2={bs.mj2*1000:.0f} "
-                 f"mj3={bs.mj3*1000:.0f} mj4={bs.mj4*1000:.0f} µJ)")
+            _row(
+                "beam pulse energy",
+                _PASS,
+                f"{avg_mj * 1000:.1f} µJ avg  "
+                f"(mj1={bs.mj1 * 1000:.0f} mj2={bs.mj2 * 1000:.0f} "
+                f"mj3={bs.mj3 * 1000:.0f} mj4={bs.mj4 * 1000:.0f} µJ)",
+            )
     except Exception as exc:
         _row("beam_status", _WARN, f"ERROR: {exc}")
 
@@ -149,8 +169,8 @@ def check_beam_ready():
     # ── 6. Slits ───────────────────────────────────────────────────────────────
     print("\n[6] Slits")
     slit_devs = [
-        ("sl1l0",              sl1l0),
-        ("dg1_slits",          mfx_dg1_slits),
+        ("sl1l0", sl1l0),
+        ("dg1_slits", mfx_dg1_slits),
         ("dg2_upstream_slits", mfx_dg2_upstream_slits),
     ]
     for label, dev in slit_devs:
