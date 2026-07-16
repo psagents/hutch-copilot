@@ -20,27 +20,20 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 
 ---
 
-## Experiment State
+## Initialization
 
-Maintain a **session state object** across the conversation. Populated on first use
-and consumed by all commands.
+On the **first user interaction**, always read `coordinate-experiment/SKILL.md` and
+run its initialization flow. coordinate-experiment is active for the **entire session**
+and silently observes every conversation turn after that.
 
-```json
-{
-  "hutch": null,
-  "experiment": null,
-  "sample_name": null,
-  "concentration": null,
-  "sample_form": null,
-  "photon_energy_eV": null,
-  "pump_laser": false,
-  "last_run": null,
-  "run_label": null,
-  "notes": ""
-}
-```
-
-When a field is already known from context, do not ask for it again.
+- The canonical experiment state lives in `{experiment}_state.json` (path defined in
+  `coordinate-experiment/SKILL.md`). All sub-skills should read this file as their
+  authoritative source of experiment state before executing.
+- Use any field already present in the state file without re-asking the user. If a field
+  **required for the current task** is missing or null, ask the user for it — do not
+  infer or assume a value.
+- After every command completes, silently pass the interaction to coordinate-experiment
+  for ambient logging (sample changes, run metadata, beam events, operator remarks).
 
 ---
 
@@ -76,6 +69,9 @@ Route based on the user's slash command or closest natural-language intent:
 | `/align-beam` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-beam.md` |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data" | Read `analyze-data/SKILL.md` |
 | `/smd-config` or "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` → `/setup` |
+| `/context` or "current conditions", "what is the sample", "experiment state" | Read `coordinate-experiment/SKILL.md` → `/context` summary |
+| "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
+| `/handoff` or "end of shift", "shift summary", "write handoff" | Read `coordinate-experiment/SKILL.md` → `/handoff` flow |
 | Beam status, machine PVs, MPS, BCS | Read `references/beam-status-pvs.md` |
 
 **When the hutch is known**, also read `references/hutches/{hutch}.md` for hutch-specific
@@ -150,5 +146,6 @@ skip per-command confirmation for that class within the conversation.
 | SLURM job submission | `@ask-slurm-s3df` |
 | DAQ error log queries | `@daq-logs` |
 | Experiment eLog posts | `@elog-copilot` |
+| Experiment context, condition tracking, beamtime log | `coordinate-experiment/` sub-skill |
 | EPICS PV documentation | `@ask-epics` |
 | LCLS Confluence docs | `@confluence-doc` |
