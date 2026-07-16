@@ -79,17 +79,11 @@ Route based on the user's slash command or closest natural-language intent:
 | `/take-run` or "take a run", "start collecting", "begin run" | Read `commands/take-run.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
 | `/align-beam` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-beam.md` |
-| `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data" | Read `analyze-data/SKILL.md` |
-| `/smd-config` or "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` → `/setup` |
-| Beam status, machine PVs, MPS, BCS | Read `references/beam-status-pvs.md` |
+| `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
 
-**When the hutch is known**, also read `references/hutches/{hutch}.md` for hutch-specific
-device names, PV prefixes, and nominal positions. Only MFX is currently documented —
-for other hutches use generic context from `@experimental-hutch-python`.
+### `/analyze-data` delegation
 
-### `/analyze-data` and `/smd-config` delegation
-
-When the user invokes `/analyze-data`, `/smd-config`, or asks to configure analysis:
+When the user invokes `/analyze-data` or asks to configure analysis:
 
 1. Read `analyze-data/SKILL.md` and dispatch to the appropriate sub-command.
 2. Pass all known experiment state (hutch, experiment, DAQ generation, detectors,
