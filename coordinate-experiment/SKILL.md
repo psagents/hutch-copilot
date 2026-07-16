@@ -33,17 +33,13 @@ reads as its authoritative source of truth.
 
 ## Persistent Files
 
-Both files live under the experiment's standard results tree:
+Both files live at the top level of the experiment's data directory
+(this directory is pre-provisioned by LCLS DM for every allocated experiment):
 
 | File | Path |
 |---|---|
-| State (JSON) | `/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json` |
-| Log (Markdown) | `/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_logs.md` |
-
-Create the `beamtime/` directory if it does not exist:
-```bash
-mkdir -p /sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/
-```
+| State (JSON) | `/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json` |
+| Log (Markdown) | `/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_logs.md` |
 
 ---
 
@@ -138,7 +134,7 @@ Run **once** on the first hutch-copilot trigger.
 If the hutch and experiment are already known, try to read the state JSON:
 
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
 ```
 
 - **File found**: load the state object into context. Note the `machine_state.last_checked`

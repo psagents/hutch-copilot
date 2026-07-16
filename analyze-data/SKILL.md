@@ -26,7 +26,7 @@ You are invoked from `hutch-copilot` when the user asks to set up or monitor ana
 
 Before asking the user for anything, read the current state from:
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
 ```
 Fields consumed by this skill:
 `hutch`, `experiment`, `photon_energy_eV`, `last_run_number`, `sample_name`, `sample_delivery`

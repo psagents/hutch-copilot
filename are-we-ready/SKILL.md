@@ -13,7 +13,7 @@ delivery. All checks are **read-only**.
 
 Before asking the user for anything, read the current state from:
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
 ```
 Fields consumed by this command: `hutch`, `experiment`
 

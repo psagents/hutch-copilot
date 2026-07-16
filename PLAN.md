@@ -1,7 +1,7 @@
 # hutch-copilot — Development Plan
 
-**Last updated:** July 15, 2026  
-**Source:** Louis's plan shared Fri Jul 10 (`PLAN.md`) + BAWG notes Mon Jul 13 + Jul 15 session notes  
+**Last updated:** July 16, 2026  
+**Source:** Louis's plan shared Fri Jul 10 (`PLAN.md`) + BAWG notes Mon Jul 13 + Jul 15–16 session notes  
 **Repository:** https://github.com/psagents/hutch-copilot
 
 **Goal:** Run a complete SFX experiment at MFX on **July 17, 2026** using agents
@@ -15,15 +15,27 @@ end-to-end, from beam readiness through data collection and processing.
 
 ```
 hutch-copilot/
-├── SKILL.md                  ← top-level skill: orchestrator instructions
-├── commands/                 ← one file per live bridge command
-│   ├── are-we-ready.md
-│   ├── align-spectrometer.md
-│   └── take-run.md
-├── analyze-data/             ← offline sub-skill (owns its own SKILL.md)
+├── SKILL.md                        ← orchestrator; initializes coordinate-experiment on first trigger
+├── commands/                       ← bridge commands (hutch-python, no sub-commands)
+│   ├── take-run.md
+│   └── align-beam.md               ← /align-spectrometer stub (rename pending Amine)
+├── are-we-ready/                   ← sub-skill (promoted from flat command)
 │   ├── SKILL.md
-│   └── commands/
-└── references/               ← static reference material (PVs, runcards, etc.)
+│   └── scripts/
+│       └── check_beam_ready_mfx.py ← MFX beam-readiness script (7 checks)
+├── coordinate-experiment/          ← ambient context manager; owns experiment state + log
+│   └── SKILL.md
+├── bridge-to-cds/                  ← psdev SSH bridge for /cds filesystem access
+│   └── SKILL.md
+├── analyze-data/                   ← offline data analysis sub-skill
+│   ├── SKILL.md
+│   ├── commands/
+│   │   ├── setup.md
+│   │   └── refine.md
+│   └── references/
+└── references/                     ← static lookup material (PVs, hutch configs)
+    ├── beam-status-pvs.md
+    └── hutches/
 ```
 
 ### Working on a skill
@@ -58,16 +70,35 @@ To contribute:
 
 ```
 hutch-copilot                   ← orchestrator (this repo)
-├── /are-we-ready               ← upstream beam path check + at-hutch device inventory  [bridge]
-├── /align-spectrometer         ← VH auto-alignment + Amine's routine  [bridge]
+│   initializes coordinate-experiment on first trigger
+│
+├── /are-we-ready               ← upstream beam path check + MFX script  [bridge, sub-skill]
+│       reads ─────→ coordinate-experiment: hutch, experiment
+│       writes ────→ coordinate-experiment: machine_state.beam_present, last_checked
+│
+├── /align-spectrometer         ← VH auto-alignment + Amine's routine  [bridge, stub]
+│       reads ─────→ coordinate-experiment: hutch, experiment, current_phase
+│
 ├── /take-run                   ← DAQ run control + sample/calibration tagging  [bridge]
 │       run_type = SAMPLE | GEOM | DARK | ...
 │       tag written to XTC header + eLog run record
+│       reads ─────→ coordinate-experiment: sample_name, concentration, delivery,
+│                    photon_energy_eV, rep_rate_Hz, transmission, pump_*
+│       writes ────→ coordinate-experiment: last_run_number, last_run_tag, daq_status
 │       → Maestro branches on run_type when LUTE jobs fire at end-of-run
-├── /coordinate-experiment      ← beamtime bookkeeping + context tracking  [offline]
-│       starts from beamtime-logger (Fred); owns experiment state YAML
+│
+├── /coordinate-experiment      ← ambient context manager + beamtime log  [offline]
+│       OWNS ──────→ {experiment}_state.json   (shared source of truth for all skills)
+│       OWNS ──────→ {experiment}_logs.md      (timestamped shift log)
+│       posts ─────→ @elog-copilot  (condition changes, shift handoff)
+│       path: /sdf/data/lcls/ds/{hutch}/{experiment}/
+│
+├── bridge-to-cds/              ← psdev SSH bridge for /cds filesystem  [offline, NEW]
+│
 └── analyze-data/               ← data analysis sub-skill (offline, no bridge)
-      ├── /setup                ← LUTE wizard (owns Phases 1–6)
+      reads ─────→ coordinate-experiment: hutch, experiment, photon_energy_eV,
+                   last_run_number, sample_name, sample_delivery
+      ├── /setup                ← LUTE wizard (Phases 1–6)
       │       consults ────→ ask-lute        (reference brain: task catalog, YAML, hutch refs)
       │       consults ────→ ask-cctbx-xfel  (sibling, SFX params)
       │       consults ────→ ask-smalldata   (sibling, SmallData params)
@@ -77,18 +108,35 @@ hutch-copilot                   ← orchestrator (this repo)
               consults ────→ ask-smalldata   (sibling, SmallData params)
 ```
 
+### State propagation — coordinate-experiment as central hub
+
+`coordinate-experiment` owns the canonical state file that every sub-skill reads
+before asking the user anything. It is initialized once at session start and then
+silently updated after every conversation turn.
+
+```
+/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
+```
+
+| Sub-skill | Fields read | Fields written |
+|---|---|---|
+| `/are-we-ready` | `hutch`, `experiment` | `machine_state.beam_present`, `machine_state.last_checked` |
+| `/align-spectrometer` | `hutch`, `experiment`, `current_phase` | *(log entry only)* |
+| `/take-run` | `sample_name`, `concentration`, `sample_delivery`, `delivery_details`, `photon_energy_eV`, `rep_rate_Hz`, `transmission`, `pump_laser`, `pump_delay_ps`, `last_run_tag` | `last_run_number`, `last_run_tag`, `machine_state.daq_status` |
+| `analyze-data` | `hutch`, `experiment`, `photon_energy_eV`, `last_run_number`, `sample_name`, `sample_delivery` | *(none)* |
+| `@elog-copilot` | `hutch`, `experiment`, current timestamp | *(none)* |
+
 **Skill placement rules:**
-- **Commands** (`hutch-copilot/commands/`): single workflow, bridge-coupled, no domain
-  references needed (`/are-we-ready`, `/align-spectrometer`, `/take-run`).
-- **Sub-skills** (`hutch-copilot/analyze-data/`): multiple sub-commands, own reference
-  files, different operational mode (offline), different owner.
+- **Commands** (`hutch-copilot/commands/`): single workflow, bridge-coupled, no sub-commands
+  (`/align-spectrometer`, `/take-run`).
+- **Sub-skill directories**: own `SKILL.md` + assets; used when a skill has scripts, references,
+  or a different operational mode — `are-we-ready/`, `coordinate-experiment/`, `bridge-to-cds/`,
+  `analyze-data/`.
 - **Sibling skills** (top-level peers): pure knowledge experts independently useful
-  beyond hutch-copilot — `ask-lute`, `ask-cctbx-xfel`, `ask-smalldata`, `ask-happi`,
-  `beamtime-logger`, etc. **`cds-bridge`** is a sibling repo:
-  https://github.com/psagents/cds-bridge
+  beyond hutch-copilot — `ask-lute`, `ask-cctbx-xfel`, `ask-smalldata`, `ask-happi`, etc.
 
 All live commands run through the hutch-python bridge (`nc localhost 9999`).
-Sibling skills and `analyze-data` work in planning mode from any terminal.
+Sub-skills and `analyze-data` work in planning/offline mode from any S3DF terminal.
 
 ---
 
@@ -118,15 +166,18 @@ control); makes available skills from the session and local `.claude/`
 
 ### /are-we-ready
 
-**Status:** draft | **Owner:** James | **Due:** Wed **2026-07-15** (BAWG 2026-07-13)
+**Status:** ✅ done (Jul 16) | **Owner:** James | **Due:** ~~Wed 2026-07-15~~ delivered Jul 16
 
-HAPPI/lightpath beam readiness check executed through the hutch-python bridge.
-Queries every device upstream of the hutch (by z-position), reports insertion
-state and transmission, and flags anything that may be blocking beam delivery.
+Beam readiness check executed through the hutch-python bridge. Promoted from a
+flat command file to a **sub-skill directory** (`are-we-ready/SKILL.md` +
+`are-we-ready/scripts/`). Reads `hutch`/`experiment` from the state JSON; no
+re-ask if already in context.
 
-**Unblocked (2026-07-10):** **ask-happi** published at
-https://github.com/psagents/ask-happi — James builds this command in `hutch-copilot`
-to use it (**T-21**).
+**MFX script delivered (Jul 16):** `are-we-ready/scripts/check_beam_ready_mfx.py`
+implements 7 checks (beam destination via HOMS pitch, imagers/YAGs, valves,
+pulse energy, undulator pointing, slits, DAQ run number) and returns `True` only
+if all CRITICAL checks pass. Script is sent inline to `mfx-daq` via the bridge —
+no file copy required.
 
 **Execution path:** the command runs a standardized bridge script that Fred
 committed to providing. That script is the primary path; the skill falls back
@@ -146,13 +197,33 @@ hardcoded) serves as the MVP baseline until Fred's script lands.
 | **Better+** | Compare current HAPPI state against the last experiment — "what worked last time?" |
 | **Better++** | Continuous bookkeeping of all device changes throughout beamtime |
 
-| Task | When |
-|---|---|
-| Obtain Fred's standardized AWR bridge script; integrate as primary execution path | W2 |
-| Compare `/are-we-ready` output against existing tools (e.g. Matt's GUI) — validate coverage | W2–W3 |
-| Integrate `@ask-happi` delegation step | W3 (**by Wed Jul 15**) |
-| Add machine-PV escalation block (from `references/beam-status-pvs.md`) when all devices OUT but beam missing | W3 |
-| Live test at MFX via bridge | W3 |
+| Task | When | Status |
+|---|---|---|
+| Implement `check_beam_ready_mfx.py` (7-check MFX script) | W3 | ✅ done (Jul 16) |
+| Promote to sub-skill directory with `scripts/` | W3 | ✅ done (Jul 16) |
+| Read state JSON for hutch/experiment context | W3 | ✅ done (Jul 16) |
+| Compare output against existing tools (e.g. Matt's GUI) — validate coverage | W3 | open |
+| Live test at MFX via bridge | W3 | open |
+
+---
+
+### bridge-to-cds  *(sub-skill — CDS filesystem + controls bridge)*
+
+**Status:** ✅ done (Jul 16) | **Owner:** Louis
+
+Enables access to `/cds/` filesystem resources from S3DF sessions via SSH to
+`psdev`. Used whenever a sub-skill needs hutch-python configs, happi DB,
+`conf.yml`, presets, or IOC files that are not mounted on S3DF. Also documents
+the three distinct network environments (S3DF, CDS/psdev, controls network) and
+the path to `caget`/`caput` on a hutch controls machine when EPICS CA access is
+required.
+
+**Key patterns covered:** pipe Python via `psdev` stdin, read `/cds/` files,
+list hutch presets, look up happi entries by name, list beamline devices by
+z-position, SSH to `mfx-control` for live PV reads.
+
+**Consults:** none — reference/execution bridge only. No further active development
+planned for July 17.
 
 ---
 
@@ -224,26 +295,33 @@ verification), `@daq-logs` (DAQ error diagnosis)
 
 ### /coordinate-experiment
 
-**Status:** in progress (Jul 15) | **Owner:** Louis (+ Fred seed)
+**Status:** ✅ done (Jul 16) | **Owner:** Louis (+ Fred seed)
 
-Experiment bookkeeping and context tracking. Checks experiment status, tracks
-sample changes, writes YAMLs with run configuration, and keeps the "current"
-experiment context in sync across all skills. Lives at
-`hutch-copilot/coordinate-experiment/SKILL.md` (separate sub-skill directory).
+Ambient context manager for the entire beamtime session. Initialized once on the
+first hutch-copilot trigger and then silently active for the whole shift. Owns the
+canonical experiment state JSON and the timestamped log file. All other sub-skills
+read the state file before asking the user for anything — `coordinate-experiment` is
+the initialization prerequisite for the session.
 
-Built from **beamtime-logger** (Fred, published psagents GH). Louis starting
-today (Jul 15) from that skeleton.
+**Persistent files** (top-level of experiment directory, pre-provisioned by LCLS DM):
+- `{experiment}_state.json` — canonical state (sample, beam, run, machine_state)
+- `{experiment}_logs.md` — timestamped shift log; never restructured, only appended
 
-**Consults:** `@elog-copilot` (write structured eLog entries), `@ask-lcls2` (run
-metadata inspection), `@lcls-catalog` (experiment file inventory)
+**Explicit user commands:** `/context` (print current state), `/handoff` (draft + post shift summary)
+
+**Ambient (silent):** condition updates → state JSON + log append + eLog post via
+`@elog-copilot`; run metadata from `/take-run` output → state JSON + log; machine
+state from bridge triggers → state JSON only.
+
+**Consults:** `@elog-copilot` (condition-update + handoff eLog posts)
 
 | Task | Owner | When | Status |
 |---|---|---|---|
-| Publish / hand off `beamtime-logger` seed | Fred | W2 | ✅ published psagents GH |
-| Build `coordinate-experiment/SKILL.md` from beamtime-logger skeleton | Louis | W3 | **in progress (Jul 15)** |
-| Define YAML schema for experiment state (sample, config, run mapping) | Louis + Fred | W3 | open |
-| Define integration points with `/take-run`, `analyze-data`, `@elog-copilot` | Louis | W3 | open |
-| Add to orchestrator command dispatch table | Louis | W3 | open |
+| Publish / hand off `beamtime-logger` seed | Fred | W2 | ✅ |
+| Build `coordinate-experiment/SKILL.md` from beamtime-logger skeleton | Louis | W3 | ✅ |
+| Define JSON state schema (sample, beam, run, machine_state, `_timestamps`) | Louis + Fred | W3 | ✅ |
+| Define integration / context-propagation table for all sub-skills | Louis | W3 | ✅ |
+| Add to orchestrator command dispatch table + initialization flow | Louis | W3 | ✅ |
 
 ---
 
@@ -348,10 +426,11 @@ integration window after today's BAWG.)*
 
 | Skill | Mode | Status |
 |---|---|---|
-| `are-we-ready` | bridge | in progress — **due today (Jul 15)** |
+| `are-we-ready` | bridge | ✅ **done (Jul 16)** — MFX script + sub-skill dir |
+| `bridge-to-cds` | offline | ✅ **done (Jul 16)** — psdev SSH patterns |
+| `coordinate-experiment` | offline | ✅ **done (Jul 16)** — state JSON + log + eLog |
 | `align-spectrometer` | bridge | stub — blocked on Amine |
 | `take-run` | bridge | draft — calibration tags + sample tagging with Fred **Jul 16** |
-| `/coordinate-experiment` | offline | **in progress (Jul 15)** — starting from beamtime-logger |
 | `analyze-data` | offline | testing — install path ✅; run_type branching blocked (Gabriel) |
 
 ---
@@ -362,29 +441,24 @@ integration window after today's BAWG.)*
 **Owner:** Louis | **When:** W3 | **Status:** in progress
 
 Three PRs in flight:
-- **SMD templating** — once merged, update `analyze-data/commands/setup.md` Phase 4.
+- **SMD templating** — merged!
 - **`run_type` branching** — gates LUTE task selection on `run_type` (SFX / SAXS / XES /
   GEOM / DARK); update `setup.md` decision tree; add `run_type` as required Phase 1
   parameter. ⚠️ **Issue (Jul 15):** jobs not terminating properly — Gabriel investigating.
   `setup.md` update blocked until resolved.
-- **Beamline summary task** — wrap CCTBX beamline summary as LUTE tasklet; output
-  surfaced in the eLog run record.
 
-**Done when:** all three PRs merged and `setup.md` + `refine.md` reflect new paths/flags.
+**Done when:** `run_type` PR merged + `setup.md` + `refine.md` reflect new paths/flags.
 
 ---
 
-### ② Push `are-we-ready`; integrate `@ask-happi` delegation
-**Owner:** James | **When:** W3 — **by Wed Jul 15** | **Status:** in progress · **T-21**
+### ② Finish `are-we-ready`
+**Owner:** James | **When:** W3 — **by Wed Jul 15** | **Status:** ✅ **done (Jul 16)**
 
 - Push / finish `are-we-ready.md` in `hutch-copilot`.
-- Add `@ask-happi` delegation (skill published: https://github.com/psagents/ask-happi).
-- Fred's standardized AWR bridge script remains primary path when available.
-- Validate against `/cds/home/opr/mfxopr/bin/awr` — coverage ≥ baseline.
 
 **Unblocked:** ask-happi on GH (2026-07-10). Still useful: Fred AWR bridge script.
 
-**Done when:** command runs via bridge at MFX and `@ask-happi` delegation is in the file.
+**Done when:** skill runs via bridge at MFX and can tell if MFX is ready or not.
 
 ---
 
@@ -396,23 +470,24 @@ Two tagging paths, both required:
   `daq.configure()`.
 - **`@elog-copilot` (post-run):** structured JSON keyed to run number; schema with Murali.
 
-Fred to confirm which metadata fields the DAQ/elog accept.
-Calibration run_type tags (`GEOM`, `DARK`) are now part of this work — they replace
-the deprecated `/calibrate` command. Full implementation with Fred: **Jul 16**.
-
 **Done when:** a test run shows `sample_name` and `run_type` (including calibration
 tags) in both the native run record and the elog JSON entry.
+
+**Debugging** We will collect runs without specific skill delegation and prompt
+OpenCode to build the skill after success.
 
 ---
 
 ### ④ Build `/coordinate-experiment` from `beamtime-logger`
-**Owner:** Louis (+ Fred) | **When:** W3 | **Status:** **in progress (today, Jul 15)**
+**Owner:** Louis (+ Fred) | **When:** W3 | **Status:** ✅ **done (Jul 16)**
 
 **beamtime-logger** published https://github.com/psagents/beamtime-logger (T-63).
-Louis building `hutch-copilot/coordinate-experiment/SKILL.md` from that skeleton
-today. Skill lives as a separate sub-skill directory (not a flat command file).
+`coordinate-experiment/SKILL.md` built from that skeleton. Skill lives as a
+sub-skill directory with its own `SKILL.md`. JSON state schema, all context-
+propagation integration points, and orchestrator dispatch table entry are complete.
 
-**Done when:** first draft exists with YAML schema and integration points defined.
+**Done when:** ✅ first draft exists with JSON schema, integration points, and
+dispatch table entry — all complete.
 
 ---
 
@@ -464,6 +539,8 @@ Design principle for handling **"samples"** (not only **"runs"**), possibly via
 Think through / crystallize the discussion between **Gabriel** and **Leland** on
 **metadata handling**. Complements Murali / elog JSON track (**T-32**).
 
+**Solution:** `/coordinate-experiment` can handle that for the time being?
+
 ---
 
 ### ⑩ AMI2 version check (Jul 13 Fred+Louis)
@@ -475,9 +552,11 @@ graph / epix100 averaging PVs).
 ---
 
 ### ⑪ Louis → James on `/are-we-ready` (Jul 13)
-**Owner:** Louis | **When:** before Wed Jul 15 | **Status:** open · **T-54** / **T-68**
+**Owner:** Louis | **When:** before Wed Jul 15 | **Status:** ✅ done
 
 Follow up with James on `/are-we-ready` progress (pairs with **T-21**).
+
+**Done when:** PR is merged on `hutch-copilot` with James' changes.
 
 ---
 
@@ -508,29 +587,200 @@ timeline with Louis).
 
 ## July 17 MVP Scenario
 
-```
-1.  Open hutch-python bridge (SSH tunnel → nc localhost 9999)
-2.  Bring in beam with Matt's GUI
-3.  hutch-copilot: /are-we-ready mfx   (upstream beam path check)
-4.  hutch-copilot: /align-spectrometer   (VH auto-align)
-5.  hutch-copilot: /analyze-data /setup      (LUTE wizard)
-                                              consults ask-lute (reference)
-                                              consults ask-cctbx-xfel (indexing params)
-6.  hutch-copilot: /take-run run_type:GEOM   (geometry calibration run)
-                   → tag written to XTC + eLog; Maestro fires BayFAI/GeomOpt branch
-                   → push geometry to calibration database (LCLSGeom)
-──── MVP ends here ────────────────────────────────────────────────────────
-7.  hutch-copilot: /take-run run_type:DARK   (dark/pedestal run, if needed)
-                   → Maestro fires pedestal processing branch
-8.  hutch-copilot: /take-run sample:lysozyme jet:50µm   (or delivery:dot)
-9.  hutch-copilot: /take-run ...    (repeat per sample condition)
-──── screen record everything ─────────────────────────────────────────────
-```
-
-`/coordinate-experiment` runs as a background bookkeeping layer, updating
-experiment state (sample, config, run mapping) after each `/take-run` call.
+`coordinate-experiment` is **always active** from the first prompt — it silently
+reads and writes `{experiment}_state.json` after every interaction so no sub-skill
+ever re-asks for already-known context.
 
 DAQ generation: **LCLS-II / psana2 / `.xtc2`** confirmed.
+
+---
+
+### Annotated Walkthrough
+
+```
+────────────────────────────────────────────────────────────────────────────
+SESSION START
+────────────────────────────────────────────────────────────────────────────
+
+User: "Let's start the experiment. We're at MFX, experiment mfxl1013621,
+       lysozyme at 20 mM via 50 µm Rayleigh jet, 9500 eV."
+
+  hutch-copilot loads → reads coordinate-experiment/SKILL.md
+  coordinate-experiment: looks for mfxl1013621_state.json → not found
+  → asks one compact prompt (hutch, experiment, sample, energy)
+  → creates state JSON + log file at:
+       /sdf/data/lcls/ds/mfx/mfxl1013621/mfxl1013621_state.json
+       /sdf/data/lcls/ds/mfx/mfxl1013621/mfxl1013621_logs.md
+
+  state.json after init:
+  {
+    "hutch": "MFX",  "experiment": "mfxl1013621",
+    "shift_date": "2026-07-17",  "shift_start": "09:00",
+    "sample_name": "lysozyme",  "concentration": "20 mM",
+    "sample_delivery": "rayleigh jet",  "delivery_details": "50 µm nozzle",
+    "photon_energy_eV": 9500,
+    "last_run_number": null,  "last_run_tag": null,
+    "machine_state": { "beam_present": null, "daq_status": null, "last_checked": null }
+  }
+
+  logs.md:
+  ## Shift Start
+  - **18:00** Experiment context initialized.
+  - Sample: lysozyme, 20 mM, Rayleigh jet (50 µm)
+  - Photon energy: 9500 eV
+
+────────────────────────────────────────────────────────────────────────────
+BEAM READINESS
+────────────────────────────────────────────────────────────────────────────
+
+1.  Bring in beam with Matt's GUI
+
+User: "/are-we-ready" or "are we ready?"
+
+  are-we-ready/SKILL.md loaded
+  → reads hutch, experiment from state.json (no re-ask)
+  → runs check_beam_ready_mfx.py via bridge (inline, no file copy)
+  → all CRITICAL checks pass → reports beam-present summary to user
+
+  coordinate-experiment silently updates:
+  state.json:  machine_state.beam_present = true,
+               machine_state.last_checked = "2026-07-17T18:05:00"
+  logs.md:     (no entry — status read, not an operational event)
+
+────────────────────────────────────────────────────────────────────────────
+ALIGNMENT  [stub — Amine's routine pending]
+────────────────────────────────────────────────────────────────────────────
+
+2.  hutch-copilot: /align-spectrometer (VH auto-align)
+  → reads hutch, experiment, current_phase from state.json (no re-ask)
+  → runs optimization routine via bridge
+  → user declares: "alignment looks good"
+
+  coordinate-experiment silently:
+  state.json:  current_phase = "alignment" → "calibration"
+               machine_state.beam_present refreshed via PV
+  logs.md:     "18:20 VH alignment complete — operator confirmed."
+
+────────────────────────────────────────────────────────────────────────────
+ANALYSIS SETUP  (offline, no bridge)
+────────────────────────────────────────────────────────────────────────────
+
+User: "/analyze-data /setup" or "set up the SFX analysis for this experiment"
+
+  analyze-data/SKILL.md loaded → dispatches to commands/setup.md
+  → reads hutch, experiment, photon_energy_eV, sample_name, sample_delivery
+    from state.json — does NOT ask user for these
+  → LUTE wizard runs: task selection, YAML config, SFX params
+    (consults @ask-lute for task catalog, @ask-cctbx-xfel for indexing params,
+     @ask-smalldata for SmallData detector params)
+  → LUTE YAML written to /sdf/data/lcls/ds/mfx/mfxl1013621/results/lute_output/
+
+  coordinate-experiment: no state.json change (no condition change detected)
+
+──── MVP boundary ────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────
+CALIBRATION — GEOMETRY RUN
+────────────────────────────────────────────────────────────────────────────
+
+User: "/take-run run_type:GEOM" or "take a geometry calibration run"
+
+  commands/take-run.md loaded
+  → reads sample_name, concentration, delivery, photon_energy_eV etc. from state.json
+  → shows confirmation summary without re-asking
+  → bridge: daq.configure(record=True) → daq.begin(duration=120, wait=False)
+  → Phase 4: monitor XTC2 arrival; reports "Run 7 started"
+  → daq.end_run()
+  → Maestro fires BayFAI/GeomOpt DAG branch
+
+  coordinate-experiment silently:
+  state.json:  last_run_number = 7,  last_run_tag = "GEOM"
+               machine_state.daq_status = "stopped"
+               _timestamps.last_run_number = "2026-07-17T09:22:00"
+  logs.md:     "**18:22** Run 7 (GEOM) — 120 s. XTC2 confirmed."
+
+────────────────────────────────────────────────────────────────────────────
+CALIBRATION — DARK RUN  (if needed)
+────────────────────────────────────────────────────────────────────────────
+
+User: "/take-run run_type:DARK"
+  → same pattern; Maestro fires pedestal processing branch
+  state.json:  last_run_number = 8,  last_run_tag = "DARK"
+  logs.md:     "**18:35** Run 8 (DARK) — pedestal run."
+
+────────────────────────────────────────────────────────────────────────────
+DATA COLLECTION
+────────────────────────────────────────────────────────────────────────────
+
+User: "/take-run for 5 minutes" or "take a sample run, 5 min"
+  → all sample/beam context already in state.json → minimal confirmation prompt
+  → bridge: daq.begin(duration=300, wait=False)
+  → Run 9 started; XTC2 landing confirmed; daq.end_run()
+
+  coordinate-experiment silently:
+  state.json:  last_run_number = 9,  last_run_tag = "DATA"
+  logs.md:     "**18:45** Run 9 (DATA) — 300 s, lysozyme 20 mM 50 µm."
+
+────────────────────────────────────────────────────────────────────────────
+CONDITION CHANGE
+────────────────────────────────────────────────────────────────────────────
+
+User: "we switched to FeNO6, 10 mM, same nozzle"
+
+  coordinate-experiment condition update flow:
+  → parses: sample_name = FeNO6, concentration = 10 mM
+  → updates state.json + _timestamps
+  → appends to logs.md
+  → posts to eLog via @elog-copilot:
+       Tag: condition-update
+       Title: Condition Update – 10:15
+       [10:15] Sample changed to FeNO6 (10 mM, 50 µm Rayleigh jet).
+               Previous: lysozyme.
+  → confirms: "Updated: sample_name=FeNO6, concentration=10 mM. Posted to eLog ✓"
+
+  state.json after change:
+  {  ...  "sample_name": "FeNO6",  "concentration": "10 mM",
+     "_timestamps": { "sample_name": "2026-07-19:15:00", ... }  }
+
+  Next /take-run will read FeNO6 directly — no re-ask.
+
+────────────────────────────────────────────────────────────────────────────
+CONTEXT CHECK  (any time)
+────────────────────────────────────────────────────────────────────────────
+
+User: "/context" or "what are the current conditions?"
+
+  coordinate-experiment renders state summary:
+  ## Current Experiment Context
+  Hutch: MFX          Experiment: mfxl1013621
+  Date: 2026-07-17    Shift start: 18:00
+  Phase: data_collection
+
+  ### Sample
+  - Name: FeNO6 / 10 mM / Rayleigh jet — 50 µm nozzle
+
+  ### Beam
+  - 9500 eV / 120 Hz
+
+  ### Last Run
+  - Run #9  Tag: DATA
+
+  ### Machine State  [last checked: 18:05 ← STALE — offer /are-we-ready refresh]
+
+────────────────────────────────────────────────────────────────────────────
+END OF SHIFT
+────────────────────────────────────────────────────────────────────────────
+
+User: "/handoff" or "write the shift handoff"
+
+  coordinate-experiment:
+  → reads full mfxl1013621_logs.md + mfxl1013621_state.json
+  → drafts Slack-format shift summary (beam conditions, issues, science summary)
+  → user reviews + approves
+  → appends to logs.md + posts to eLog (tag: shift-handoff) via @elog-copilot
+```
+
+──── screen record everything ──────────────────────────────────────────────
 
 ---
 
@@ -544,13 +794,12 @@ DAQ generation: **LCLS-II / psana2 / `.xtc2`** confirmed.
 | `run_type` branching job-termination bug | High — blocks Maestro GEOM/DARK branch; Gabriel investigating | Gabriel |
 | CX-P1 CCTBX stats not yet validated on clean run with Pam mask | High — Jul 17 analysis demo | Constance (T-64) |
 | **DoT operator TBD** for Jul 17 data collection | High — blocks stretch `/take-run` path | Leland → Ray (SED) |
-| James `/are-we-ready` not yet integrated with ask-happi | Medium — due today (Jul 15) | James (T-21); Louis follow-up (T-54/T-68) |
 | `/are-we-ready` output not yet validated against existing tools | Medium — could miss beam path gaps | Claire (+ James) |
 | `takepeds`/`makepeds` not in agent path (CDS terminal, not hutch-python) | Medium — darks/pedestals for calibration | Fred + Louis (T-69) |
 | AMI2 may not be latest from Seshu | Medium — align-spectrometer AMI setup | Fred + Louis (T-67) |
 | `ask-cctbx-xfel` skill does not exist yet | Medium — `/setup` Step 3.4 Tier 2 falls back to user prompt | Louis + Pam (+ Constance) |
 | Dry run must land early in W3 (Jul 13–16) | Medium — fix-or-ship before Fri | All |
-| `/coordinate-experiment` SKILL.md skeleton in progress (Jul 15) | Low — bookkeeping; not blocking Jul 17 | Louis |
+| ~~`/coordinate-experiment` SKILL.md skeleton~~ | ~~Low~~ | ✅ done (Jul 16) |
 | `/fixdaq` referenced in error handling but does not exist | Low — operators know the manual fix | Louis (post-Jul-17) |
 | `/checkout` has no command file; referenced in `mfx.md` | Low — operators do this manually today | Louis (post-Jul-17) |
 

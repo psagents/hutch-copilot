@@ -17,7 +17,7 @@ For SFX-specific parameter adjustments, delegate to `@ask-cctbx-xfel`.
 
 Before asking the user for anything, read the current state from:
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
 ```
 Fields consumed by this command: `hutch`, `experiment`, `last_run_number`
 

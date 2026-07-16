@@ -71,7 +71,7 @@ Route based on the user's slash command or closest natural-language intent:
 |---|---|
 | `/take-run` or "take a run", "start collecting", "begin run" | Read `commands/take-run.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
-| `/align-beam` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-beam.md` |
+| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-spectrometer.md` |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
 | `/context` or "current conditions", "what is the sample", "experiment state" | Read `coordinate-experiment/SKILL.md` → `/context` summary |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
