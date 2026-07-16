@@ -9,6 +9,19 @@ delivery. All checks are **read-only**.
 
 ---
 
+## Experiment State (silent context)
+
+Before asking the user for anything, read the current state from:
+```
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+```
+Fields consumed by this command: `hutch`, `experiment`
+
+Use any non-null field directly — do not re-ask the user. Ask only if a field
+is still `null` after reading the file.
+
+---
+
 ## Implementation Levels
 
 This command has four progressive levels of capability:
@@ -24,7 +37,8 @@ This command has four progressive levels of capability:
 
 ## Phase 1: Identify Hutch
 
-Pull from session state. If not set, ask once: "Which hutch? (e.g. `mfx`, `tmo`, `rix`)"
+Read `hutch` from the experiment state file (see preamble above). If still `null`
+after reading the file, ask once: "Which hutch? (e.g. `mfx`, `tmo`, `rix`)"
 
 ---
 

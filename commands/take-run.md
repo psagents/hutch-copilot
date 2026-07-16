@@ -4,6 +4,23 @@ Triggered by: `/takerun`, "take a run", "start collecting", "begin a run", "take
 
 ---
 
+## Experiment State (silent context)
+
+Before asking the user for anything, read the current state from:
+```
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+```
+Fields consumed by this command:
+`hutch`, `experiment`, `sample_name`, `concentration`, `sample_delivery`,
+`delivery_details`, `photon_energy_eV`, `rep_rate_Hz`, `transmission`,
+`pump_laser`, `pump_delay_ps`, `last_run_tag`
+
+Use any non-null field directly — do not re-ask the user. Ask only for fields
+that are still `null` after reading the file. If `hutch` or `experiment` are
+unknown, ask for them first, then read the file.
+
+---
+
 ## Phase 0: Verify DAQ is Running
 
 Before resolving any run parameters, confirm the DAQ is live via the bridge.
@@ -139,7 +156,7 @@ suggest `/fixdaq`.
 
 **Update session state:**
 ```json
-{ "last_run": <run_number> }
+{ "last_run_number": <run_number>, "last_run_tag": "<run_tag>" }
 ```
 
 ---

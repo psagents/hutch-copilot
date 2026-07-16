@@ -9,6 +9,18 @@ hutch-python environment — this command drives it via the bridge.
 
 ---
 
+## Experiment State (silent context)
+
+Before asking the user for anything, read the current state from:
+```
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+```
+Fields consumed by this command: `hutch`, `experiment`, `current_phase`
+
+Use any non-null field directly — do not re-ask the user.
+
+---
+
 > **TODO — requires input from Amine before this command can be completed:**
 >
 > - Exact function name and module in hutch-python

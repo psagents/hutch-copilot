@@ -15,14 +15,28 @@ and experiment-level orchestration live here.
 
 ---
 
+## Experiment State (silent context)
+
+Before asking the user for anything, read the current state from:
+```
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+```
+Fields consumed by this command: `hutch`, `experiment`
+
+Use any non-null field directly — do not re-ask. If `hutch` or `experiment` are
+unknown, ask for them first, then read the file.
+
+---
+
 ## Phase 1 — Gather Experiment Info
 
-Ask the user for the following. Derive what can be derived; only ask for what cannot.
+Read `experiment` and `hutch` from the experiment state file (see preamble above).
+Only ask the user for variables that are still `null` after reading the file.
 
 | Variable | How to obtain |
 |---|---|
-| `experiment` | Ask the user (e.g. `mfxl1013621`) |
-| `hutch` | Derived: first 3 characters of `experiment` |
+| `experiment` | Read from state file; ask only if still null (e.g. `mfxl1013621`) |
+| `hutch` | Read from state file; derive from first 3 chars of `experiment` as fallback |
 | `version` | Ask — default `dev` |
 | `directory` | Ask — optional subdirectory under `results/`; default empty |
 

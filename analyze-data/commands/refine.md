@@ -13,6 +13,18 @@ For SFX-specific parameter adjustments, delegate to `@ask-cctbx-xfel`.
 
 ---
 
+## Experiment State (silent context)
+
+Before asking the user for anything, read the current state from:
+```
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/beamtime/{experiment}_state.json
+```
+Fields consumed by this command: `hutch`, `experiment`, `last_run_number`
+
+Use any non-null field directly — do not re-ask the user.
+
+---
+
 ## Step R.1 — Locate the first output
 
 ```bash
