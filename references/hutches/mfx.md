@@ -25,30 +25,57 @@ For LUTE-specific information (detectors, analysis chains, SmallData config), se
 
 ## Beam Path Devices (for `/checkout` and `/awr`)
 
-Ordered upstream → downstream. Update device names to match the hutch-python object
-names in the current session.
+Ordered upstream → downstream. Confirmed device names from live hutch-python
+session (mfx101609126, July 2026).
 
-### MFX Beam Path (typical)
+### MFX Beam Path (confirmed)
 
 | Device | hutch-python name | PV prefix | Nominal state |
 |---|---|---|---|
 | Stopper 1 | `# FILL IN` | `MFX:PPS:MMS:ST1` | OUT during ops |
 | Stopper 2 | `# FILL IN` | `MFX:PPS:MMS:ST2` | OUT during ops |
-| DG1 H slit | `mfx_dg1_h_slit` | `MFX:DG1:JAWS:` | gap: 0.5–2mm |
-| DG1 V slit | `mfx_dg1_v_slit` | `MFX:DG1:JAWS:` | gap: 0.5–2mm |
-| Attenuator | `# FILL IN` | `MFX:ATT:COM:` | T depends on exp |
-| DG2 H slit | `# FILL IN` | `MFX:DG2:JAWS:` | gap: 0.2–1mm |
-| DG2 V slit | `# FILL IN` | `MFX:DG2:JAWS:` | gap: 0.2–1mm |
-| KB H mirror | `# FILL IN` | `MFX:MMS:KBH:` | in-beam |
-| KB V mirror | `# FILL IN` | `MFX:MMS:KBV:` | in-beam |
+| DG1 valve 1 | `mfx_dg1_valve_1` | — | OUT (open) |
+| DG1 valve 2 | `mfx_dg1_valve_2` | — | OUT (open) |
+| DG1 slits | `mfx_dg1_slits` | `MFX:DG1:JAWS:` | gap: 0.5–2mm |
+| DG1 imager (PIM) | `mfx_dg1_pim` | — | removed |
+| DG1 IPM | `mfx_dg1_ipm` | `MFX:DG1:IPM:` | upstream monitor |
+| MXT valve | `mfx_mxt_valve` | — | OUT (open) |
+| Attenuator (AT2L0) | `at2l0` | — | T depends on exp |
+| DG2 upstream slits | `mfx_dg2_upstream_slits` | `MFX:DG2:JAWS:` | gap: 0.2–1mm |
+| DG2 midstream slits | `mfx_dg2_midstream_slits` | — | gap: 0.2–1mm |
+| DG2 downstream slits | `mfx_dg2_downstream_slits` | — | gap: 0.2–1mm |
+| DG2 imager (PIM) | `mfx_dg2_pim` | — | removed |
+| DG2 IPM | `mfx_dg2_ipm` | `MFX:DG2:IPM:` | pre-sample monitor |
+| DVD valve | `mfx_dvd_valve` | — | OUT (open) |
+| DIA valve 01 | `mfx_dia_valve_01` | — | OUT (open) |
+| DIA valve 02 | `mfx_dia_valve_02` | — | OUT (open) |
+| DIA imager (PIM) | `mfx_dia_pim` | — | removed |
+| DIA IPM | `mfx_dia_ipm` | — | downstream monitor |
+
+### YAGs / Imagers
+
+| Device | hutch-python name | Notes |
+|---|---|---|
+| YAG 0 | `yag0` | upstream, `.removed` = True when out |
+| YAG 1 | `yag1` | mid, `.removed` = True when out |
+| YAG 2 | `yag2` | downstream, `.removed` = True when out |
+
+### Beam Destination Mirror
+
+| Device | hutch-python name | MFX position | MEC position |
+|---|---|---|---|
+| MR1L4 pitch | `mr1l4_homs.pitch` | −562.035 µrad | +819.2 µrad |
+
+> **Do not use the Beam Destination pyDM GUI** — it resets MR2L0 pointing.
 
 ### Beam Intensity Monitors
 
 | Device | hutch-python name | PV prefix | Notes |
 |---|---|---|---|
-| IPM DG1 | `# FILL IN` | `MFX:DG1:IPM:` | upstream monitor |
-| IPM DG2 | `# FILL IN` | `MFX:DG2:IPM:` | pre-sample monitor |
-| Wave8 | `mfx_wave8` | `MFX:WAVE8:` | waveform digitizer |
+| IPM DG1 | `mfx_dg1_ipm` | `MFX:DG1:IPM:` | upstream monitor |
+| IPM DG2 | `mfx_dg2_ipm` | `MFX:DG2:IPM:` | pre-sample monitor |
+| Wave8 motor | `mfx_dg1_wave8_motor` | — | wave8 positioning |
+| beam_status | `beam_status` | — | returns BeamCheckTuple (ev, mj1–4, mj_avg1–4) |
 
 ---
 

@@ -28,25 +28,72 @@ Pull from session state. If not set, ask once: "Which hutch? (e.g. `mfx`, `tmo`,
 
 ---
 
-## Phase 2: Run Fred's Bridge Script  *(primary path)*
+## Phase 2: Run Hutch-Specific AWR Script  *(primary path for MFX)*
 
-> **Pending:** Fred is providing a standardized AWR bridge script.
-> Once available, this is the **primary execution path** — run it before
-> falling back to the generated scripts in Phase 3.
->
-> Script location and invocation TBD — Fred to confirm.
+For **MFX**, a tested beam-readiness script is available under
+`are-we-ready/scripts/check_beam_ready_mfx.py` (co-located with this skill file).
 
-Run via the hutch-python bridge:
+### Bridge Prerequisites
 
-```python
-# Fred's standardized AWR bridge script — path TBD
-exec(open('/path/to/fred_awr_{hutch}.py').read())
+The hutch-python IPython bridge (`nc localhost 9999`) must be active.
+
+- **Tunnel setup** — see `@experimental-hutch-python` Bridge Setup Walkthrough.
+- **Network topology** — see `bridge-to-cds/SKILL.md` for why `/sdf/home/` is not
+  reachable from mfx-daq and how S3DF ↔ CDS ↔ controls paths are separated.
+
+### Run via bridge (from S3DF)
+
+The script is located on S3DF (where the skill filesystem is accessible) and sent
+inline to mfx-daq — **no file copy required**.
+
+```bash
+SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \
+    -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+python3 -c "
+import json, pathlib
+code = pathlib.Path('$SCRIPT').read_text() + '\ncheck_beam_ready()'
+print(json.dumps({'code': code}))
+" | nc -w 30 localhost 9999
 ```
 
-If the bridge is not connected, provide the script path for the user to run
-manually in their hutch-python session.
+### Optional: persistent install on mfx-daq
 
-If Fred's script is not yet available, proceed to Phase 3.
+For repeated use directly from the hutch console, write the script once to `/tmp/`
+on mfx-daq via the bridge:
+
+```bash
+SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \
+    -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+python3 -c "
+import json, pathlib
+content = pathlib.Path('$SCRIPT').read_text()
+code = 'with open(\"/tmp/check_beam_ready_mfx.py\",\"w\") as _f: _f.write(' + repr(content) + ')'
+print(json.dumps({'code': code}))
+" | nc -w 10 localhost 9999
+```
+
+Then from the hutch console directly:
+
+```python
+exec(open('/tmp/check_beam_ready_mfx.py').read())
+check_beam_ready()
+```
+
+### What it checks
+
+| # | Check | Type | Pass condition |
+|---|-------|------|----------------|
+| 1 | **Beam destination** | CRITICAL | `mr1l4_homs.pitch` within 10 µrad of −562.035 |
+| 2 | **Imagers / YAGs** | WARNING | yag0, yag1, yag2, dg1_pim, dg2_pim, dia_pim all `.removed` |
+| 3 | **Valves** | INFO | dg1×2, dia×2, dvd, mxt valve states reported |
+| 4 | **Energy** | CRITICAL | `beam_status` pulse energy > 0.05 mJ; DCCM reported |
+| 5 | **Undulator pointing** | INFO | X/Y from `BPMS:UNDH:4690:XOFF.D` / `YOFF.D` |
+| 6 | **Slits** | INFO | sl1l0, dg1_slits, dg2_upstream_slits x/y widths |
+| 7 | **DAQ** | INFO | Current run number from `get_run()` |
+
+Returns `True` if all CRITICAL checks pass.
+
+For other hutches, proceed to Phase 3.
 
 ---
 
@@ -132,7 +179,7 @@ for name, state, prefix in results:
     print(f"{name:<35} {state:<15} {prefix}{flag}")
 ```
 
-Save the script to `/tmp/awr_{hutch}.py` and run it via the bridge:
+Send inline via the bridge:
 
 ```python
 exec(open('/tmp/awr_{hutch}.py').read())
