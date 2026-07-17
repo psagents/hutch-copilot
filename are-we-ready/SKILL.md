@@ -44,53 +44,67 @@ after reading the file, ask once: "Which hutch? (e.g. `mfx`, `tmo`, `rix`)"
 
 ## Phase 2: Run Hutch-Specific AWR Script  *(primary path for MFX)*
 
-For **MFX**, a tested beam-readiness script is available under
-`are-we-ready/scripts/check_beam_ready_mfx.py` (co-located with this skill file).
+For **MFX**, a tested beam-readiness script is available at
+`hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py`.
 
 ### Bridge Prerequisites
 
-The hutch-python IPython bridge (`nc localhost 9999`) must be active.
+The IPython bridge must be running on the DAQ machine. If not yet set up:
 
-- **Tunnel setup** — see `@experimental-hutch-python` Bridge Setup Walkthrough.
-- **Network topology** — see `bridge-to-cds/SKILL.md` for why `/sdf/home/` is not
-  reachable from mfx-daq and how S3DF ↔ CDS ↔ controls paths are separated.
+**Step 1 — Install the bridge script on mfx-daq** (from S3DF):
+
+```bash
+ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/oc_bridge.py" \
+    < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/scripts/oc_bridge.py
+```
+
+**Step 2 — Operator starts the bridge** in the hutch-python session on mfx-daq:
+
+```python
+exec(open('/tmp/oc_bridge.py').read())
+# Expected: "OpenCode bridge listening on port 9999"
+```
+
+> **Note:** `ssh -L 9999:localhost:9999 mfx-daq` (TCP port forwarding) is blocked by
+> `AllowTcpForwarding` restrictions on DAQ machines. All bridge calls use the SSH pipe
+> pattern below instead. See `bridge-to-cds/SKILL.md` for network topology details.
 
 ### Run via bridge (from S3DF)
 
-The script is located on S3DF (where the skill filesystem is accessible) and sent
-inline to mfx-daq — **no file copy required**.
-
 ```bash
-SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \
-    -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+SCRIPT=/sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
 python3 -c "
 import json, pathlib
 code = pathlib.Path('$SCRIPT').read_text() + '\ncheck_beam_ready()'
 print(json.dumps({'code': code}))
-" | nc -w 30 localhost 9999
+" | ssh -o ConnectTimeout=60 -J psdev mfx-daq "python3 -c \"
+import socket, json, sys
+s = socket.socket()
+s.connect(('localhost', 9999))
+s.sendall(sys.stdin.buffer.read())
+s.shutdown(socket.SHUT_WR)
+data = b''
+while True:
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+resp = json.loads(data.decode())
+print(resp.get('output', resp.get('error', '')))
+\""
 ```
 
-### Optional: persistent install on mfx-daq
-
-For repeated use directly from the hutch console, write the script once to `/tmp/`
-on mfx-daq via the bridge:
-
-```bash
-SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \
-    -path '*/hutch-copilot/*' 2>/dev/null | head -1)
-python3 -c "
-import json, pathlib
-content = pathlib.Path('$SCRIPT').read_text()
-code = 'with open(\"/tmp/check_beam_ready_mfx.py\",\"w\") as _f: _f.write(' + repr(content) + ')'
-print(json.dumps({'code': code}))
-" | nc -w 10 localhost 9999
-```
-
-Then from the hutch console directly:
+### From the hutch console directly
 
 ```python
 exec(open('/tmp/check_beam_ready_mfx.py').read())
 check_beam_ready()
+```
+
+To install the AWR script on mfx-daq for console use (run once from S3DF):
+
+```bash
+ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/check_beam_ready_mfx.py" \
+    < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
 ```
 
 ### What it checks

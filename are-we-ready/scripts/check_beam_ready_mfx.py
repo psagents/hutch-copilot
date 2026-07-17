@@ -1,35 +1,50 @@
 """
 check_beam_ready_mfx.py — MFX beam readiness checker
 =====================================================
-Canonical source: are-we-ready/scripts/check_beam_ready_mfx.py
-                  (within the hutch-copilot skill tree)
+Canonical source (S3DF):
+  hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
 
 This script runs inside a hutch-python session on mfx-daq where all device
 objects (mr1l4_homs, yag0, beam_status, …) are already in the namespace.
 It is NOT meant to be imported from a plain Python environment.
 
-Recommended usage — send inline from S3DF via the hutch-python IPython bridge:
+--- Sending inline from S3DF via the IPython bridge (recommended) ---
 
-    SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \\
-        -path '*/hutch-copilot/*' 2>/dev/null | head -1)
+    SCRIPT=/sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
     python3 -c "
     import json, pathlib
-    code = pathlib.Path('$SCRIPT').read_text() + '\\ncheck_beam_ready()'
+    code = pathlib.Path('$SCRIPT').read_text() + '\ncheck_beam_ready()'
     print(json.dumps({'code': code}))
-    " | nc -w 30 localhost 9999
+    " | ssh -o ConnectTimeout=60 -J psdev mfx-daq "python3 -c \"
+    import socket, json, sys
+    s = socket.socket()
+    s.connect(('localhost', 9999))
+    s.sendall(sys.stdin.buffer.read())
+    s.shutdown(socket.SHUT_WR)
+    data = b''
+    while True:
+        chunk = s.recv(65536)
+        if not chunk: break
+        data += chunk
+    resp = json.loads(data.decode())
+    print(resp.get('output', resp.get('error', '')))
+    \""
 
-Optional persistent install on mfx-daq (write once, reuse from hutch console):
+Note: ssh -L port forwarding is blocked on mfx-daq (AllowTcpForwarding restriction).
+      Use the SSH pipe pattern above instead of nc localhost 9999.
 
-    SCRIPT=$(find /sdf/home -name 'check_beam_ready_mfx.py' \\
-        -path '*/hutch-copilot/*' 2>/dev/null | head -1)
-    python3 -c "
-    import json, pathlib
-    content = pathlib.Path('$SCRIPT').read_text()
-    code = 'with open(\"/tmp/check_beam_ready_mfx.py\",\"w\") as _f: _f.write(' + repr(content) + ')'
-    print(json.dumps({'code': code}))
-    " | nc -w 10 localhost 9999
-    # Then from the hutch console:
-    # exec(open('/tmp/check_beam_ready_mfx.py').read()); check_beam_ready()
+--- Install on mfx-daq for direct console use (run once from S3DF) ---
+
+    ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/check_beam_ready_mfx.py" \\
+        < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
+
+    # Then from the hutch-python console on mfx-daq:
+    exec(open('/tmp/check_beam_ready_mfx.py').read())
+    check_beam_ready()
+
+--- Bridge setup (if not already running) ---
+
+See hutch-copilot/scripts/oc_bridge.py and hutch-copilot/SKILL.md.
 """
 
 import epics

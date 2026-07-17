@@ -39,27 +39,91 @@ and silently observes every conversation turn after that.
 
 ## Bridge Detection
 
-On the first command that requires live execution, check connectivity:
+> **Two distinct bridges exist.**
+> - **IPython bridge** — sends Python code to a running hutch-python session on the DAQ
+>   machine (mfx-daq, etc.). Covered in this section.
+> - **CDS bridge** — reads `/cds/` config files (happi DB, conf.yml, presets) or runs
+>   scripts on controls machines via SSH to `psdev` / `mfx-control`. See
+>   `bridge-to-cds/SKILL.md`.
+
+### Setup (once per hutch-python session)
+
+**Step 1 — Install the bridge script on the DAQ machine** (from S3DF):
 
 ```bash
-echo '{"code": "True"}' | nc -w 2 localhost 9999
+ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/oc_bridge.py" \
+    < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/scripts/oc_bridge.py
 ```
 
-- **Connected** (`{"status": "ok", ...}`): live execution mode is available.
-- **Not connected**: documentation/planning mode only. Offer to walk the user through
-  the bridge setup (see `@experimental-hutch-python` Bridge Setup Walkthrough).
+**Step 2 — Start the listener** (operator runs in hutch-python session):
 
-> **Two distinct bridges exist.** The IPython bridge (`nc localhost 9999`) runs
-> hutch-python commands on the DAQ machine. The CDS bridge (`ssh psdev` /
-> `ssh mfx-control`) reads `/cds/` config files (happi DB, conf.yml, presets) or
-> runs scripts on controls machines. See `bridge-to-cds/SKILL.md` for the latter.
+```python
+exec(open('/tmp/oc_bridge.py').read())
+# Expected output: "OpenCode bridge listening on port 9999"
+```
 
-Live commands use:
+**Step 3 — Verify connectivity** (from S3DF):
+
 ```bash
-echo '{"code": "PYTHON_CODE"}' | nc -w TIMEOUT localhost 9999
+echo '{"code": "True"}' | \
+    ssh -o ConnectTimeout=10 -J psdev mfx-daq "python3 -c \"
+import socket, json, sys
+s = socket.socket()
+s.connect(('localhost', 9999))
+s.sendall(sys.stdin.buffer.read())
+s.shutdown(socket.SHUT_WR)
+data = b''
+while True:
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+print(json.loads(data.decode()).get('output', 'ERROR'))
+\""
 ```
 
-Use 2s for queries, 10s for device operations, 300s+ for scans/runs.
+Expected response: `True`
+
+> **Why not `ssh -L 9999:localhost:9999 mfx-daq` + `nc localhost 9999`?**
+> TCP port forwarding (`-L`) is blocked by `AllowTcpForwarding` restrictions on DAQ
+> machines. The SSH pipe pattern above is the reliable alternative — it connects to
+> `localhost:9999` on the DAQ machine directly from within the SSH session.
+> See `bridge-to-cds/SKILL.md` for more on this topology.
+
+### Connectivity check
+
+On the first command that requires live execution, test the bridge:
+
+- **Connected** (`{"status": "ok", "output": "True"}`): live execution mode available.
+- **Not connected / error**: documentation/planning mode only. Walk the user through
+  the setup procedure above.
+
+### Sending live commands
+
+All live bridge calls use the SSH pipe pattern. Replace `DAQ_HOST` with the actual
+DAQ hostname (e.g. `mfx-daq`):
+
+```bash
+echo '{"code": "PYTHON_CODE_OR_SCRIPT"}' | \
+    ssh -o ConnectTimeout=TIMEOUT -J psdev DAQ_HOST "python3 -c \"
+import socket, json, sys
+s = socket.socket()
+s.connect(('localhost', 9999))
+s.sendall(sys.stdin.buffer.read())
+s.shutdown(socket.SHUT_WR)
+data = b''
+while True:
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+resp = json.loads(data.decode())
+print(resp.get('output', resp.get('error', '')))
+\""
+```
+
+Timeout guidelines (ConnectTimeout in seconds):
+- `10` — queries, status reads
+- `30` — device operations, single moves
+- `300` — scans, DAQ runs (use 300+)
 
 ---
 

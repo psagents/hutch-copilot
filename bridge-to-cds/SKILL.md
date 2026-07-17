@@ -179,12 +179,60 @@ Need to caget/caput a live PV?
        └─► If that fails from S3DF: SSH -J psdev mfx-control
 
 Need to run hutch-python commands (e.g. move a motor)?
-  └─► SSH to mfx-control, source mfxpython, run Python
+  └─► IPython bridge (oc_bridge.py) + SSH pipe pattern (see below)
        OR: be physically at the hutch console
+
+Need to reach a service on localhost on a DAQ/controls machine (e.g. port 9999)?
+  └─► SSH pipe — NOT ssh -L (TCP port forwarding blocked on DAQ machines)
+       See "Reaching a localhost socket" section below.
 
 Need to run a psana2 analysis on S3DF data?
   └─► Stay on S3DF — /sdf/data/ is mounted here
 ```
+
+---
+
+## Reaching a localhost Socket on a DAQ Machine
+
+DAQ machines (e.g. `mfx-daq`) typically have `AllowTcpForwarding` disabled in their
+SSH server config. This means `ssh -L 9999:localhost:9999 mfx-daq` will establish
+an SSH session but silently reject any connection attempt to the forwarded port
+(`Connection reset by peer`).
+
+**The reliable alternative: SSH pipe via stdin.**
+
+Instead of forwarding the port, SSH into the machine and run a Python one-liner that
+connects to the local socket from within the SSH session:
+
+```bash
+echo '{"code": "YOUR_CODE"}' | \
+    ssh -o ConnectTimeout=10 -J psdev mfx-daq "python3 -c \"
+import socket, json, sys
+s = socket.socket()
+s.connect(('localhost', 9999))
+s.sendall(sys.stdin.buffer.read())
+s.shutdown(socket.SHUT_WR)
+data = b''
+while True:
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+resp = json.loads(data.decode())
+print(resp.get('output', resp.get('error', '')))
+\""
+```
+
+This works because the Python process runs **on** mfx-daq and connects to
+`localhost:9999` locally — no TCP forwarding required.
+
+### Rules for SSH pipe to localhost socket
+
+- Always use `-J psdev` as jump host if direct SSH from S3DF fails.
+- Set `ConnectTimeout` based on expected response time (10s for queries, 60s+ for scripts).
+- The listener on the remote side must be running before you connect (see
+  `hutch-copilot/scripts/oc_bridge.py` for the IPython bridge listener).
+- Send complete JSON in one `sendall()`, then `shutdown(SHUT_WR)` to signal EOF.
+  The listener reads until it sees EOF before processing.
 
 ---
 
