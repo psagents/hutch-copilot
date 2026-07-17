@@ -18,7 +18,7 @@ hutch-copilot/
 ├── SKILL.md                        ← orchestrator; initializes coordinate-experiment on first trigger
 ├── commands/                       ← bridge commands (hutch-python, no sub-commands)
 │   ├── take-run.md
-│   └── align-beam.md               ← /align-spectrometer stub (rename pending Amine)
+│   └── align-spectrometer.md       ← /align-spectrometer stub
 ├── are-we-ready/                   ← sub-skill (promoted from flat command)
 │   ├── SKILL.md
 │   └── scripts/
@@ -115,7 +115,7 @@ before asking the user anything. It is initialized once at session start and the
 silently updated after every conversation turn.
 
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/{experiment}_state.json
 ```
 
 | Sub-skill | Fields read | Fields written |
@@ -284,7 +284,7 @@ verification), `@daq-logs` (DAQ error diagnosis)
 
 | Task | When | Status |
 |---|---|---|
-| Research: what metadata fields can be written into a run (`runtype`, etc.)? | W2 | open (T-30) |
+| Research: what metadata fields can be written into a run (`run_type`, etc.)? | W2 | open (T-30) |
 | Add DAQ pre-check (verify DAQ is running before Phase 1 proceeds) | W2 | ✅ done (`daq.status()` Phase 0) |
 | Add sample tagging via hutch-python (bridge call before DAQ start) | W2–W3 | open |
 | Add sample tagging via `@elog-copilot` (structured JSON post-run log) | W2–W3 | open |
@@ -609,13 +609,13 @@ User: "Let's start the experiment. We're at MFX, experiment mfxl1013621,
   coordinate-experiment: looks for mfxl1013621_state.json → not found
   → asks one compact prompt (hutch, experiment, sample, energy)
   → creates state JSON + log file at:
-       /sdf/data/lcls/ds/mfx/mfxl1013621/mfxl1013621_state.json
-       /sdf/data/lcls/ds/mfx/mfxl1013621/mfxl1013621_logs.md
+       /sdf/data/lcls/ds/mfx/mfxl1013621/results/psagents/mfxl1013621_state.json
+       /sdf/data/lcls/ds/mfx/mfxl1013621/results/psagents/mfxl1013621_logs.md
 
   state.json after init:
   {
     "hutch": "MFX",  "experiment": "mfxl1013621",
-    "shift_date": "2026-07-17",  "shift_start": "09:00",
+    "shift_date": "2026-07-17",  "shift_start": "18:00",
     "sample_name": "lysozyme",  "concentration": "20 mM",
     "sample_delivery": "rayleigh jet",  "delivery_details": "50 µm nozzle",
     "photon_energy_eV": 9500,
@@ -644,7 +644,7 @@ User: "/are-we-ready" or "are we ready?"
 
   coordinate-experiment silently updates:
   state.json:  machine_state.beam_present = true,
-               machine_state.last_checked = "2026-07-17T18:05:00"
+               machine_state.last_checked = "2026-07-17T18:20:00"
   logs.md:     (no entry — status read, not an operational event)
 
 ────────────────────────────────────────────────────────────────────────────
@@ -659,13 +659,13 @@ ALIGNMENT  [stub — Amine's routine pending]
   coordinate-experiment silently:
   state.json:  current_phase = "alignment" → "calibration"
                machine_state.beam_present refreshed via PV
-  logs.md:     "18:20 VH alignment complete — operator confirmed."
+  logs.md:     "19:30 VH alignment complete — operator confirmed."
 
 ────────────────────────────────────────────────────────────────────────────
 ANALYSIS SETUP  (offline, no bridge)
 ────────────────────────────────────────────────────────────────────────────
 
-User: "/analyze-data /setup" or "set up the SFX analysis for this experiment"
+User: "@analyze-data /setup" or "set up the SFX analysis for this experiment"
 
   analyze-data/SKILL.md loaded → dispatches to commands/setup.md
   → reads hutch, experiment, photon_energy_eV, sample_name, sample_delivery
@@ -674,29 +674,28 @@ User: "/analyze-data /setup" or "set up the SFX analysis for this experiment"
     (consults @ask-lute for task catalog, @ask-cctbx-xfel for indexing params,
      @ask-smalldata for SmallData detector params)
   → LUTE YAML written to /sdf/data/lcls/ds/mfx/mfxl1013621/results/lute_output/
+  → One workflow one YAML for smd --> BayFAI
+  → One workflow one YAML for smd --> XES
 
   coordinate-experiment: no state.json change (no condition change detected)
-
-──── MVP boundary ────────────────────────────────────────────────────────────
 
 ────────────────────────────────────────────────────────────────────────────
 CALIBRATION — GEOMETRY RUN
 ────────────────────────────────────────────────────────────────────────────
 
-User: "/take-run run_type:GEOM" or "take a geometry calibration run"
+User: "/take-run run_type:GEOM, calibrant is AgBh, 2 minute-run"
 
   commands/take-run.md loaded
   → reads sample_name, concentration, delivery, photon_energy_eV etc. from state.json
   → shows confirmation summary without re-asking
-  → bridge: daq.configure(record=True) → daq.begin(duration=120, wait=False)
+  → bridge: run `autorun()`
   → Phase 4: monitor XTC2 arrival; reports "Run 7 started"
-  → daq.end_run()
   → Maestro fires BayFAI/GeomOpt DAG branch
 
   coordinate-experiment silently:
   state.json:  last_run_number = 7,  last_run_tag = "GEOM"
                machine_state.daq_status = "stopped"
-               _timestamps.last_run_number = "2026-07-17T09:22:00"
+               _timestamps.last_run_number = "2026-07-17T20:00:00"
   logs.md:     "**18:22** Run 7 (GEOM) — 120 s. XTC2 confirmed."
 
 ────────────────────────────────────────────────────────────────────────────
@@ -704,28 +703,29 @@ CALIBRATION — DARK RUN  (if needed)
 ────────────────────────────────────────────────────────────────────────────
 
 User: "/take-run run_type:DARK"
-  → same pattern; Maestro fires pedestal processing branch
+  → ARP script /takepeds /makepeds
   state.json:  last_run_number = 8,  last_run_tag = "DARK"
-  logs.md:     "**18:35** Run 8 (DARK) — pedestal run."
+  logs.md:     "**20:30** Run 8 (DARK) — pedestal run."
 
 ────────────────────────────────────────────────────────────────────────────
 DATA COLLECTION
 ────────────────────────────────────────────────────────────────────────────
 
-User: "/take-run for 5 minutes" or "take a sample run, 5 min"
+User: "/take-run for 5 minutes, placebo sample, run_type:DATA" 
   → all sample/beam context already in state.json → minimal confirmation prompt
-  → bridge: daq.begin(duration=300, wait=False)
-  → Run 9 started; XTC2 landing confirmed; daq.end_run()
+  → bridge: run `autorun()`
+  → Run 9 started; XTC2 landing confirmed;
 
   coordinate-experiment silently:
   state.json:  last_run_number = 9,  last_run_tag = "DATA"
-  logs.md:     "**18:45** Run 9 (DATA) — 300 s, lysozyme 20 mM 50 µm."
+  logs.md:     "**21:00** Run 9 (DATA) — 300 s, plcaebo 20 mM 50 µm."
 
 ────────────────────────────────────────────────────────────────────────────
 CONDITION CHANGE
 ────────────────────────────────────────────────────────────────────────────
 
 User: "we switched to FeNO6, 10 mM, same nozzle"
+(XES - Vandana's sample)
 
   coordinate-experiment condition update flow:
   → parses: sample_name = FeNO6, concentration = 10 mM
@@ -740,7 +740,7 @@ User: "we switched to FeNO6, 10 mM, same nozzle"
 
   state.json after change:
   {  ...  "sample_name": "FeNO6",  "concentration": "10 mM",
-     "_timestamps": { "sample_name": "2026-07-19:15:00", ... }  }
+     "_timestamps": { "sample_name": "2026-07-22:00:00", ... }  }
 
   Next /take-run will read FeNO6 directly — no re-ask.
 
@@ -765,7 +765,7 @@ User: "/context" or "what are the current conditions?"
   ### Last Run
   - Run #9  Tag: DATA
 
-  ### Machine State  [last checked: 18:05 ← STALE — offer /are-we-ready refresh]
+  ### Machine State  [last checked: 18:30 ← STALE — offer /are-we-ready refresh]
 
 ────────────────────────────────────────────────────────────────────────────
 END OF SHIFT
