@@ -38,8 +38,8 @@ Both files live at the top level of the experiment's data directory
 
 | File | Path |
 |---|---|
-| State (JSON) | `/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json` |
-| Log (Markdown) | `/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_logs.md` |
+| State (JSON) | `/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_state.json` |
+| Log (Markdown) | `/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_logs.md` |
 
 ---
 
@@ -134,7 +134,7 @@ Run **once** on the first hutch-copilot trigger.
 If the hutch and experiment are already known, try to read the state JSON:
 
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
+/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_state.json
 ```
 
 - **File found**: load the state object into context. Note the `machine_state.last_checked`
@@ -148,7 +148,7 @@ If the hutch and experiment are already known, try to read the state JSON:
 - **File not found**: ask for the following in one compact prompt:
   > *"Starting experiment log. Please confirm: hutch, experiment ID, current sample
   > (name, concentration, delivery method), photon energy?"*
-  Then create the `beamtime/` directory and both files.
+  Then create the `psagents/` directory and both files.
 
 ### Step 2 — Open or create the log file
 
