@@ -55,7 +55,7 @@ The IPython bridge must be running on the DAQ machine. If not yet set up:
 
 ```bash
 ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/oc_bridge.py" \
-    < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/scripts/oc_bridge.py
+    < /path/to/.claude/skills/hutch-copilot/scripts/oc_bridge.py
 ```
 
 **Step 2 — Operator starts the bridge** in the hutch-python session on mfx-daq:
@@ -104,7 +104,7 @@ To install the AWR script on mfx-daq for console use (run once from S3DF):
 
 ```bash
 ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/check_beam_ready_mfx.py" \
-    < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
+    < /path/to/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
 ```
 
 ### What it checks

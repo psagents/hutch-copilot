@@ -11,7 +11,7 @@ JSON-encoded code requests from OpenCode running on S3DF.
 Usage — install on the DAQ machine (run once per session from S3DF):
 
     ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/oc_bridge.py" \
-        < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/scripts/oc_bridge.py
+        < /path/to/skills/hutch-copilot/scripts/oc_bridge.py
 
 Then in the hutch-python session on the DAQ machine:
 
@@ -94,9 +94,17 @@ def _oc_bridge():
                 error = str(exc)
             finally:
                 sys.stdout = old_stdout
+                old_stdout.write(
+                    buf.getvalue()
+                )  # echo captured output to hutch-python console
+                old_stdout.flush()
 
             if error:
                 resp = json.dumps({"status": "error", "error": error})
+                old_stdout.write(
+                    f"[OpenCode bridge error] {error}\n"
+                )  # echo error to hutch-python console
+                old_stdout.flush()
             else:
                 resp = json.dumps({"status": "ok", "output": buf.getvalue()})
 
