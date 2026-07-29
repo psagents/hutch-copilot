@@ -6,9 +6,10 @@ description: >
   setup (/setup) and parameter refinement after first output (/refine). Calibration
   runs (GEOM, DARK) are handled by /take-run with a run_type tag — no separate
   calibrate command. Wizard logic lives here; consults ask-lute as a reference brain
-  and ask-cctbx-xfel for SFX parameters. No bridge required — works entirely offline
-  from S3DF. Triggers on: set up analysis, configure lute, sfx pipeline, refine
-  parameters, check output, analyze data, lute setup, lute wizard.
+  and ask-cctbx-xfel for SFX parameters and ask-smalldata for SmallData parameters.
+  No bridge required — works entirely offline from S3DF. Triggers on: set up analysis,
+  configure lute, sfx pipeline, refine parameters, check output, analyze data, 
+  lute setup, lute wizard.
 ---
 
 # analyze-data
@@ -50,8 +51,8 @@ ask for them first, then read the file.
 
 - All commands run from S3DF — no hutch-python bridge required.
 - Data lives at `/sdf/data/lcls/ds/{hutch}/{experiment}/`.
-- LUTE output lives at `/sdf/data/lcls/ds/{hutch}/{experiment}/results/lute_output/`.
-- Jobs submit to SLURM via `@ask-slurm-s3df` or the LUTE eLog trigger.
+- LUTE output lives at `/sdf/data/lcls/ds/{hutch}/{experiment}/results/<optional_dir>/lute_output/`.
+- Jobs are submitted by the specified eLog trigger.
 
 ---
 
@@ -62,7 +63,6 @@ ask for them first, then read the file.
 | LUTE task catalog, YAML syntax, DAG structure, result passing | `@ask-lute` (reference brain) |
 | SFX crystallography parameters (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
 | SmallData detector parameters (ROI, droplet/photon, azimuthal integration) | `@ask-smalldata` |
-| MFX SFX typical defaults, merge statistics targets, failure modes | `references/sfx-analysis-defaults.md` |
-| SLURM job submission and monitoring | `@ask-slurm-s3df` |
+| SLURM job submission and monitoring | `@ask-lute/references/slurm-submission.md` |
 | File finding, XTC2 inventory, HDF5 verification | `@lcls-catalog` |
 | psana2 data inspection, detector calibration check | `@ask-lcls2` |

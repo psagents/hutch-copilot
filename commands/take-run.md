@@ -13,7 +13,7 @@ Before asking the user for anything, read the current state from:
 Fields consumed by this command:
 `hutch`, `experiment`, `sample_name`, `concentration`, `sample_delivery`,
 `delivery_details`, `photon_energy_eV`, `rep_rate_Hz`, `transmission`,
-`pump_laser`, `pump_delay_ps`, `last_run_tag`
+`pump_laser`, `pump_delay_ps`, `last_run_tag`, `lute_config`
 
 Use any non-null field directly — do not re-ask the user. Ask only for fields
 that are still `null` after reading the file. If `hutch` or `experiment` are
@@ -75,89 +75,132 @@ Wait for explicit approval before proceeding.
 
 ---
 
-## Phase 3: Configure and Begin
+## Phase 3: Run via autorun()
 
-If live bridge is available, execute in sequence. All DAQ commands are **write** class —
+If live bridge is available, issue a single `autorun()` call. All DAQ setup,
+begin, and end_run are handled internally. This is a **write** class operation —
 confirmation has already been given in Phase 2.
 
 ```python
-# Configure
-daq.configure(
-    record=True,
-    # duration OR events — use whichever was specified
-)
-```
-
-Then start with the appropriate call:
-
-```python
 # By duration (seconds):
-daq.begin(duration=180, wait=False)
+autorun(duration=180, record=True)
 
 # Or by event count:
-daq.begin(events=54000, wait=False)
+autorun(events=54000, record=True)
 ```
 
-Use `wait=False` so monitoring can proceed in parallel.
+`autorun()` blocks until the run completes — no separate `daq.end_run()` needed.
 
----
-
-## Phase 4: Monitor
-
-Poll status and data arrival. Issue the status check every ~15s while the run is active.
+**Immediately after `autorun()` returns**, query the run number:
 
 ```python
-# DAQ status
 daq.status()
 ```
 
-Parse the response for:
-- `run_number` — report it to the user ("Run 47 started")
-- `state` — `Running`, `Configured`, `Open`
-- Any error messages
-
-**Simultaneously, verify data is landing on S3DF** (check after ~30s):
-
-```bash
-ls -lt /sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/ | head -5
-```
-
-If XTC2 files are not growing within 60s of run start, warn the user:
-> "No new XTC2 files detected at `/sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/`.
-> The run may not be recording. Check DAQ status or run `/fixdaq`."
-
-Report run number and estimated progress to the user while waiting.
+Parse for `run_number` and report it to the user ("Run 47 complete").
 
 ---
 
-## Phase 5: End Run
+## Phase 4: Verify XTC2 Arrival (automatic — runs every time)
 
-When duration has elapsed or the user says "stop" / "end run" / "done":
-
-```python
-daq.end_run()
-```
-
-**This must be called even if an error occurred.** Use try/finally semantics — if any
-prior step raised an exception, still call `daq.end_run()` before surfacing the error.
-
----
-
-## Phase 6: Verify Data
-
-After end_run, confirm the data arrived:
+After `autorun()` returns and the run number is known, verify data landed on S3DF.
+This step is **mandatory and automatic** — do not skip it or make it optional.
 
 ```bash
 ls -lh /sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/ | grep "r{run_number:04d}"
 ```
 
-Report the file size and count. If files are absent or zero-size, warn the user and
-suggest `/fixdaq`.
+**Pass:** files present and non-zero size — report size and file count to the user.
 
-**Update session state:**
+**Fail (no files after 30s):** warn immediately:
+> "No XTC2 files found for run {run_number} at
+> `/sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/`.
+> The run may not have recorded. Check DAQ status or run `/fixdaq`."
+
+Retry once after an additional 30s before escalating.
+
+---
+
+## Phase 5: LUTE MANUAL Workflow Submission
+
+After XTC2 is confirmed, check whether the run_tag maps to a MANUAL-triggered
+workflow. If it does, **the agent submits the LUTE job automatically** — no
+operator action required.
+
+### Step 5.1 — Check for a MANUAL workflow match
+
+Read `lute_config` from the session state:
+```json
+"lute_config": {
+  "yaml_path": ".../{hutch}_lute.yaml",
+  "workflows": ["lute_geom_calib", "lute_sfx_crystfel", "lute_xes_analysis"],
+  "configured_at": "..."
+}
+```
+
+If `lute_config` is null or `yaml_path` is null — skip this phase silently.
+
+Match `run_tag` to a workflow using this table:
+
+| run_tag | MANUAL workflow | Trigger |
+|---|---|---|
+| `GEOM` | `geom_calib` | MANUAL |
+| `DARK` | *(none by default — DARK handled by ARP pedestal scripts)* | — |
+| `DATA`, `SFX`, `XES` | END_OF_RUN or START_OF_RUN — fires automatically | skip |
+
+If no MANUAL match → skip this phase silently.
+
+### Step 5.2 — Submit the workflow
+
+This is a **write** operation. Show the command and confirm before executing:
+
+> **I'd like to submit the LUTE `{workflow_name}` workflow for run {run_number}.**
+> ```bash
+> source /sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh
+> {results_dir}/lute_envs/lute_env_py39/bin/launch_slurm \
+>   -c {lute_output_dir}/{hutch}_lute.yaml \
+>   -W {lute_output_dir}/{workflow_name}.dag \
+>   -e {experiment} \
+>   -r {run_number} \
+>   --type {run_tag}
+> ```
+> **Shall I proceed?**
+
+On confirmation, execute the command and report the job output to the user.
+
+### Step 5.3 — Update session state
+
 ```json
 { "last_run_number": <run_number>, "last_run_tag": "<run_tag>" }
 ```
+
+---
+
+## Phase 6: Verify Data
+
+XTC2 verification was already performed in Phase 4. This phase updates session state
+and logs the run if not already done in Phase 5.
+
+Report file size and count if not already reported.
+
+---
+
+---
+
+## → coordinate-experiment handoff (mandatory — runs after every completed take-run)
+
+After Phase 5 or Phase 6 completes (or after any error that ends the run), pass
+to coordinate-experiment for ambient logging. Do this even if the run failed.
+
+Minimum entries to write:
+```markdown
+- **{HH:MM}** Run {run_number} ({run_tag}) — {duration}s / {n_events} events.
+  XTC2: {file_size} ({n_files} files). Sample: {sample_name}.
+  [If LUTE job submitted]: lute_{workflow} submitted.
+  [If XTC2 missing]: WARNING — no XTC2 files detected.
+```
+
+Update state JSON: `last_run_number`, `last_run_tag`.
 
 ---
 
@@ -174,14 +217,30 @@ suggest `/fixdaq`.
 
 ## Bridge Not Available
 
-If the bridge is not connected, provide the commands for the user to run manually
+If the bridge is not connected, provide the command for the user to run manually
 in their hutch-python session:
 
 ```python
 # In your hutch-python session:
-daq.configure(record=True)
-daq.begin(duration=180, wait=True)
-daq.end_run()
+autorun(duration=180, record=True)   # or events=N instead of duration
 ```
 
-Guide them through each step, waiting for them to confirm before proceeding to the next.
+After the run completes, **infer the run number from context** — do not ask the user:
+
+1. **Expected run number:** `last_run_number + 1` from the session state (or run 1
+   if no prior runs).
+2. **Confirm via XTC2 directory** — look for the expected run file on S3DF:
+
+```bash
+ls -lh /sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/ | grep "r{expected_run:04d}"
+```
+
+3. If the expected file is present → use that run number, update state, report to user.
+4. If not found → scan the last few entries in the directory to find the newest run:
+
+```bash
+ls -lt /sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/ | head -10
+```
+
+Parse the run number from the filename (pattern: `*-r{NNNN}-*`) and confirm with the
+user only if the run number is ambiguous.

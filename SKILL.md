@@ -140,6 +140,7 @@ Route based on the user's slash command or closest natural-language intent:
 | `/context` or "current conditions", "what is the sample", "experiment state" | Read `coordinate-experiment/SKILL.md` → `/context` summary |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
 | `/handoff` or "end of shift", "shift summary", "write handoff" | Read `coordinate-experiment/SKILL.md` → `/handoff` flow |
+| `/sync-log` or "log is empty", "sync the log", "catch up the log" | Read `coordinate-experiment/SKILL.md` → `/sync-log` flow |
 
 ### `/analyze-data` delegation
 

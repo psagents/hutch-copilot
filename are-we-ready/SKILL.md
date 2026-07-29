@@ -270,3 +270,24 @@ Always cross-reference with the hutch operator before moving any device.
 - `lightpath` may not have a full entry for every hutch.
 - Devices in maintenance or with disconnected PVs will appear as `ERROR`.
 - This is a point-in-time snapshot — states can change rapidly.
+
+---
+
+## → coordinate-experiment handoff (mandatory — runs after Phase 5 completes)
+
+After the AWR report is delivered to the user, update coordinate-experiment state:
+
+1. **Update `machine_state` in state JSON:**
+```json
+"machine_state": {
+  "beam_present": {true|false},
+  "daq_status": "{from daq.status() if available}",
+  "last_checked": "{ISO timestamp}"
+}
+```
+
+2. **Append to log only if beam is blocked or a fault was found:**
+```markdown
+- **{HH:MM}** AWR check: beam blocked — {device} IN-BEAM. Operator notified.
+```
+If all checks pass, no log entry (status read, not an operational event).

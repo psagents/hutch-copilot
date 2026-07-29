@@ -75,6 +75,12 @@ Write the JSON file every time any field changes.
   "last_run_number": null,
   "last_run_tag": null,
 
+  "lute_config": {
+    "yamls": [],
+    "workflows": [],
+    "configured_at": null
+  },
+
   "_timestamps": {},
 
   "machine_state": {
@@ -109,6 +115,9 @@ Write the JSON file every time any field changes.
 | `last_run_number` | int | Most recent run number |
 | `last_run_tag` | string | Free tag for the run type: `DATA`, `DARK`, `GEOM`, `SFX`, `SPEC`, etc. |
 | `_timestamps` | object | Maps each field name to its last-updated ISO timestamp |
+| `lute_config.yamls` | list | Absolute paths to the active config files |
+| `lute_config.workflows` | list | Registered workflow names, e.g. `["lute_xes", "lute_sfx_crystfel"]` |
+| `lute_config.configured_at` | string | ISO timestamp when `install_lute.py` last ran successfully |
 | `machine_state.beam_present` | bool | Whether beam is currently present |
 | `machine_state.daq_status` | string | e.g. `running`, `stopped`, `configuring` |
 | `machine_state.last_checked` | string | ISO timestamp of last machine state refresh |
@@ -188,7 +197,41 @@ After every user message + hutch-copilot response, classify the content and act.
 | Machine state trigger (see below) | Bridge query → update `machine_state` → write JSON |
 | Operator explicitly declares alignment success or decides to move on | Append outcome note to log |
 | Explicit operational decision: "we decided to…", "changing to…", "skipping X because…" | Append to log |
+| `analyze-data /setup` Phase 5 completes successfully | Update `lute_config` → write JSON → append to log (see below) |
+| New PV or detector parameter added to LUTE YAML that is not in the hutch reference | Backfill hutch reference (see below) |
 | Purely conversational, factual question, or status read | No action |
+
+### LUTE config tracking
+
+When `install_lute.py` completes successfully, update `lute_config` in state:
+```json
+"lute_config": {
+  "yaml_path": "/sdf/data/lcls/ds/{hutch}/{experiment}/results/lute_output/{hutch}_lute.yaml",
+  "workflows": ["lute_xes_analysis", "lute_sfx_crystfel", "lute_geom_calib"],
+  "configured_at": "2026-07-17T21:45:00"
+}
+```
+Append to log:
+```markdown
+- **{HH:MM}** LUTE configured. Workflows: {workflows}. Config: {yaml_path}
+```
+
+On session recovery, if `lute_config.yaml_path` is non-null, report it in the restored
+context summary so the operator knows analysis workflows are already registered.
+
+### Hutch reference knowledge backfill
+
+When a user adds PVs or detector parameters to the LUTE YAML that are **not already
+present** in the hutch reference (`ask-lute/references/hutches/{hutch}.md`):
+
+1. **Detect:** user edits the YAML directly, or explicitly states new PVs/aliases
+   (e.g. "I added the Von Hamos PVs", "we also save `MFX:SPEC:…` shot-to-shot").
+2. **Check** the hutch reference file for the PV or parameter — read the file first.
+3. **If missing:** append the new entry to the appropriate section of the hutch
+   reference. Use the same table format already present. Add a note:
+   `# added from {experiment} {YYYY-MM-DD}`.
+4. **Log** silently: `- **{HH:MM}** Hutch reference updated: added {N} PV(s) to {hutch}.md`
+5. **Never remove** existing entries from the hutch reference — only append.
 
 ### What counts as experiment-relevant
 
@@ -392,6 +435,59 @@ state so downstream skills do not re-ask for already-known information.
 3. Check `machine_state.last_checked` — if from a previous session, note it may be stale
    and offer to refresh via `/are-we-ready` before the next operation.
 4. Confirm restored context with the user in one line before proceeding.
+
+---
+
+## `/sync-log` Command
+
+Triggered by: `/sync-log`, "sync the log", "catch up the log", "log is empty", "why are the logs empty".
+
+Replays the current conversation to reconstruct any log entries and state updates
+that were missed by the ambient observation step.
+
+### Step 1 — Read current state
+
+Read `{experiment}_state.json` and `{experiment}_logs.md` to understand what has
+already been recorded.
+
+### Step 2 — Replay the conversation
+
+Scan back through the full conversation history from the last logged timestamp.
+For each exchange, apply the ambient observation classification rules:
+
+| What was in the conversation | Entry to write |
+|---|---|
+| Sample / energy / delivery / transmission set or changed | Condition change entry |
+| Run completed (any source — bridge, manual, inferred) | Run entry with number, tag, duration, XTC2 status |
+| LUTE configured (`install_lute.py` completed) | LUTE config entry + update `lute_config` in state |
+| AWR check with beam fault | Beam fault entry |
+| Operational decision stated | Decision entry |
+| Bridge connectivity issues, SSH failures | Infrastructure note |
+
+### Step 3 — Write missing entries
+
+Append all reconstructed entries to `{experiment}_logs.md` in chronological order.
+Prefix each reconstructed entry with `*(reconstructed)*` to distinguish from
+real-time entries:
+
+```markdown
+### Sync – {HH:MM}
+
+- **{HH:MM}** *(reconstructed)* Sample set: {sample_name}, {photon_energy_eV} eV.
+- **{HH:MM}** *(reconstructed)* LUTE configured. Workflows: {workflows}.
+- **{HH:MM}** *(reconstructed)* ...
+```
+
+### Step 4 — Reconcile state JSON
+
+Update any state fields that are out of sync with what actually happened in the
+conversation (e.g. `lute_config`, `last_run_number`, `current_phase`).
+
+### Step 5 — Confirm
+
+Report to the user:
+> *"Sync complete. Added {N} missing entries to the log (marked as reconstructed).
+> State JSON updated: {changed fields}."*
 
 ---
 
