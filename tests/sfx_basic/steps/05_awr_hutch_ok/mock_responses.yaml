@@ -1,0 +1,24 @@
+# Mock responses for step 05 — hutch readiness PASS after Jungfrau detector server restarted.
+
+responses:
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "check_hutch_ready"
+    response: |
+      Hutch Readiness Report — MFX — 2026-08-03 10:07
+      ═══════════════════════════════════════════════════════════════
+      [1] Imagers:  yag0 OUT  yag1 OUT  yag2 OUT  dg1_pim OUT  dg2_pim OUT  ✓
+      [2] Valves:   dg1_v1 OPEN  dg1_v2 OPEN  dia_v1 OPEN  mxt OPEN  ✓
+      [3] Stoppers: ST1 OUT  ST2 OUT  ✓
+      [4] DAQ:      state=Ready  Detector: Jungfrau 16M (drp-srcf-cmp001, drp-srcf-cmp002)  ✓
+      [5] XTC2:     /sdf/data/lcls/ds/mfx/mfxltest01/xtc2  accessible  ✓
+      ═══════════════════════════════════════════════════════════════
+      PASS — hutch is ready for data collection.
+
+  - pattern: "MFX:PPS:MMS:ST"
+    response: "OUT"
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

@@ -10,7 +10,7 @@ It is NOT meant to be imported from a plain Python environment.
 
 --- Sending inline from S3DF via the IPython bridge (recommended) ---
 
-    SCRIPT=/sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
+    SCRIPT=~/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
     python3 -c "
     import json, pathlib
     code = pathlib.Path('$SCRIPT').read_text() + '\ncheck_beam_ready()'
@@ -36,7 +36,7 @@ Note: ssh -L port forwarding is blocked on mfx-daq (AllowTcpForwarding restricti
 --- Install on mfx-daq for direct console use (run once from S3DF) ---
 
     ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/check_beam_ready_mfx.py" \\
-        < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
+        < ~/.claude/skills/hutch-copilot/are-we-ready/scripts/check_beam_ready_mfx.py
 
     # Then from the hutch-python console on mfx-daq:
     exec(open('/tmp/check_beam_ready_mfx.py').read())

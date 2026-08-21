@@ -1,0 +1,22 @@
+stills_process summary — mfxltest01 run 45
+══════════════════════════════════════════════════════════════
+Total images processed:     14 400
+Indexed lattices:            1 056 / 14 400  (7.3%)
+══════════════════════════════════════════════════════════════
+WARNING: indexing rate (7.3%) is below the typical SFX threshold (20-60%).
+
+Possible causes:
+  - Geometry calibration (.data files from BayFAI run 44) not yet deployed to
+    the psana calibration database — most likely cause at this stage of setup.
+    Ask instrument scientist for deploy command (calibcopy or calibman).
+  - spotfinder_threshold_dispersion_sigma_strong may be too high (default: 3).
+    Try lowering to 2.5 or 2.0 to increase spot finding sensitivity.
+  - Target unit cell not specified — stills_process defaulting to P1 indexing.
+    Provide indexing_known_symmetry_space_group and indexing_known_symmetry_unit_cell
+    in IndexCCTBXXFEL.phil_parameters for improved indexing rate.
+  - Detector alias mismatch: verify data_spec.detector_address matches
+    the output of run.detnames for this experiment and run number.
+
+Output files:
+  {work_dir}/cctbx_index_r0045.log    (this file)
+  No .expt / .refl files written (too few indexed lattices for downstream scaling).

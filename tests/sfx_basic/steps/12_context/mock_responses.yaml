@@ -1,0 +1,7 @@
+# Mock responses for step 12 — /context summary.
+# Agent reads state file and log to produce a concise shift summary.
+
+responses:
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

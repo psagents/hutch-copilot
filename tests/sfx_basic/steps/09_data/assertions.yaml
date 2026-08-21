@@ -1,0 +1,45 @@
+# Step 09 — SFX data run (5 minutes)
+# The agent must extract concentration from prompt, call autorun() with run_type='DATA'
+# (uppercase), verify XTC2, watch for LUTE jobs via squeue (unified — no branching),
+# and update state.
+
+skill_loads:
+  required:
+    - take-run/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - are-we-ready/SKILL.md
+    - commands/take-run.md   # old path must NOT be loaded
+
+state_checks:
+  last_run_number: 45
+  last_run_tag: "DATA"
+  concentration: "20 mg/mL"
+
+log_checks:
+  - contains: "Run 45"
+  - contains_one_of: ["DATA"]
+  - contains_one_of: ["6", "GB"]   # ~6 GB total XTC2
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load take-run/SKILL.md (NOT commands/take-run.md).
+    2. Extract the new concentration (20 mg/mL) from the prompt and update it in state
+       WITHOUT re-asking the user to confirm.
+    3. Check DAQ state (daq.state) and report ready.
+    4. Show a confirmation block — run_type DATA, duration 300s / 5 min, sample
+       (lysozyme, 20 mg/mL, GDVN), hutch/experiment.
+    5. Call autorun(sample='lysozyme', run_length=300, record=True, run_type='DATA')
+       via the bridge. The run_type MUST be uppercase 'DATA' — not 'data'.
+     6. After the run, extract run number 45 from the autorun() response
+        ("Run 45 complete") — do not rely on a separate get_run() call in test mode.
+    7. Verify XTC2 arrival (ls xtc2/ | grep r0045) — 3 files, ~6 GB total.
+    8. Watch for LUTE jobs via squeue (poll squeue -u mfxopr). Report any detected
+       LUTE job ID and state. Do NOT manually submit LUTE — it auto-triggers.
+    9. Update last_run_number=45, last_run_tag=DATA, and concentration=20 mg/mL in state.
+    10. NOT re-ask for hutch, experiment, photon energy — all in state.
+    11. run_type must be 'DATA' (not 'SFX', 'data', or any other variant).
+    12. After the LUTE job is confirmed triggered, remind the user to review
+        merging statistics once CCTBX completes and suggest revisiting merging_d_min
+        (e.g., check CC* at the 2.0 Å cutoff and adjust before the next data run).

@@ -1,0 +1,7 @@
+# Mock responses for step 13 — /handoff shift summary.
+# Agent reads state/log and produces a handoff note posted to the eLog.
+
+responses:
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

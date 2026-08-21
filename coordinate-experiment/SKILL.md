@@ -86,6 +86,8 @@ Write the JSON file every time any field changes.
   "machine_state": {
     "beam_present": null,
     "daq_status": null,
+    "detector_name": null,
+    "hutch_ready": null,
     "last_checked": null
   }
 }
@@ -119,7 +121,9 @@ Write the JSON file every time any field changes.
 | `lute_config.workflows` | list | Registered workflow names, e.g. `["lute_xes", "lute_sfx_crystfel"]` |
 | `lute_config.configured_at` | string | ISO timestamp when `install_lute.py` last ran successfully |
 | `machine_state.beam_present` | bool | Whether beam is currently present |
-| `machine_state.daq_status` | string | e.g. `running`, `stopped`, `configuring` |
+| `machine_state.daq_status` | string | e.g. `Ready`, `Running`, `Disconnected` |
+| `machine_state.detector_name` | string | Detector name from `daq.config_info()`, e.g. `Jungfrau 16M` |
+| `machine_state.hutch_ready` | bool | Whether all hutch-side checks passed (imagers, valves, DAQ, XTC2) |
 | `machine_state.last_checked` | string | ISO timestamp of last machine state refresh |
 
 ### Updating `_timestamps`
@@ -156,8 +160,42 @@ If the hutch and experiment are already known, try to read the state JSON:
 
 - **File not found**: ask for the following in one compact prompt:
   > *"Starting experiment log. Please confirm: hutch, experiment ID, current sample
-  > (name, concentration, delivery method), photon energy?"*
+  > (name, concentration, delivery method)?"*
   Then create the `psagents/` directory and both files.
+
+### Step 1b — EPICS context discovery (runs right after Step 1)
+
+After the hutch and experiment are known (either recovered from state or just provided
+by the user), proactively read machine PVs to discover or verify photon energy and
+rep rate. These are authoritative machine values and should not require the user to
+type them.
+
+**For LCLS-I HXR experiments (default for MFX):**
+
+```bash
+ssh -o ConnectTimeout=10 psdev caget BLD:SYS0:500:ENERGYHXBR SIOC:SYS0:ML00:CALCOUT000
+```
+
+Expected output:
+```
+BLD:SYS0:500:ENERGYHXBR   9500.3
+SIOC:SYS0:ML00:CALCOUT000 120.0
+```
+
+**For LCLS-II experiments (TMO, RIX, NEH instruments):** use `BLD:SYS0:500:ENERGYSXBR`
+for soft X-ray and `TPG:SYS0:1:DST00:RATE` for beam rate.
+
+**If the SSH call fails or returns no value:**
+- Fall back to asking the user: *"I couldn't read the photon energy PV — what is the
+  current photon energy?"*
+
+**Conflict handling:**
+- If the user already provided energy or rate (e.g. "9500 eV") and the PV returns a
+  significantly different value (> 50 eV or > 5 Hz), report the discrepancy and ask
+  the user to confirm which is correct.
+- Otherwise, silently adopt the PV values and report them as part of the init confirmation.
+
+Store the discovered values in `photon_energy_eV` and `rep_rate_Hz` in state.
 
 ### Step 2 — Open or create the log file
 
@@ -409,6 +447,8 @@ Phase: {current_phase}
 ### Machine State  [last checked: {machine_state.last_checked}]
 - Beam present: {machine_state.beam_present}
 - DAQ status: {machine_state.daq_status}
+- Detector: {machine_state.detector_name}
+- Hutch ready: {machine_state.hutch_ready}
 ```
 
 ---
@@ -423,7 +463,7 @@ state so downstream skills do not re-ask for already-known information.
 | `/take-run` | `sample_name`, `concentration`, `sample_delivery`, `delivery_details`, `photon_energy_eV`, `rep_rate_Hz`, `transmission`, `pump_laser`, `pump_delay_ps`, `last_run_tag` |
 | `/are-we-ready` | `hutch`, `experiment` |
 | `/align-beam` | `hutch`, `experiment`, `current_phase` |
-| `/analyze-data` | `hutch`, `experiment`, `photon_energy_eV`, `last_run_number`, `sample_name`, `sample_delivery` |
+| `/analyze-data` | `hutch`, `experiment`, `photon_energy_eV`, `rep_rate_Hz`, `last_run_number`, `sample_name`, `sample_delivery`, `machine_state.detector_name` |
 | `@elog-copilot` posts | `hutch`, `experiment`, current timestamp |
 
 ---

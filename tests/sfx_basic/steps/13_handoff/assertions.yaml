@@ -1,0 +1,37 @@
+# Step 13 — Shift handoff
+# The agent must generate a shift summary in the LCLS Slack format,
+# list all three runs, append to the log file, and offer to post to eLog.
+
+skill_loads:
+  required: []
+  forbidden:
+    - are-we-ready/SKILL.md
+    - analyze-data/SKILL.md
+    - commands/take-run.md
+
+files_modified:
+  - "{test_dir}/results/psagents/mfxltest01_logs.md"
+
+log_checks:
+  - contains: "Shift Handoff"
+  - contains: "Run 43"
+  - contains: "Run 44"
+  - contains: "Run 45"
+  - contains: "Run 46"
+  - contains_one_of: ["Day", "Swing", "Night"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Generate a shift summary in the LCLS Slack shift-summary format:
+       - Date line, technique (SFX), experiment (mfxltest01)
+       - Beam Conditions & Tuning section
+       - Issues and Downtime section
+       - Summary paragraph
+     2. List all four runs taken during the session:
+        run 43 (DARK / pedestal), run 44 (GEOM), run 45 (DATA), run 46 (DATA).
+    3. Mention the LUTE analysis configuration.
+    4. Ask if the summary should be posted to eLog (or present it for review first).
+    5. Append the handoff section to the beamtime log file.
+    6. Ask for any genuinely missing info (shift number, PI name, Day/Swing/Night) if
+       not already in state — but only what is truly missing.

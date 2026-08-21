@@ -1,0 +1,37 @@
+# Mock responses for step 10 — analyze-data /refine after run 45.
+# CCTBX stills_process returned 7.3% indexing rate — well below the 20-60% SFX threshold.
+# Mock LUTE log files were pre-placed in {test_dir}/results/lute_output/ during Phase 0.3.
+
+responses:
+
+  # Agent locates LUTE output files
+  - pattern: "ls.*lute_output"
+    response: |
+      cctbx_index_r0045.log
+      cctbx_scale_r0045.log
+
+  # Agent reads the CCTBX stills_process indexing log
+  - pattern: "cctbx_index_r0045|cat.*cctbx_index"
+    response: |
+      stills_process summary — mfxltest01 run 45
+      ══════════════════════════════════════════════════════════════
+      Total images processed:     14 400
+      Indexed lattices:            1 056 / 14 400  (7.3%)
+      ══════════════════════════════════════════════════════════════
+      WARNING: indexing rate (7.3%) is below the typical SFX threshold (20–60%).
+      Possible causes:
+        - Geometry calibration (.data files from BayFAI) not yet deployed to psana calib DB
+        - spotfinder_threshold_dispersion_sigma_strong too high (current default: 3)
+        - Target unit cell not specified — stills_process defaulting to P1
+        - Detector alias mismatch
+
+  # Agent reads the CCTBX scaling log
+  - pattern: "cctbx_scale_r0045|cat.*cctbx_scale"
+    response: |
+      ScaleCCTBXXFEL — mfxltest01 run 45
+      Input: 1056 integrated lattices
+      WARNING: sample size too small for reliable scaling statistics (need >= 5000).
+      Scaling incomplete — output files not written.
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

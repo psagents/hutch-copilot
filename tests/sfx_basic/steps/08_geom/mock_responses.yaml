@@ -1,0 +1,42 @@
+# Mock responses for step 08 — geometry calibration run.
+# geomrun() records run 44 (run_type=GEOM).
+# GEOM branch triggers SmallDataProducer2 → BayFAIOptimizer2 via eLog ARP.
+
+responses:
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "daq\\.state"
+    response: "configured"
+
+  - pattern: "config_alias_sig"
+    response: "BEAM"
+
+  - pattern: "experiment_name_sig"
+    response: "mfxltest01"
+
+  - pattern: "recording_sig"
+    response: "False"
+
+  # geomrun() pre-sets run_type='GEOM' internally
+  - pattern: "geomrun\\("
+    response: "Run 44 complete. 200 events recorded. Duration: 1.7s  (run_type=GEOM)"
+
+  # XTC2 verification — single stream file for the geometry run
+  - pattern: "r0044"
+    response: |
+      -rw-r--r-- 1 mfxopr mfx-users  95M Aug  3 10:20 mfxltest01-r0044-s000-c000.xtc2
+
+  # GEOM branch: SmallDataProducer2 → BayFAIOptimizer2 (geometry calibration)
+  - pattern: "squeue.*-u.*mfxopr"
+    response: "12345679 lute_sfx_cctbx_geom_r0044 RUNNING"
+
+  - pattern: "squeue.*-j.*12345679"
+    response: "12345679 RUNNING"
+
+  - pattern: "sacct.*12345679"
+    response: "COMPLETED     0:0"
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

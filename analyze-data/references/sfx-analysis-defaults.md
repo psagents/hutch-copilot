@@ -101,6 +101,60 @@ the experiment run.
 
 ---
 
+## Canonical SFX DAG — `!run_type` Branching
+
+For SFX experiments with DARK (pedestal), GEOM (geometry calibration), and DATA runs,
+use a single DAG with `!run_type` branching. The DARK branch is always **empty** — no
+analysis tasks are needed for pedestal runs.
+
+```yaml
+!LUTE_DAG
+- !run_type
+  DARK: []
+  GEOM:
+    task_name: "SmallDataProducer2"
+    slurm_params: "--nodes=4 --ntasks-per-node=50 --partition=milano --account=lcls:{experiment}"
+    next:
+    - task_name: "BayFAIOptimizer2"
+      slurm_params: "--nodes=1 --ntasks=120 --partition=milano --account=lcls:{experiment}"
+      next: []
+  DATA:
+    task_name: "CCTBXIndexer"
+    slurm_params: "--nodes=16 --ntasks-per-node=50 --partition=milano --account=lcls:{experiment}"
+    next:
+    - task_name: "CCTBXScaler"
+      slurm_params: "--nodes=8 --ntasks-per-node=50 --partition=milano --account=lcls:{experiment}"
+      next:
+      - task_name: "CCTBXMerger"
+        slurm_params: "--nodes=4 --ntasks-per-node=50 --partition=milano --account=lcls:{experiment}"
+        next: []
+```
+
+Key rules:
+- `DARK: []` — empty list, no tasks. takepeds/makepeds happen outside LUTE.
+- `GEOM` branch: SmallDataProducer2 (calibrant frame accumulation) → BayFAIOptimizer2.
+  The `.poni` output must be deployed to the psana calibration DB before DATA runs.
+- `DATA` branch: full CCTBX pipeline. SmallDataProducer2 is NOT needed here for pure SFX
+  (CCTBXIndexer reads directly from psana). Add it only if per-shot diagnostics are required.
+- Use managed task names (CCTBXIndexer, not IndexCCTBXXFEL; SmallDataProducer2, not SubmitSMD).
+- Set `wf_name = sfx_cctbx` and `--trigger END_OF_RUN`.
+
+---
+
+## merging_d_min — First-Pass Guidance
+
+`merging_d_min` controls the high-resolution cutoff for scaling and merging. An incorrect
+value produces silent empty output or poor statistics.
+
+- **Starting placeholder**: `2.0` Å is a safe first-pass value for most protein crystals.
+- **After the first DATA run**: review CC* and completeness at 2.0 Å. If CC* drops
+  sharply at 2.0 Å, the data does not extend that far — increase to 2.5 or 3.0 Å.
+  If CC* is still high (> 0.9) at the cutoff, the data may extend further — try 1.8 Å.
+- **Suggest revisiting**: after every first DATA run, explicitly remind the user to check
+  merging statistics and adjust `merging_d_min` in the LUTE YAML before the second run.
+
+---
+
 ## Common MFX SFX Failure Modes
 
 | Symptom | Most likely cause |

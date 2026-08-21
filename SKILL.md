@@ -1,15 +1,11 @@
 ---
 name: hutch-copilot
 description: >
-  LCLS beamline copilot agent. Use for any experiment operation at an LCLS or LCLS-II
-  hutch: starting/monitoring data runs (/take-run), beam readiness checks
-  (/are-we-ready), beam alignment optimization (/align-beam), and SmallData/LUTE
-  configuration (/smd-config). Triggers on: take a run, take data, collect data, start
-  a run, run the DAQ, are we ready, awr, beam blocked, beam path, align beam, optimize
-  beam, smd config, smalldata setup, lute setup, mfx-opr, beamline operator, hutch
-  operator, hutch copilot. Use whenever the user mentions an LCLS experiment name
-  (e.g. mfxl1013621), a hutch (MFX, TMO, RIX, CXI, XPP, MEC, TXI), or any live
-  beamline operation.
+  LCLS beamline copilot agent. Use for any experiment operation at an LCLS-I or LCLS-II
+  hutch: starting/monitoring data runs, beam readiness checks, beam alignment optimization, 
+  setup analysis workflows and refine then if needed, and coordinate experiment state with 
+  the operator. This skill is the main entry point for all hutch operations and delegates 
+  to sub-skills for specialized tasks.
 ---
 
 # Hutch Copilot (`hutch-copilot`)
@@ -21,6 +17,10 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 ---
 
 ## Initialization
+
+> **Exception — `/review-scenario`:** If the first user message is `/review-scenario <dir>`,
+> skip this entire Initialization section and go directly to Command Dispatch. Do NOT read
+> `coordinate-experiment/SKILL.md` or run any hutch-copilot startup logic.
 
 On the **first user interaction**, always read `coordinate-experiment/SKILL.md` and
 run its initialization flow. coordinate-experiment is active for the **entire session**
@@ -133,7 +133,8 @@ Route based on the user's slash command or closest natural-language intent:
 
 | Command / Intent | Action |
 |---|---|
-| `/take-run` or "take a run", "start collecting", "begin run" | Read `commands/take-run.md` |
+| `/review-scenario <dir>` | Read `tests/review_scenario.md` — act as **reviewer agent only**; do NOT run coordinate-experiment init or any hutch-copilot startup |
+| `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
 | `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-spectrometer.md` |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
@@ -161,7 +162,7 @@ Classify every action before executing. This protocol is mandatory for all comma
 ### Read-Only (execute without confirmation)
 
 - Position queries: `.position`, `.get()`, `.read()`, `.inserted`, `.removed`
-- Status checks: `daq.status()`, `daq.config_info()`, process listing
+- Status checks: `daq.state`, `daq.config_alias_sig.get()`, `daq.recording_sig.get()`, `daq.experiment_name_sig.get()`, process listing
 - File reads: `ls`, `df`, log tailing
 - PV reads: `caget`, `camonitor -n 1`
 - HAPPI / lightpath queries
@@ -170,6 +171,7 @@ Classify every action before executing. This protocol is mandatory for all comma
 
 - Device moves: `.mv()`, `.set()`, `.move()`, `.insert()`, `.remove()`
 - DAQ control: `daq.begin()`, `daq.configure()`, `daq.end_run()`, `daq.connect()`
+- Run commands: `autorun()`, `geomrun()`, `takepeds()`, `makepeds` (via SSH)
 - File writes: YAML edits, log posts, config changes
 - DAQ process restarts
 
@@ -198,6 +200,7 @@ skip per-command confirmation for that class within the conversation.
 
 | Task | Skill |
 |---|---|
+| DAQ runs (DARK/GEOM/DATA), DAQ check, XTC2 verify, LUTE monitoring | `take-run/` sub-skill |
 | Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
 | CDS config files (`/cds/`), happi DB, conf.yml, presets, controls machines | `bridge-to-cds/` sub-skill |
 | LUTE analysis setup, calibration, refinement, job monitoring | `analyze-data/` sub-skill |

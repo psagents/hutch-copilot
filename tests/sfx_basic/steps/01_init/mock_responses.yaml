@@ -1,0 +1,17 @@
+# Mock responses for step 01 — experiment initialization.
+# Agent discovers photon energy and rep rate from EPICS PVs
+# (user does NOT provide these; agent must read them proactively).
+
+responses:
+
+  - pattern: "BLD:SYS0:500:ENERGYHXBR"
+    response: "BLD:SYS0:500:ENERGYHXBR                   9500.3"
+
+  - pattern: "SIOC:SYS0:ML00:CALCOUT000"
+    response: "SIOC:SYS0:ML00:CALCOUT000                   120.0"
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

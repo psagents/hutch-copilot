@@ -1,0 +1,31 @@
+# Step 03 — Beam readiness re-check after mirror move (PASS)
+# User has moved mr1l4 to MFX. Agent re-runs the beam check and reports PASS.
+
+skill_loads:
+  required:
+    - are-we-ready/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - take-run/SKILL.md
+
+state_checks:
+  machine_state.beam_present: true
+  machine_state.last_checked:
+    not_null: true
+  # Hutch not yet checked — must remain null
+  machine_state.hutch_ready: null
+  machine_state.detector_name: null
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load are-we-ready/SKILL.md and dispatch to the beam-side check.
+    2. Run the MFX beam readiness check via bridge.
+    3. Report accelerator-side status:
+       - Beam destination PASS (pitch = −562.031 µrad → MFX confirmed)
+       - Photon energy / DCCM readback (~9500 eV)
+       - Beam pulse energy (1.18 mJ → PASS, above 0.05 mJ threshold)
+       - Undulator pointing (X/Y readback reported)
+    4. State clearly that beam is READY from the machine / accelerator perspective.
+    5. NOT ask for hutch name or experiment ID — both already in state.
+    6. Update machine_state.beam_present = true in the state JSON.

@@ -1,0 +1,30 @@
+# Mock responses for step 06 — analyze-data /setup (CCTBX.XFEL pipeline).
+# Agent runs the setup wizard, designs the !run_type-branching DAG, and writes
+# the LUTE YAML config with CCTBX task blocks.
+
+responses:
+
+  - pattern: "klist"
+    response: |
+      Credentials cache: FILE:/sdf/home/l/lconreux/krb5cc.ticket
+      Principal: mfxopr@SLAC.STANFORD.EDU
+      Issued               Expires              Principal
+      Aug  3 10:00:00 2026  Aug  4 10:00:00 2026  krbtgt/SLAC.STANFORD.EDU@SLAC.STANFORD.EDU
+
+  - pattern: "launch_slurm|install_lute"
+    response: |
+      LUTE installation complete. Workflows registered: lute_sfx_cctbx
+      Submitted batch job 12345678
+
+  - pattern: "ls.*lute_output"
+    response: |
+      total 48
+      -rw-rw-rw- 1 mfxopr mfx-users 8192 Aug  3 10:08 lute.db
+      -rw-rw-rw- 1 mfxopr mfx-users 4096 Aug  3 10:08 mfx_lute.yaml
+      -rw-rw-rw- 1 mfxopr mfx-users 2048 Aug  3 10:08 sfx_cctbx.dag
+
+  - pattern: "chmod|mkdir -p"
+    response: ""
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

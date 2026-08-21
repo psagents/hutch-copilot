@@ -1,0 +1,50 @@
+# Mock responses for step 09 — first SFX data run (run 45).
+# autorun() with run_type='DATA' (uppercase required by LUTE).
+# DATA branch triggers CCTBXIndexer → CCTBXScaler → CCTBXMerger via eLog ARP.
+# CCTBX pipeline is long-running — job shows RUNNING when polled (realistic).
+
+responses:
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "daq\\.state"
+    response: "configured"
+
+  - pattern: "config_alias_sig"
+    response: "BEAM"
+
+  - pattern: "experiment_name_sig"
+    response: "mfxltest01"
+
+  - pattern: "recording_sig"
+    response: "False"
+
+  # DATA run — autorun with run_type='DATA' (uppercase required)
+  - pattern: "autorun\\(.*run_type\\s*=\\s*['\"]DATA['\"]"
+    response: "Run 45 complete. 36000 events recorded. Duration: 300.1s  (run_type=DATA)"
+
+  # Generic autorun fallback (catches other signatures)
+  - pattern: "autorun\\("
+    response: "Run 45 complete. Events recorded."
+
+  # XTC2 verification — three stream files (~6 GB total)
+  - pattern: "r0045"
+    response: |
+      -rw-r--r-- 1 mfxopr mfx-users 2.1G Aug  3 10:35 mfxltest01-r0045-s000-c000.xtc2
+      -rw-r--r-- 1 mfxopr mfx-users 2.0G Aug  3 10:35 mfxltest01-r0045-s000-c001.xtc2
+      -rw-r--r-- 1 mfxopr mfx-users 1.9G Aug  3 10:35 mfxltest01-r0045-s000-c002.xtc2
+
+  # DATA branch: CCTBXIndexer pipeline triggered — RUNNING (takes hours for large run)
+  - pattern: "squeue.*-u.*mfxopr"
+    response: "23456789 lute_sfx_cctbx_data_r0045 RUNNING"
+
+  - pattern: "squeue.*-j.*23456789"
+    response: "23456789 RUNNING"
+
+  # Still running when re-polled — realistic for large CCTBX jobs
+  - pattern: "sacct.*23456789"
+    response: "RUNNING    -"
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

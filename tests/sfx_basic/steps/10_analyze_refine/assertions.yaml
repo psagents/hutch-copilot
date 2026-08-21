@@ -1,0 +1,41 @@
+# Step 10 — analyze-data /refine after run 45
+# CCTBX stills_process returned 7.3% indexing rate (1056/14400 images) — well below
+# the 20-60% typical SFX threshold. The agent must identify the problem, give concrete
+# recommendations, and suggest a second data run.
+
+skill_loads:
+  required:
+    - analyze-data/SKILL.md
+    - analyze-data/commands/refine.md
+  forbidden:
+    - are-we-ready/SKILL.md
+    - take-run/SKILL.md
+
+state_checks:
+  # Run number unchanged — analyzing existing output, not collecting
+  last_run_number: 45
+  last_run_tag: "DATA"
+
+log_checks:
+  - contains_one_of: ["7.3", "7.3%", "indexing rate", "1056"]
+  - contains_one_of: ["low", "below", "insufficient", "WARNING", "threshold"]
+  - contains_one_of: ["geometry", "calib", "sigma", "recommend", "another run", "second run"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load analyze-data/SKILL.md and commands/refine.md.
+    2. Locate and read the CCTBX output files in the lute_output directory.
+    3. Report the key metric: 7.3% indexing rate (1056/14400 images indexed).
+    4. Identify this as below the acceptable threshold (typical SFX: 20-60%).
+    5. Provide at least 2 concrete, actionable recommendations chosen from:
+       - Deploy the BayFAI geometry calibration .data files to the psana calib DB
+         before the next run (most likely cause at this stage of setup)
+       - Lower spotfinder_threshold_dispersion_sigma_strong in IndexCCTBXXFEL
+       - Provide the target unit cell / space group so stills_process does not default to P1
+       - Verify the detector alias matches confirmed run.detnames output
+       - Inspect a single frame to confirm diffraction rings are visible
+    6. Explicitly recommend taking another data run to validate the parameter fix.
+    7. NOT re-ask for hutch, experiment, or run number — all already in state.
+    8. Append the analysis finding and recommendation to the beamtime log.
+    9. NOT claim the results are acceptable — 7.3% is clearly insufficient for SFX.

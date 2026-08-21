@@ -1,0 +1,36 @@
+# Step 02 — Beam readiness FAIL (beam at MEC)
+# The agent runs the beam check, detects that mr1l4 pitch (819.156 µrad) routes beam to MEC,
+# reports the failure, and tells the user to move the mirror to MFX before proceeding.
+
+skill_loads:
+  required:
+    - are-we-ready/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - take-run/SKILL.md
+
+state_checks:
+  machine_state.beam_present: false
+  machine_state.last_checked:
+    not_null: true
+  # Hutch not yet checked — must remain null
+  machine_state.hutch_ready: null
+  machine_state.detector_name: null
+
+log_checks:
+  - contains_one_of: ["MEC", "819"]
+  - contains_one_of: ["FAIL", "not ready", "NOT READY", "beam destination"]
+  - contains_one_of: ["mr1l4", "pitch", "mirror", "-562"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load are-we-ready/SKILL.md and run the beam check via bridge.
+    2. Report that the beam destination check FAILED: pitch = 819.156 µrad routes beam to MEC.
+    3. Correctly identify MEC as the destination (not "unknown" — 819 µrad is within 10 µrad
+       of MEC_PITCH = 819.2, so the script code path returns the explicit MEC message).
+    4. Tell the user to move mr1l4 mirror to approximately −562 µrad to route beam to MFX.
+    5. Set machine_state.beam_present = false in the state JSON.
+    6. Log the fault with timestamp (MEC destination, operator notified).
+    7. NOT proceed to hutch checks — beam check failed, hard stop.
+    8. NOT ask for hutch name or experiment ID — both already in state from step 01.

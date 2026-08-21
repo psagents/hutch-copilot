@@ -1,0 +1,60 @@
+# Step 01 — Experiment initialization + EPICS context discovery
+# The agent receives the first prompt, initializes coordinate-experiment,
+# creates the state JSON and log file, then proactively reads EPICS PVs
+# (BLD:SYS0:500:ENERGYHXBR and SIOC:SYS0:ML00:CALCOUT000) to discover
+# photon energy and rep rate — neither is provided in the user prompt.
+
+skill_loads:
+  required:
+    - coordinate-experiment/SKILL.md
+  forbidden:
+    - are-we-ready/SKILL.md
+    - analyze-data/SKILL.md
+    - commands/take-run.md
+
+state_checks:
+  hutch: "mfx"
+  experiment: "mfxltest01"
+  # Energy and rate are discovered from EPICS, not from the user prompt
+  photon_energy_eV:
+    not_null: true
+  rep_rate_Hz:
+    not_null: true
+  sample_name:
+    contains_one_of: ["lysozyme"]
+  sample_delivery:
+    contains_one_of: ["gdvn", "jet", "liquid"]
+  # Downstream fields — nothing should be set yet
+  lute_config.configured_at: null
+  last_run_number: null
+  last_run_tag: null
+  machine_state.beam_present: null
+  # Detector name is not discoverable in init (comes from step 03 hutch check)
+  machine_state.detector_name: null
+
+files_created:
+  - "{test_dir}/results/psagents/mfxltest01_state.json"
+  - "{test_dir}/results/psagents/mfxltest01_logs.md"
+
+log_checks:
+  - contains: "lysozyme"
+  - contains_one_of: ["GDVN", "gdvn", "liquid jet"]
+  # Energy and rate should appear in the log (discovered from EPICS)
+  - contains_one_of: ["9500", "9500.3"]
+  - contains_one_of: ["120 Hz", "120.0 Hz", "120Hz"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load coordinate-experiment (reads coordinate-experiment/SKILL.md).
+    2. Record experiment context from the user prompt: hutch (MFX), experiment ID
+       (mfxltest01), sample (lysozyme, GDVN jet).
+    3. Proactively read EPICS PVs to discover photon energy and rep rate — it must
+       issue a caget or bridge call for BLD:SYS0:500:ENERGYHXBR and
+       SIOC:SYS0:ML00:CALCOUT000 (or equivalent), since the user did NOT provide these.
+    4. Report the discovered photon energy (~9500 eV) and rep rate (~120 Hz) to the user.
+    5. NOT ask for photon energy or rep rate as a question if they can be read from EPICS.
+    6. NOT ask for information that was already provided in the prompt (hutch, experiment
+       ID, sample name, delivery method).
+    7. Create the state JSON file and the beamtime log file.
+    8. Be concise — confirmation should be two to four lines at most.

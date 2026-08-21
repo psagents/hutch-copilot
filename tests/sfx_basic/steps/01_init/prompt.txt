@@ -1,0 +1,1 @@
+Hi, we are starting an SFX experiment at MFX. The experiment ID is mfxltest01. Sample is lysozyme in a GDVN liquid jet.

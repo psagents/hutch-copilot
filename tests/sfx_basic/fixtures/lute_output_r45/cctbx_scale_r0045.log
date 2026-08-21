@@ -1,0 +1,11 @@
+ScaleCCTBXXFEL — mfxltest01 run 45
+══════════════════════════════════════════════════════════════
+Input integrated lattices:   1 056
+WARNING: sample size too small for reliable scaling statistics.
+  Minimum recommended: 5 000 lattices for first-pass statistics.
+  Current: 1 056 lattices — below threshold.
+
+Scaling incomplete — output .expt/.refl files not written.
+Downstream MergeCCTBXXFEL step will not run (no input available).
+══════════════════════════════════════════════════════════════
+Action required: improve indexing rate before re-running the pipeline.

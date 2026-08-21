@@ -1,0 +1,46 @@
+# Mock responses for step 11 — second SFX data run (run 46).
+# Same structure as step 09_data.  CCTBX pipeline job appears as RUNNING (takes hours).
+
+responses:
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "daq\\.state"
+    response: "configured"
+
+  - pattern: "config_alias_sig"
+    response: "BEAM"
+
+  - pattern: "experiment_name_sig"
+    response: "mfxltest01"
+
+  - pattern: "recording_sig"
+    response: "False"
+
+  # DATA run — autorun with run_type='DATA' (uppercase required)
+  - pattern: "autorun\\(.*run_type\\s*=\\s*['\"]DATA['\"]"
+    response: "Run 46 complete. 36000 events recorded. Duration: 300.4s  (run_type=DATA)"
+
+  # Generic autorun fallback
+  - pattern: "autorun\\("
+    response: "Run 46 complete. Events recorded."
+
+  - pattern: "r0046"
+    response: |
+      -rw-r--r-- 1 mfxopr mfx-users 2.2G Aug  3 11:05 mfxltest01-r0046-s000-c000.xtc2
+      -rw-r--r-- 1 mfxopr mfx-users 2.1G Aug  3 11:05 mfxltest01-r0046-s000-c001.xtc2
+      -rw-r--r-- 1 mfxopr mfx-users 2.0G Aug  3 11:05 mfxltest01-r0046-s000-c002.xtc2
+
+  # DATA branch: CCTBXIndexer → CCTBXScaler → CCTBXMerger (RUNNING — takes hours)
+  - pattern: "squeue.*-u.*mfxopr"
+    response: "34567890 lute_sfx_cctbx_data_r0046 RUNNING"
+
+  - pattern: "squeue.*-j.*34567890"
+    response: "34567890 RUNNING"
+
+  - pattern: "sacct.*34567890"
+    response: "RUNNING    -"
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

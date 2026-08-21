@@ -1,0 +1,41 @@
+# Step 08 — Geometry calibration run
+# The agent must load take-run/SKILL.md, check DAQ state, confirm, call geomrun()
+# (NOT autorun — geomrun pre-sets run_type='GEOM'), verify XTC2, then watch for
+# LUTE jobs via squeue (unified monitoring — no manual LUTE submission).
+
+skill_loads:
+  required:
+    - take-run/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - are-we-ready/SKILL.md
+    - commands/take-run.md   # old path must NOT be loaded
+
+state_checks:
+  last_run_number: 44
+  last_run_tag: "GEOM"
+
+log_checks:
+  - contains: "Run 44"
+  - contains_one_of: ["GEOM", "geometry"]
+  - contains_one_of: ["XTC2", "xtc2", ".xtc2"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load take-run/SKILL.md (NOT commands/take-run.md).
+    2. Check DAQ state (daq.state) and report ready.
+    3. Show a confirmation block — run_type GEOM, duration (200 events → estimated
+       time at rep rate), hutch/experiment.
+     4. Call geomrun() via the bridge (NOT autorun — geomrun pre-sets run_type='GEOM'
+        internally; the agent must NOT pass run_type as an argument). Confirm to the
+        user that this run will be tagged GEOM as required by LUTE.
+     5. After the run, extract run number 44 from the geomrun() response
+        ("Run 44 complete") — do not rely on a separate get_run() call in test mode.
+    6. Verify XTC2 arrival (ls xtc2/ | grep r0044) — 1 file, 95 MB.
+    7. Watch for LUTE jobs via squeue (poll squeue -u mfxopr after run completion).
+       Report job ID and state if found. Do NOT manually submit LUTE — LUTE handles
+       GEOM via its run_type routing automatically.
+    8. Update last_run_number=44 and last_run_tag=GEOM in state.
+    9. NOT re-ask for hutch, experiment, sample, or energy.
+    10. NOT attempt to manually submit a geom_calib LUTE job — LUTE auto-triggers.

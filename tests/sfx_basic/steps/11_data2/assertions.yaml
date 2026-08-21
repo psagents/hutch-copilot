@@ -1,0 +1,36 @@
+# Step 11 — Second SFX data run (run 46) after parameter adjustment
+# The user takes a second 5-minute data run following the analyze-data /refine
+# recommendations from step 10. Same DAQ flow as step 09_data, run number is 46.
+
+skill_loads:
+  required:
+    - take-run/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - are-we-ready/SKILL.md
+    - commands/take-run.md
+
+state_checks:
+  last_run_number: 46
+  last_run_tag: "DATA"
+
+log_checks:
+  - contains: "Run 46"
+  - contains_one_of: ["DATA"]
+  - contains_one_of: ["XTC2", "xtc2", ".xtc2"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load take-run/SKILL.md (NOT commands/take-run.md).
+    2. Check DAQ state (daq.state) and report configured/ready.
+    3. Show a confirmation block — run_type DATA, duration 300s / 5 min,
+       sample lysozyme (from state), hutch/experiment.
+    4. Call autorun() with run_type='DATA' (uppercase — LUTE branches on this).
+    5. Extract run number 46 from the autorun() response ("Run 46 complete").
+    6. Verify XTC2 arrival (ls xtc2/ | grep r0046) — 3 files (~6.3 GB total).
+    7. Detect LUTE job via squeue (job 34567890 RUNNING) — report job ID and state.
+    8. Note that CCTBX indexing is running and will take time to complete.
+    9. Update last_run_number=46 and last_run_tag=DATA in state JSON.
+    10. NOT re-ask for hutch, experiment, sample, or energy — all in state.
+    11. run_type must be 'DATA' (uppercase) in the autorun() call.

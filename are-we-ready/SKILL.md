@@ -1,11 +1,43 @@
-# /are-we-ready — Beampath Status
+---
+name: are-we-ready
+description: >
+  Beampath and hutch readiness sub-skill for hutch-copilot. Checks whether beam
+  is unobstructed (Phases 1–5: HAPPI/lightpath device states, MPS stoppers,
+  attenuators, undulator pointing) and whether the hutch is ready for data collection
+  (Phase H: imagers, valves, stoppers, DAQ status, XTC2 path). All checks are
+  read-only. Triggers on: /are-we-ready, /awr, /awr-beam, /awr-hutch, are we ready,
+  is beam blocked, beampath status, why don't we see beam, what's blocking the beam,
+  are we ready beam wise, are we ready hutch wise, is the hutch ready, is the DAQ
+  ready, are the data flows up.
+---
+
+# /are-we-ready
+
+You are the beampath and hutch readiness sub-skill of `hutch-copilot`. You run
+read-only checks to determine whether beam is unobstructed through the beamline
+and whether the hutch is ready for data collection. You do not move any devices —
+all actions are status reads only.
 
 Triggered by: `/awr`, `/are-we-ready`, "are we ready", "is beam blocked",
-"beampath status", "why don't we see beam", "what's blocking the beam", `awr {hutch}`.
+"beampath status", "why don't we see beam", "what's blocking the beam", `awr {hutch}`,
+"are we ready beam wise", "are we ready hutch wise", "is the hutch ready",
+"is the DAQ ready", "are the data flows up".
 
-Checks the LCLS beampath for the given hutch — querying which lightpath devices
-are inserted, removed, or transmitting — and reports what may be blocking beam
-delivery. All checks are **read-only**.
+All checks are **read-only**.
+
+---
+
+## Command Routing
+
+This skill handles two distinct readiness domains. Route based on the trigger:
+
+| Trigger | Action |
+|---|---|
+| `/awr-beam`, "beam ready", "machine ready", "accelerator side", "are we ready beam wise" | **Beam checks only** → Phases 1–5, then handoff |
+| `/awr-hutch`, "hutch ready", "daq ready", "data flows", "instrument side", "are we ready hutch wise" | **Hutch checks only** → Phase H, then handoff |
+| `/are-we-ready` or `/awr` (bare, no qualifier) | **Both** → run beam checks (Phases 1–5) first, then hutch checks (Phase H), then handoff |
+
+When running both, present a single combined report with two clearly labelled sections.
 
 ---
 
@@ -263,6 +295,81 @@ Always cross-reference with the hutch operator before moving any device.
 
 ---
 
+## Phase H: Hutch Readiness Check  *(hutch-side path)*
+
+Checks the instrument-side state: optics out of beam, valves open, stoppers cleared,
+DAQ configured and ready, and the data-flow path (XTC2 directory) accessible.
+Run this phase for `/awr-hutch` or as the second half of a bare `/are-we-ready`.
+
+### H.1 — Run hutch-readiness script (MFX)
+
+For **MFX**, a dedicated hutch-readiness script is available at
+`hutch-copilot/are-we-ready/scripts/check_hutch_ready_mfx.py`.
+
+```bash
+SCRIPT=/sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/are-we-ready/scripts/check_hutch_ready_mfx.py
+python3 -c "
+import json, pathlib
+code = pathlib.Path('$SCRIPT').read_text() + '\ncheck_hutch_ready()'
+print(json.dumps({'code': code}))
+" | ssh -o ConnectTimeout=60 -J psdev mfx-daq "python3 -c \"
+import socket, json, sys
+s = socket.socket()
+s.connect(('localhost', 9999))
+s.sendall(sys.stdin.buffer.read())
+s.shutdown(socket.SHUT_WR)
+data = b''
+while True:
+    chunk = s.recv(65536)
+    if not chunk: break
+    data += chunk
+resp = json.loads(data.decode())
+print(resp.get('output', resp.get('error', '')))
+\""
+```
+
+For other hutches, generate an equivalent script using `happi` or `lightpath` device
+objects available in that hutch's Python session.
+
+### H.2 — What it checks
+
+| # | Check | Type | Pass condition |
+|---|-------|------|----------------|
+| 1 | **Imagers / YAGs** | WARNING | All imagers (yag0, yag1, yag2, dg1_pim, dg2_pim, dia_pim) `.removed` |
+| 2 | **Valves** | INFO | dg1×2, dia×2, dvd, mxt valve states reported |
+| 3 | **Stoppers** | CRITICAL | `MFX:PPS:MMS:ST1:STATE` and `ST2:STATE` both `OUT` |
+| 4 | **DAQ status** | CRITICAL | `daq.status()` → state not `Disconnected`; `daq.config_info()` → detector listed |
+| 5 | **XTC2 path** | INFO | Data path `/sdf/data/lcls/ds/{hutch}/{experiment}/xtc2/` exists and is accessible |
+
+Returns `True` if all CRITICAL checks pass.
+
+### H.3 — Report format
+
+```
+Hutch Readiness Report — MFX — {timestamp}
+══════════════════════════════════════════════════════════════
+[1] Imagers:  yag0 OUT  yag1 OUT  yag2 OUT  ✓
+[2] Valves:   dg1_v1 OPEN  dia_v1 OPEN  mxt OPEN  ✓
+[3] Stoppers: ST1 OUT  ST2 OUT  ✓
+[4] DAQ:      state=Ready  Detector: {detector_name} ({drp_nodes})  ✓
+[5] XTC2:     {xtc2_path}  accessible  ✓
+══════════════════════════════════════════════════════════════
+PASS — hutch is ready for data collection.
+```
+
+### H.4 — Diagnose blockers
+
+- **Stopper IN-BEAM** — hard block; requires operator + PPS authorization.
+- **DAQ Disconnected** — the DAQ must be connected before data collection.
+  Inform the user; do not attempt `daq.connect()` without explicit confirmation.
+- **DAQ configured but no detector listed** — misconfigured DAQ session.
+  Operator should reconfigure before running.
+- **XTC2 path missing** — GPFS not mounted or experiment directory not provisioned.
+  Escalate to LCLS computing support.
+- **Imager IN-BEAM** — usually removable by operator; check if intentional.
+
+---
+
 ## Known Limitations
 
 - Device classification (blocking vs. diagnostic) may not be perfect — human
@@ -273,21 +380,38 @@ Always cross-reference with the hutch operator before moving any device.
 
 ---
 
-## → coordinate-experiment handoff (mandatory — runs after Phase 5 completes)
+## → coordinate-experiment handoff (mandatory — runs after all checks complete)
 
-After the AWR report is delivered to the user, update coordinate-experiment state:
+After every AWR report is delivered, update the coordinate-experiment state JSON.
+Update only the fields that were checked in this invocation.
 
-1. **Update `machine_state` in state JSON:**
+### After beam checks (Phases 1–5):
+
 ```json
 "machine_state": {
   "beam_present": {true|false},
-  "daq_status": "{from daq.status() if available}",
   "last_checked": "{ISO timestamp}"
 }
 ```
 
-2. **Append to log only if beam is blocked or a fault was found:**
-```markdown
-- **{HH:MM}** AWR check: beam blocked — {device} IN-BEAM. Operator notified.
+### After hutch checks (Phase H):
+
+```json
+"machine_state": {
+  "daq_status": "{Ready | Running | Disconnected | …}",
+  "detector_name": "{detector name from daq.config_info(), e.g. 'Jungfrau 16M'}",
+  "hutch_ready": {true|false},
+  "last_checked": "{ISO timestamp}"
+}
 ```
-If all checks pass, no log entry (status read, not an operational event).
+
+### Log entry rules
+
+- **Beam blocked or MPS fault**: append timestamped note to log.
+- **Stopper IN-BEAM**: append note — stopper state, operator notified.
+- **DAQ disconnected**: append note.
+- **All checks pass**: no log entry (status read, not an operational event).
+
+```markdown
+- **{HH:MM}** AWR check: {beam blocked — {device} IN-BEAM | stopper ST1 IN | DAQ disconnected}. Operator notified.
+```

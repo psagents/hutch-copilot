@@ -1,0 +1,49 @@
+# Ground truth for the LUTE YAML generated in step 06.
+# Applied to the first *.yaml found in {test_dir}/results/lute_output/
+#
+# These are checked deterministically by the harness (no LLM judge).
+
+required_tasks:
+  - name_matches_one_of: [CCTBXIndexer, IndexCCTBXXFEL]
+    description: "CCTBX indexing (stills_process) required for DATA branch"
+
+  - name_matches_one_of: [CCTBXScaler, ScaleCCTBXXFEL]
+    description: "CCTBX scaling step required (produces .expt/.refl for downstream merge)"
+
+  - name_matches_one_of: [CCTBXMerger, MergeCCTBXXFEL]
+    description: "CCTBX merging step required for DATA branch"
+
+  - name_matches_one_of: [SmallDataProducer2, SubmitSMD]
+    description: "SmallData producer required for GEOM branch calibrant frame accumulation"
+
+  - name_matches_one_of: [BayFAIOptimizer2, BayFAI]
+    description: "BayFAI geometry optimizer required for GEOM branch"
+
+parameter_checks:
+  - task: IndexCCTBXXFEL
+    field: data_spec.detector_address
+    allowed_values: [jungfrau, Jungfrau, epix10k2M]
+    description: "Detector alias must reference Jungfrau (or epix10k2M as fallback)"
+
+  - task: MergeCCTBXXFEL
+    field: phil_parameters.merging_d_min
+    not_empty: true
+    description: "merging_d_min must be set — cctbx.xfel.merge silently produces empty output without it"
+
+  - task: ScaleCCTBXXFEL
+    field: phil_parameters.merging_d_min
+    not_empty: true
+    description: "merging_d_min required in ScaleCCTBXXFEL too (defines resolution grid)"
+
+detector_check:
+  field: detector_address
+  contains_one_of: [jungfrau, Jungfrau, epix10k]
+  description: "Detector alias must reference Jungfrau or epix10k"
+
+forbidden_tasks:
+  - CrystFELIndexer
+  - IndexCrystFEL
+  - PartialatorMerger
+  - MergePartialator
+  - HKLComparer
+  - CompareHKL

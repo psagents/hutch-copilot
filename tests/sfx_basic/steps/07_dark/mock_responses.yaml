@@ -1,0 +1,50 @@
+# Mock responses for step 07 — pedestal / DARK run.
+# takepeds() steps through all Jungfrau gain modes, records run 43.
+# DARK branch of the run_type DAG is empty — no LUTE jobs expected.
+
+responses:
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "daq\\.state"
+    response: "configured"
+
+  - pattern: "config_alias_sig"
+    response: "BEAM"
+
+  - pattern: "experiment_name_sig"
+    response: "mfxltest01"
+
+  - pattern: "recording_sig"
+    response: "False"
+
+  # takepeds() steps through 5 gain modes — 300 events each — then returns run number
+  - pattern: "takepeds"
+    response: |
+      MFX Pedestal Scan
+      ══════════════════════════════════════════
+      Step 0/5 (gain=FH)  — 300 events recorded
+      Step 1/5 (gain=FM)  — 300 events recorded
+      Step 2/5 (gain=FL)  — 300 events recorded
+      Step 3/5 (gain=AHL) — 300 events recorded
+      Step 4/5 (gain=AML) — 300 events recorded
+      ══════════════════════════════════════════
+      Pedestal scan complete. Run 43 recorded.
+
+  # makepeds deploys pedestal constants via SSH to psdev
+  - pattern: "makepeds.*mfxltest01.*43"
+    response: "makepeds: pedestals processed and deployed for run 43 (Jungfrau 16M). Calibration store updated."
+
+  # XTC2 verification — two stream files for the dark run
+  - pattern: "r0043"
+    response: |
+      -rw-r--r-- 1 mfxopr mfx-users 142M Aug  3 10:05 mfxltest01-r0043-s000-c000.xtc2
+      -rw-r--r-- 1 mfxopr mfx-users  38M Aug  3 10:05 mfxltest01-r0043-s000-c001.xtc2
+
+  # DARK branch is empty — no LUTE jobs expected after a dark run
+  - pattern: "squeue.*-u.*mfxopr"
+    response: ""
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

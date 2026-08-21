@@ -1,0 +1,1 @@
+/analyze-data /setup — we will use CCTBX.XFEL for indexing and merging. Lysozyme crystal, space group P4₃2₁2 (tetragonal), unit cell a=b=79.3 Å c=37.6 Å, α=β=γ=90°. Use merging_d_min=2.0 as a starting placeholder — we expect to refine this after reviewing the first data run.

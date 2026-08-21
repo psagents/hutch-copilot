@@ -1,0 +1,40 @@
+# Step 04 — Hutch readiness FAIL (Jungfrau not discoverable)
+# The agent runs the hutch check and finds Jungfrau 16M not discoverable in the DAQ
+# (connection timeout on the DRP nodes). It must report the failure and give actionable
+# diagnostic recommendations.
+
+skill_loads:
+  required:
+    - are-we-ready/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - take-run/SKILL.md
+
+state_checks:
+  machine_state.hutch_ready: false
+  machine_state.beam_present: true   # must still be set from step 03
+  machine_state.last_checked:
+    not_null: true
+  machine_state.detector_name: null  # cannot be set — detector not discoverable
+
+log_checks:
+  - contains_one_of: ["Jungfrau", "jungfrau", "detector"]
+  - contains_one_of: ["FAIL", "not discoverable", "ERROR", "not ready"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load are-we-ready/SKILL.md and run the hutch check via bridge.
+    2. Report that the DAQ check FAILED: Jungfrau 16M not discoverable (connection timeout 5.0s).
+    3. Set machine_state.hutch_ready = false in the state JSON.
+    4. Give at least 2 actionable diagnostic recommendations, chosen from:
+       - Check if the Jungfrau detector server is running on DRP nodes (drp-srcf-cmp001/002)
+       - Verify detector power supply and cabling to the DRP nodes
+       - Ask the instrument scientist to inspect the Jungfrau detector control GUI
+       - Try restarting the DAQ detector configuration via the DAQ interface
+       - Verify the detector alias in the DAQ config matches the expected psana alias
+       - Check network connectivity between the DAQ host and the detector nodes
+    5. NOT tell the user the hutch is ready — the check failed.
+    6. Log the fault with timestamp (Jungfrau not discoverable, operator notified).
+    7. NOT re-ask for hutch or experiment ID — both already in state.
+    8. NOT proceed to suggest data collection — hutch is not ready.

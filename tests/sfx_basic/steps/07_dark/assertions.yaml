@@ -1,0 +1,39 @@
+# Step 07 — Pedestal / DARK run
+# The agent must load take-run/SKILL.md, check DAQ state, show a confirmation,
+# call takepeds() (NOT autorun for dark runs), run makepeds via SSH,
+# verify XTC2 arrival, monitor LUTE jobs via squeue, and update state.
+
+skill_loads:
+  required:
+    - take-run/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - are-we-ready/SKILL.md
+    - commands/take-run.md   # old path must NOT be loaded
+
+state_checks:
+  last_run_number: 43
+  last_run_tag: "DARK"
+
+log_checks:
+  - contains: "Run 43"
+  - contains_one_of: ["DARK", "pedestal"]
+  - contains_one_of: ["XTC2", "xtc2", ".xtc2"]
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load take-run/SKILL.md (dispatch to the take-run skill, NOT commands/take-run.md).
+    2. Check DAQ state (daq.state) — report configured/connected as READY.
+    3. Show a confirmation block BEFORE taking the run — must identify run_type as DARK
+       and describe that takepeds() will be called (gain-mode stepping pedestal scan).
+    4. Call takepeds() via the bridge (NOT autorun — DARK runs use takepeds).
+     5. After the run, extract run number 43 from the takepeds() response
+        ("Run 43 recorded") — do not rely on a separate get_run() call in test mode.
+    6. Verify XTC2 file arrival (ls xtc2/ | grep r0043) and report file sizes (2 files).
+    7. Run makepeds via SSH to psdev: "makepeds -e mfxltest01 -r 43 -u mfxopr"
+       (or provide the command to the user for confirmation).
+    8. Monitor squeue for LUTE jobs: poll squeue -u mfxopr after run completion.
+    9. Update last_run_number=43 and last_run_tag=DARK in the state JSON.
+    10. NOT re-ask for sample, hutch, photon energy, or experiment — all in state.
+    11. NOT call autorun() for a DARK run — the correct call is takepeds().

@@ -68,6 +68,28 @@ Then ask `@ask-lute` for the appropriate reference.
 
 Build a minimal custom DAG — exactly the tasks needed, nothing more.
 
+**For SFX experiments with DARK / GEOM / DATA run types**, use `!run_type` branching
+(see canonical template in `references/sfx-analysis-defaults.md`):
+
+```yaml
+!LUTE_DAG
+- !run_type
+  DARK: []          # empty — no tasks for pedestal runs
+  GEOM:
+    task_name: "SmallDataProducer2"
+    slurm_params: "..."
+    next:
+    - task_name: "BayFAIOptimizer2"
+      slurm_params: "..."
+      next: []
+  DATA:
+    task_name: "CCTBXIndexer"   # or first task of chosen pipeline
+    slurm_params: "..."
+    next: [...]
+```
+
+For **other techniques** (no run_type branching needed), use a simple linear DAG:
+
 ```yaml
 !LUTE_DAG
 task_name: "<ManagedTaskName>"

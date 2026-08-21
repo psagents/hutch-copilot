@@ -1,0 +1,36 @@
+# Step 05 — Hutch readiness re-check after Jungfrau restart (PASS)
+# User has restarted the Jungfrau detector server on the DRP nodes.
+# Agent re-runs the hutch check and reports PASS.
+
+skill_loads:
+  required:
+    - are-we-ready/SKILL.md
+  forbidden:
+    - analyze-data/SKILL.md
+    - take-run/SKILL.md
+
+state_checks:
+  machine_state.hutch_ready: true
+  machine_state.daq_status:
+    not_null: true
+  machine_state.detector_name:
+    not_null: true
+  machine_state.last_checked:
+    not_null: true
+  # Beam state still set from step 03 — must not be cleared
+  machine_state.beam_present: true
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load are-we-ready/SKILL.md and dispatch to the hutch-side check.
+    2. Run the MFX hutch readiness check via bridge.
+    3. Report hutch-side status:
+       - Imagers / YAGs all OUT (removed from beam path)
+       - Valves open / beam path clear
+       - Stoppers OUT (ST1 and ST2)
+       - DAQ state (Ready) and the configured detector name (Jungfrau 16M)
+       - XTC2 data path accessible
+    4. State clearly that the hutch is READY for data collection.
+    5. NOT repeat accelerator-side beam checks — those were already reported in step 03.
+    6. Update machine_state.hutch_ready = true and machine_state.detector_name in state JSON.

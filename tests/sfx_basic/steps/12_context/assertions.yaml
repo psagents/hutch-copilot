@@ -1,0 +1,32 @@
+# Step 12 — Context summary
+# The agent must print the /context summary from the state JSON.
+# No sub-skill dispatch needed — coordinate-experiment is already active.
+
+skill_loads:
+  required: []
+  forbidden:
+    - are-we-ready/SKILL.md
+    - analyze-data/SKILL.md
+    - commands/take-run.md
+
+# /context is read-only — state must be unchanged from the end of step 11.
+state_checks:
+  last_run_number: 46
+  last_run_tag: "DATA"
+  machine_state.beam_present: true
+  lute_config.configured_at:
+    not_null: true
+  concentration: "20 mg/mL"
+
+llm_judge:
+  rubric: |
+    The agent must display a structured context summary that includes ALL of the
+    following (all are non-null after the previous steps):
+    1. Hutch: mfx, Experiment: mfxltest01
+    2. Sample name (lysozyme), concentration (20 mg/mL), delivery (GDVN)
+    3. Photon energy (9500 eV), rep rate (120 Hz)
+     4. Last run number (46) and tag (SFX or DATA)
+    5. Machine state: beam present (from step 02)
+    6. LUTE config: configured, at least one workflow registered
+    The agent must NOT display fields that are still null (pump laser, pump delay, etc.)
+    unless explicitly present in state.

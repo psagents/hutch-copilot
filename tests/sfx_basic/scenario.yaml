@@ -1,0 +1,93 @@
+# Scenario: sfx_basic
+# SFX experiment at MFX — 13-step fake beamtime walkthrough.
+#
+# Run with:
+#   /review-scenario tests/sfx_basic/
+#
+# See tests/review_scenario.md for reviewer instructions.
+
+name: sfx_basic
+description: >
+  Thirteen-step fake beamtime for a Serial Femtosecond Crystallography experiment at MFX.
+  Covers: experiment init with EPICS energy/rate discovery; beam readiness with a failing
+  case (beam routed to MEC) and a fix+re-check cycle; hutch readiness with a Jungfrau
+  not-discoverable failure and a fix+re-check cycle; LUTE analysis setup for a CCTBX.XFEL
+  pipeline with a single !run_type-branching DAG (DARK empty, GEOM: SmallDataProducer2→
+  BayFAIOptimizer2, DATA: CCTBXIndexer→CCTBXScaler→CCTBXMerger); a pedestal run; a
+  geometry calibration run; a first 5-minute data run; an analyze-data /refine step
+  inspecting CCTBX output (7.3% indexing rate → recommend second run); a second data
+  run; a context summary; and a shift handoff.
+
+# Entry skill the sub-agent must load on the first prompt (relative to hutch-copilot root).
+entry_skill: SKILL.md
+
+# Temporary directory for all files the sub-agent creates (state JSON, logs, LUTE YAML).
+# The reviewer creates this directory before starting the scenario and cleans it up after.
+# {timestamp} is replaced by the reviewer with a YYYYMMDD_HHMMSS string.
+test_dir: /sdf/data/lcls/ds/prj/prjlute22/results/benchmarks/hutch_copilot/tests/sfx_basic_{timestamp}
+
+# Mock responses: each step directory contains its own standalone mock_responses.yaml.
+# No global fixtures file — mocks are fully self-contained per step.
+
+# Fixed timestamp the sub-agent should use in place of real date/time calls,
+# so log entries and state timestamps are deterministic.
+fixed_time:
+  date: "2026-08-03"
+  time: "10:00"   # used for any `date +"%H:%M"` or timestamp fields
+
+# Whether all steps run in one continued sub-agent session (state carries over).
+chained: true
+
+# Clean-start constraints for the sub-agent.
+clean_start:
+  # The sub-agent must NOT read any pre-existing state files at session start.
+  # It discovers context exclusively through the conversation.
+  no_preloaded_state: true
+  # The sub-agent loads entry_skill only when processing the first user prompt,
+  # not as a pre-injected system prompt.
+  skill_on_demand: true
+
+# Ordered list of step directories (relative to this scenario directory).
+steps:
+  - steps/01_init            #  1. Experiment init + EPICS energy/rate discovery
+  - steps/02_awr_beam_fail   #  2. Beam check FAIL — beam at MEC (pitch=819 µrad)
+  - steps/03_awr_beam_ok     #  3. Mirror fixed — beam re-check PASS
+  - steps/04_awr_hutch_fail  #  4. Hutch check FAIL — Jungfrau not discoverable
+  - steps/05_awr_hutch_ok    #  5. Detector restarted — hutch re-check PASS
+  - steps/06_setup           #  6. /analyze-data /setup — CCTBX.XFEL + !run_type DAG
+  - steps/07_dark            #  7. Pedestal run (run 43, DARK branch empty)
+  - steps/08_geom            #  8. Geometry run (run 44, GEOM: SmallDataProducer2→BayFAIOptimizer2)
+  - steps/09_data            #  9. First data run (run 45, DATA: CCTBXIndexer→CCTBXScaler→CCTBXMerger)
+  - steps/10_analyze_refine  # 10. /analyze-data /refine — 7.3% indexing rate → recommend second run
+  - steps/11_data2           # 11. Second data run (run 46)
+  - steps/12_context         # 12. /context summary
+  - steps/13_handoff         # 13. /handoff shift summary
+
+# Phase 2.5 — Real LUTE integration jobs (triggered by reviewer after confirmed take-run steps).
+# Results are reported as lute_integration checks (informational — do NOT affect scenario score).
+# See review_scenario.md Phase 2.5 for full reviewer instructions.
+lute_integration:
+  dark:
+    experiment: mfx101624926
+    run: 14
+    expected: "no_jobs"          # DARK branch is empty — no analysis tasks to submit
+  geom:
+    experiment: mfx101591026
+    run: 15
+    calibrant: LaB6
+    pipeline: [SmallDataProducer2, BayFAIOptimizer2]
+    expected_geometry:
+      distance_mm: 80
+      distance_tolerance_mm: 5
+      poni2_mm: 0.2              # x-shift (beam center offset)
+      poni2_tolerance_mm: 0.05
+      poni1_mm: 0.0              # y-shift (near zero)
+      poni1_tolerance_mm: 1.0
+  data_run1:
+    experiment: mfx101624926
+    run: 36
+    pipeline: [CCTBXIndexer, CCTBXScaler, CCTBXMerger]
+  data_run2:
+    experiment: mfx101624926
+    run: 37
+    pipeline: [CCTBXIndexer, CCTBXScaler, CCTBXMerger]

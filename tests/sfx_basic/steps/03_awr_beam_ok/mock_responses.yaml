@@ -1,0 +1,24 @@
+# Mock responses for step 03 — beam readiness PASS after mirror was moved to MFX.
+# mr1l4 pitch = -562.031 µrad → within 10 µrad of MFX_PITCH (-562.035), detected as MFX.
+
+responses:
+
+  - pattern: "ConnectTimeout.*mfx-daq.*True"
+    response: "True"
+
+  - pattern: "check_beam_ready"
+    response: |
+      AWR Report — MFX — 2026-08-03 10:02
+      ══════════════════════════════════════════════════════════════
+      [1] Beam destination:   PASS  (pitch = -562.031 µrad → MFX)
+      [2] Imagers / YAGs:     yag0 OUT  yag1 OUT  yag2 OUT
+                              dg1_pim OUT  dg2_pim OUT  dia_pim OUT
+      [3] Valves:             dg1_v1 OPEN  dg1_v2 OPEN  dia_v1 OPEN
+      [4] Energy:             1.18 mJ  DCCM: 9500 eV  ✓
+      [5] Undulator pointing: X = -0.12  Y = 0.05
+      [6] Slits:              sl1l0 2.0×2.0  dg1 1.5×1.5
+      ══════════════════════════════════════════════════════════════
+      PASS — all critical checks OK. Beam is present at MFX.
+
+  - pattern: "elog|lgbk"
+    response: "eLog post submitted successfully."

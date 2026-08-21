@@ -1,0 +1,51 @@
+# Step 06 — Analysis setup (CCTBX.XFEL pipeline with !run_type-branching DAG)
+#
+# The agent runs /analyze-data /setup, designs a single DAG with !run_type branching
+# (DARK empty; GEOM: SmallDataProducer2→BayFAIOptimizer2; DATA: CCTBXIndexer→CCTBXScaler→CCTBXMerger),
+# and generates a LUTE YAML config with CCTBX task parameter blocks.
+# CrystFEL tasks must NOT appear anywhere in the output.
+
+skill_loads:
+  required:
+    - analyze-data/SKILL.md
+    - analyze-data/commands/setup.md
+  forbidden:
+    - are-we-ready/SKILL.md
+    - take-run/SKILL.md
+
+state_checks:
+  lute_config.yaml_path:
+    not_null: true
+  lute_config.configured_at:
+    not_null: true
+
+files_created:
+  - "{test_dir}/results/lute_output/*.yaml"
+
+llm_judge:
+  rubric: |
+    The agent must:
+    1. Load analyze-data/SKILL.md and analyze-data/commands/setup.md.
+    2. Run the setup wizard without re-asking for hutch, experiment, photon energy, or
+       detector — all already in state from steps 01 and 05.
+    3. Use CCTBX.XFEL as the indexing/merging pipeline (specified in prompt).
+       Must NOT propose CrystFEL (no IndexCrystFEL, no MergePartialator).
+    4. Design and present a single DAG with !run_type branching with exactly three branches:
+       - DARK: empty (next: []) — no analysis tasks needed for pedestal runs
+       - GEOM: SmallDataProducer2 (calibrant frame accumulation) → BayFAIOptimizer2 (geometry)
+       - DATA: CCTBXIndexer → CCTBXScaler → CCTBXMerger (full CCTBX SFX pipeline)
+    5. Generate a complete LUTE YAML config (two-document format) containing:
+       - Experiment header with experiment=mfxltest01, work_dir correctly set
+       - IndexCCTBXXFEL block: data_spec.detector_address set to confirmed detector alias
+       - ScaleCCTBXXFEL block: merging_d_min and output_output_dir set
+       - MergeCCTBXXFEL block: merging_d_min set, dispatch_step_list for merge-only mode
+       - SubmitSMD block: for calibrant frame accumulation (GEOM workflow)
+       - BayFAI block: calibrant, detname, center/bounds (GEOM workflow)
+    6. Use managed task names in DAG task_name fields:
+       CCTBXIndexer (not IndexCCTBXXFEL), SmallDataProducer2 (not SubmitSMD),
+       BayFAIOptimizer2 (not BayFAI).
+    7. Ask only for genuinely missing parameters — acceptable to leave merging_d_min
+       as a placeholder or ask the user once if space group / unit cell is unknown.
+    8. Write DAG and YAML files to lute_output_dir and run install_lute.py.
+    9. Update lute_config in state JSON (yamls list and configured_at timestamp).
+    10. Workflow name must reflect CCTBX (e.g., sfx_cctbx, not sfx_crystfel).
