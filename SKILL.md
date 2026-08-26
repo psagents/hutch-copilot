@@ -138,6 +138,7 @@ Route based on the user's slash command or closest natural-language intent:
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
 | `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-spectrometer.md` |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
+| "watch this experiment for new runs", "monitor the cctbx pipeline", "check if the pipeline should run", "review merge statistics", "decide on d_min", "iterate the merge", "approve dmin" | Read `cctbx-sfx-workflow/SKILL.md` |
 | `/context` or "current conditions", "what is the sample", "experiment state" | Read `coordinate-experiment/SKILL.md` → `/context` summary |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
 | `/handoff` or "end of shift", "shift summary", "write handoff" | Read `coordinate-experiment/SKILL.md` → `/handoff` flow |
@@ -152,6 +153,21 @@ When the user invokes `/analyze-data` or asks to configure analysis:
    photon energy) so `analyze-data` does not re-ask for it.
 3. `analyze-data` owns the wizard and handles calibration gating, LUTE configuration,
    and SFX parameter guidance internally — do not duplicate those steps here.
+
+### Tag-based CCTBX pipeline delegation
+
+When the user asks to watch an eLog tag for new runs, monitor an ongoing CCTBX
+pipeline, or iterate d_min on a merge:
+
+1. Read `cctbx-sfx-workflow/SKILL.md` and dispatch to its watcher/agent workflow.
+2. This is a separate track from `/analyze-data`: it is for an ongoing, tag-based,
+   multi-run CCTBX pipeline (index → scale → merge, iterated as new runs are
+   collected), not the single-run/ad-hoc LUTE setup that `analyze-data` handles.
+3. `cctbx-sfx-workflow` requires the pipeline config (master YAML, DAGs, submit
+   script) to already exist. If it does not, hand off to `@setup-cctbx-pipeline`
+   (an independent, top-level skill — not bundled here, since it is also used for
+   one-off/offline CCTBX reprocessing outside live hutch operation) to generate it
+   first, then return to `cctbx-sfx-workflow` for ongoing monitoring.
 
 ---
 
@@ -204,6 +220,8 @@ skip per-command confirmation for that class within the conversation.
 | Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
 | CDS config files (`/cds/`), happi DB, conf.yml, presets, controls machines | `bridge-to-cds/` sub-skill |
 | LUTE analysis setup, calibration, refinement, job monitoring | `analyze-data/` sub-skill |
+| Tag-based CCTBX SFX pipeline monitoring (index/scale/merge loop, d_min iteration) | `cctbx-sfx-workflow/` sub-skill |
+| One-time CCTBX SFX pipeline generation (master YAML, DAGs, submit script) — prerequisite for `cctbx-sfx-workflow/`, also used standalone for offline reprocessing | `@setup-cctbx-pipeline` |
 | LUTE reference (task catalog, YAML syntax, hutch knowledge) | `@ask-lute` |
 | SFX indexing/merging parameter guidance (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
 | XPM timing sequences, event codes, rate calculation | `@xpm-seq` |
