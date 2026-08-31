@@ -2,7 +2,8 @@
 
   hutch-state    path | get | set | audit
   hutch-bridge   ping | install | exec | run
-  hutch-resolve  devices | device | pv | beampath | detectors | daq | conf | preset | cell
+  hutch-resolve  devices | device | pv | caget | beampath | detectors | daq | conf |
+                 preset | cell | cat
   hutch-lute     sbatch | submit | status | watch | traps | kerberos | config
 """
 
@@ -180,6 +181,13 @@ def resolve_main(argv: list[str] | None = None) -> int:
     ce = sub.add_parser("cell")
     ce.add_argument("pdb")
 
+    ct = sub.add_parser("cat", help="read a /cds file from S3DF via psdev")
+    ct.add_argument("path")
+
+    cg = sub.add_parser("caget", help="read PVs from a hutch control machine")
+    cg.add_argument("--hutch", required=True)
+    cg.add_argument("pv", nargs="+")
+
     args = ap.parse_args(argv)
     try:
         if args.cmd == "devices":
@@ -200,6 +208,10 @@ def resolve_main(argv: list[str] | None = None) -> int:
             rec = resolvers.preset(args.hutch, args.device)
         elif args.cmd == "cell":
             rec = resolvers.cell(args.pdb)
+        elif args.cmd == "cat":
+            rec = resolvers.cds_file(args.path)
+        elif args.cmd == "caget":
+            rec = resolvers.pv_values(args.pv, hutch=args.hutch)
         else:
             return 2
 

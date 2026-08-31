@@ -1,293 +1,146 @@
-# /setup — Configure LUTE Analysis Workflow
+# /setup — Configure a LUTE Analysis Workflow
 
-Phases 1–4 are pure planning — no files written, no scripts run.
-Execution happens only in Phase 5 after user approval.
+Planning is conversational; writing is not. Nothing is written until the operator approves
+the plan, and then it is written by `hutch-lute config`, not by a heredoc.
 
-**Reference brain:** use `@ask-lute` for all LUTE internals (task catalog, YAML syntax,
-DAG structure, hutch+technique references, and templates).
-
-**Scripts referenced:**
-- `analyze-data/scripts/install_lute.py` — venv setup, DAG patching, eLog registration
+**Reference brain:** `@ask-lute` for LUTE internals (task catalog, YAML syntax, DAG
+structure, templates). `@ask-cctbx-xfel` for SFX parameter reasoning.
+`references/sfx-cctbx-patterns.md` for the CCTBX DAG pattern and the d_min hazard.
 
 ---
 
-## Experiment State (silent context)
+## 1. Context and paths
 
-Before asking the user for anything, read:
-```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_state.json
-```
-Use any non-null field directly. If `hutch` or `experiment` are unknown, ask first.
-
-Derived paths:
-```
-results_dir     = /sdf/data/lcls/ds/{hutch}/{experiment}/results[/{directory}]
-lute_output_dir = {results_dir}/lute_output
-config_path     = {lute_output_dir}/{hutch}_lute.yaml
-lute_envs_dir   = {results_dir}/lute_envs
+```bash
+bin/hutch-state audit --hutch "$H" --experiment "$E"
+bin/hutch-state path  --hutch "$H" --experiment "$E"
 ```
 
----
+Ask only for what is genuinely missing: `version` (default `dev`) and an optional `directory`
+under `results/`. Derived locations follow the convention
+`{results_dir}[/{directory}]/lute_output`, with `lute_envs` beside it — but get the
+experiment root from `hutch-state path`, never by interpolating it here.
 
-## Phase 1 — Gather Experiment Info
-
-| Variable | How to obtain |
-|---|---|
-| `experiment` | State file; ask only if null (e.g. `mfxl1013621`) |
-| `hutch` | State file; derive from first 3 chars of experiment as fallback |
-| `version` | Ask — default `dev` |
-| `directory` | Ask — optional subdirectory under `results/`; default empty |
-
-### Kerberos check — scoped, not unconditional
+### Kerberos — scoped, not unconditional
 
 A ticket is needed **only for eLog interaction**: resolving inputs from an eLog tag, and
-registering workflows with `install_lute.py`. Running a pipeline whose inputs are explicit
-paths needs no ticket at all. Ask the config, don't assume:
+registering workflows with `install_lute.py`. A pipeline whose inputs are explicit paths needs
+none. Ask the config rather than assuming:
 
 ```bash
 bin/hutch-lute kerberos --yaml "$CONFIG"
-# -> {"needs_kerberos": false, "why": "config supplies explicit input paths; ...",
-#     "have_ticket": false}
 ```
 
-If `needs_kerberos` is true and `have_ticket` is false, show the user:
-```
-kinit -c FILE:$HOME/krb5cc.ticket <username>@SLAC.STANFORD.EDU
-```
-If `needs_kerberos` is false, **proceed without a ticket** — do not block on it. This used
-to be an unconditional gate, which would have blocked a ten-iteration campaign that never
-touched the eLog.
+If `needs_kerberos` is true and `have_ticket` is false, show:
+`kinit -c FILE:$HOME/krb5cc.ticket <username>@SLAC.STANFORD.EDU`.
+If false, **proceed without a ticket**. This was an unconditional gate, which would have
+blocked a ten-iteration campaign that never touched the eLog.
 
 ---
 
-## Phase 2 — Analysis & DAG Planning
+## 2. Design the DAG — this is the judgment part
 
-Ask `@ask-lute`:
-> "For hutch `{hutch}`, technique `{technique}`, give me the LUTE task chain,
-> the experiment reference (`references/{hutch}/{technique}.md`), and the starting
-> template (`templates/{hutch}/{technique}.yaml`)."
+Ask `@ask-lute` for the task chain and starting template for this hutch and technique. If the
+technique is unknown, ask one framing question first (SFX, TR-SAXS, XES, RIXS, other?).
 
-If the technique is not yet known, ask a single framing question first:
-> "What technique are you running? (e.g. SFX, TR-SAXS, XES, RIXS, other?)"
+Build a **minimal** DAG — exactly the tasks needed. For SFX with DARK/GEOM/DATA run types use
+`!run_type` branching; the canonical shape is in `references/sfx-cctbx-patterns.md`. For other
+techniques a linear DAG is right.
 
-Then ask `@ask-lute` for the appropriate reference.
+Decisions that are yours, not the tool's:
 
-### Design the DAG
+- Which tasks belong in the chain at all. `SmallDataProducer2` is not needed for pure SFX.
+- `slurm_params` per task — default `--nodes=1 --ntasks-per-node=1`; ask whether more compute
+  is warranted, which it usually is for `MPIExecutor` tasks.
+- Trigger: `END_OF_RUN` for offline analysis, `START_OF_RUN` for live SmallData, `MANUAL` for
+  calibration or one-off computation.
+- `wf_name` (e.g. `sfx_cctbx`, `xes`).
 
-Build a minimal custom DAG — exactly the tasks needed, nothing more.
+Note that `slurm_params` carries no `--time` — nothing in LUTE does. If a wall-clock limit
+matters, submit through `hutch-lute sbatch --time`, which refuses to emit a script without one.
 
-**For SFX experiments with DARK / GEOM / DATA run types**, use `!run_type` branching
-(see canonical template in `references/sfx-cctbx-patterns.md`):
-
-```yaml
-!LUTE_DAG
-- !run_type
-  DARK: []          # empty — no tasks for pedestal runs
-  GEOM:
-    task_name: "SmallDataProducer2"
-    slurm_params: "..."
-    next:
-    - task_name: "BayFAIOptimizer2"
-      slurm_params: "..."
-      next: []
-  DATA:
-    task_name: "CCTBXIndexer"   # or first task of chosen pipeline
-    slurm_params: "..."
-    next: [...]
-```
-
-For **other techniques** (no run_type branching needed), use a simple linear DAG:
-
-```yaml
-!LUTE_DAG
-task_name: "<ManagedTaskName>"
-slurm_params: "<params>"
-next:
-- task_name: "<NextManagedTaskName>"
-  slurm_params: "<params>"
-  next: []
-```
-
-`slurm_params` defaults (write verbatim) to `--nodes=1 --ntasks-per-node=1`
-Ask the user if more compute power is needed, usually the case for `MPIExecutor` managed tasks.
-
-Choose a `wf_name` (e.g. `sfx_crystfel`, `sfx_cctbx`, `xss`, `xes`).
-
-Default SLURM globals (ask only if overriding): `--partition=milano`, `--account=lcls:{experiment}`
-
-`--trigger` spec per workflow:
-
-| Spec | When to use |
-|---|---|
-| `END_OF_RUN` | Offline analysis after run completes |
-| `START_OF_RUN` | SmallData in live mode |
-| `MANUAL` | Calibration or one-time computation |
-
-### Confirm analysis plan
-
-```
-Analysis plan
-──────────────────────────────────────────
-Hutch    : {hutch}  (LCLS-I/psana1 or LCLS-II/psana2)
-Chain    : {Task1} → {Task2} → ...
-Workflow : {wf_name}
-  DAG    : {lute_output_dir}/{wf_name}.dag
-  Trigger: {trigger_spec}
-
-DAG YAML:
-{full DAG YAML}
-──────────────────────────────────────────
-Proceed to YAML configuration? (yes / adjust)
-```
-
-Do not advance to Phase 3 until approved.
+Show the plan (chain, workflow name, DAG path, trigger, full DAG YAML) and get approval
+before continuing.
 
 ---
 
-## Phase 3 — YAML Configuration
+## 3. Detector alias — a human gate, not a guess
 
-Ask `@ask-lute` for the experiment template:
-> "Give me `templates/{hutch}/{technique}.yaml` — I will walk the user through
-> each field that needs verification."
-
-### Step 3.0 — Detector alias pre-flight (hard gate)
-
-Collect every detector alias before filling any field. Ask the user to run:
-
-> **psana2:** `ds = DataSource(exp='{experiment}', run={run}); print(next(ds.runs()).detnames)`
-> **psana1:** `ds = psana.DataSource('exp={experiment}:run={run}:smd'); print(next(ds.events()).keys())`
-
-Never write an alias the user has not confirmed. If uncertain, write `"# VERIFY ALIAS"`.
-
-### Step 3.1 — Walk the template
-
-For each block in the template:
-1. Ask the enabling question ("Do you need X?")
-2. Ask each `# VERIFY WITH USER` / `# FILL IN` field one at a time
-3. Show the assembled block as a checkpoint — get confirmation before moving on
-
-For SmallData optional blocks (detector algorithm, azimuthal integration, ROI design):
-delegate to `@ask-smalldata` if the choice is ambiguous.
-
-For SFX indexing/merging parameters (CrystFEL vs CCTBX.XFEL, unit cell, symmetry):
-delegate to `@ask-cctbx-xfel`. If unavailable, ask directly:
-- "CrystFEL or CCTBX.XFEL for indexing?"
-- "Is the unit cell known? If yes, provide a,b,c,α,β,γ."
-- "What is the point group / space group for merging?"
-
-### Step 3.2 — Full YAML review
-
-```
-Here is the complete YAML to be written to:
-  {config_path}
-
-{full two-document YAML}
-
-Proceed to Phase 4 (execution)? (yes / adjust)
-```
-
----
-
-## Phase 4 — Execute
-
-### Step 4.1 — Create output directory
+Resolve it, then confirm it:
 
 ```bash
-mkdir -p {lute_output_dir}
-chmod 777 {lute_output_dir}
+bin/hutch-resolve detectors --experiment "$E" --run "$RUN" \
+    --persist-to "$H" "$E" --field detectors
 ```
 
-### Step 4.2 — Write DAG file
+The tool returns every key plus `area_candidates`. **Show the list and ask which is the area
+detector** — there are many detectors per instrument and the auto-detected value can be
+ambiguous. Never write an alias the operator has not confirmed.
+
+Same rule for the other inputs: get the unit cell from `hutch-resolve cell --pdb` (never
+hand-typed), and `ls` the experiment's `results/common/` tree for geometry and mask rather
+than recalling paths — a campaign lost time to a mask path documented without its `.mask`
+extension.
+
+---
+
+## 4. Render the config
 
 ```bash
-cat > {lute_output_dir}/{wf_name}.dag << 'EOF'
-{full DAG YAML from Phase 2}
+bin/hutch-lute config \
+  --template  "$TEMPLATE" \
+  --context   context.json \
+  --set       TASK.phil_parameters.KEY=VALUE ... \
+  --whitelist-dir "$LUTE_PATH/config/templates" \
+  --out       "$CONFIG"
+```
+
+Read the report before showing anything to the operator:
+
+- **`overrides`** says `replaced` or `inserted` per override. An `inserted` where you expected
+  `replaced` means the key is misspelled — say so rather than reporting success.
+- **Unknown phil keys are refused.** `phil_parameters` is pydantic `extra='allow'`, so LUTE
+  accepts anything and the fixed jinja template silently ignores what it does not reference.
+  `--whitelist-dir` turns that invisible no-op into an error. Only pass `--no-whitelist` if
+  the operator accepts that an unknown key will be dropped.
+- The incident register runs automatically: `parallel_a2a`, `modify` in the merge step list,
+  missing merge suffixes, `phil_file` without `{{ run }}`, merge-version padding, and
+  `merging_d_min` disagreeing between the scale and merge stages.
+
+Then show the operator the rendered config and the report together, and get approval before
+step 5.
+
+---
+
+## 5. Register the workflow
+
+```bash
+mkdir -p "$LUTE_OUTPUT_DIR" && chmod 777 "$LUTE_OUTPUT_DIR"
+cat > "$LUTE_OUTPUT_DIR/$WF_NAME.dag" << 'EOF'
+{approved DAG YAML}
 EOF
-chmod 666 {lute_output_dir}/{wf_name}.dag
-```
+chmod 666 "$LUTE_OUTPUT_DIR/$WF_NAME.dag"
 
-### Step 4.3 — Write YAML configuration
-
-```bash
-cat > {config_path} << 'EOF'
-{full two-document YAML from Phase 3}
-EOF
-chmod 666 {config_path}
-```
-
-### Step 4.4 — Run install_lute.py
-
-Source psana environment first (required every time):
-
-```bash
 source /sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh
+python analyze-data/scripts/install_lute.py -e "$E" -v "$VERSION" [-D "$DIRECTORY"] \
+    -W "$WF_NAME" --trigger "$TRIGGER" [--partition milano] [--account "lcls:$E"]
 ```
 
-Then run:
+`install_lute.py` talks to the eLog, so this step **does** need a ticket. Verify afterwards:
+`lute.db` (664), `{hutch}_lute.yaml` (666), `{wf_name}.dag` (666), and the workflow appearing
+as `lute_{wf_name}` under Workflow Definitions in the eLog. Re-run with the same `-W` to
+update registration after a DAG or trigger change.
+
+---
+
+## 6. Handoff (mandatory)
 
 ```bash
-python analyze-data/scripts/install_lute.py \
-  -e {experiment} \
-  -v {version}    \
-  [-D {directory}]              \
-  -W {wf1} [{wf2} ...]          \
-  --trigger {spec1} [{spec2} ...] \
-  [--partition {partition}]     \
-  [--account {account}]
+bin/hutch-state set --hutch "$H" --experiment "$E" lute_config \
+    '{"yaml_path": "'"$CONFIG"'", "workflows": ["lute_'"$WF_NAME"'"]}' \
+    --source "install_lute.py -W $WF_NAME, verified in eLog Workflow Definitions" \
+    --kind resolved
 ```
 
-> Always pass `-D {directory}` when a subdirectory was chosen in Phase 1.
-
-### Step 4.5 — Verify
-
-```bash
-ls -la {lute_output_dir}/
-# Expected: lute.db (664), {hutch}_lute.yaml (666), {wf_name}.dag (666)
-```
-
----
-
-## Phase 5 — Verify eLog Registration
-
-```
-https://pswww.slac.stanford.edu/lgbk/lgbk/{experiment}/
-→ Workflow Definitions tab
-```
-
-Workflows appear as `lute_{wf_name}`. Re-run `install_lute.py` with the same `-W` arguments
-to update registration after a DAG or trigger change.
-
----
-
-## → coordinate-experiment handoff (mandatory after Phase 5)
-
-1. Update `lute_config` in state JSON:
-```json
-"lute_config": {
-  "yaml_path": "{config_path}",
-  "workflows": ["lute_{wf1}", ...],
-  "configured_at": "{ISO timestamp}"
-}
-```
-
-2. Append to log:
-```markdown
-- **{HH:MM}** LUTE configured. Workflows: {workflows}. Config: {config_path}
-- **Action:** Fill `# FILL IN` items remaining in the YAML (geometry, symmetry, etc.)
-```
-
-3. Check for new PVs or detector aliases added during Phase 3 not yet in
-   `@ask-lute` `references/{hutch}/{technique}.md` — backfill per the
-   coordinate-experiment knowledge backfill rule.
-
----
-
-## Quick Reference — Phase Order
-
-```
-Phase 1  Gather info       → experiment, hutch, paths, Kerberos
-Phase 2  Analysis plan     → @ask-lute for chain + DAG; user approves
-Phase 3  YAML config       → @ask-lute template; walk fields; user approves
-Phase 4  Execute           → mkdir, write DAGs, write YAML, install_lute.py
-Phase 5  Verify            → confirm workflows in eLog UI
-```
+Then pass to coordinate-experiment for logging, and note any `# FILL IN` items still
+outstanding in the config.

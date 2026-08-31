@@ -31,112 +31,32 @@ reads as its authoritative source of truth.
 
 ---
 
-## Persistent Files
+## Persistent Files and State
 
-Both files live at the top level of the experiment's data directory
-(this directory is pre-provisioned by LCLS DM for every allocated experiment):
+`hutch-state` owns both paths and the schema. Never write a path out, and never hand-format
+the JSON:
 
-| File | Path |
-|---|---|
-| State (JSON) | `/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_state.json` |
-| Log (Markdown) | `/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_logs.md` |
-
----
-
-## Canonical State Object
-
-Maintain this object in-context and keep it in sync with the state JSON file.
-Write the JSON file every time any field changes.
-
-```json
-{
-  "hutch": null,
-  "experiment": null,
-  "shift_date": null,
-  "shift_start": null,
-
-  "sample_name": null,
-  "concentration": null,
-  "sample_delivery": null,
-  "delivery_details": null,
-  "transmission": null,
-  "sample_notes": null,
-
-  "photon_energy_eV": null,
-  "pulse_energy_uJ": null,
-  "rep_rate_Hz": null,
-
-  "pump_laser": false,
-  "pump_wavelength_nm": null,
-  "pump_delay_ps": null,
-
-  "current_phase": null,
-
-  "last_run_number": null,
-  "last_run_tag": null,
-
-  "lute_config": {
-    "yamls": [],
-    "workflows": [],
-    "configured_at": null
-  },
-
-  "_timestamps": {},
-
-  "machine_state": {
-    "beam_present": null,
-    "daq_status": null,
-    "detector_name": null,
-    "hutch_ready": null,
-    "last_checked": null
-  }
-}
+```bash
+bin/hutch-state path  --hutch "$H" --experiment "$E"   # state + log + xtc2 paths
+bin/hutch-state dump  --hutch "$H" --experiment "$E"   # the whole object
+bin/hutch-state audit --hutch "$H" --experiment "$E"   # every field with age + provenance
+bin/hutch-state set   --hutch "$H" --experiment "$E" FIELD VALUE --source "..." --kind ...
 ```
 
-### Field reference
+The field list, the defaults and the per-field TTLs live in `hutchlib/state.py`. They used
+to be duplicated here as a JSON literal plus a 30-row table, which is exactly the kind of
+copy that drifts from the thing it describes.
 
-| Field | Type | Description |
-|---|---|---|
-| `hutch` | string | Hutch name, e.g. `MFX`, `RIX`, `CXI` |
-| `experiment` | string | Experiment ID, e.g. `mfxl1013621` |
-| `shift_date` | string | ISO date of the shift |
-| `shift_start` | string | `HH:MM` (24h) when this session started |
-| `sample_name` | string | Current sample name |
-| `concentration` | string | e.g. `10 mM` |
-| `sample_delivery` | string | e.g. `rayleigh jet`, `GDVN`, `tape drive`, `fixed target` |
-| `delivery_details` | string | Free text: nozzle size, tape speed, target type, etc. |
-| `transmission` | float | Attenuator transmission, 0.0–1.0 |
-| `sample_notes` | string | Optional free-text notes about the sample |
-| `photon_energy_eV` | number | Photon energy in eV |
-| `pulse_energy_uJ` | number | Pulse energy in µJ |
-| `rep_rate_Hz` | number | Repetition rate in Hz |
-| `pump_laser` | bool | Whether pump laser is active |
-| `pump_wavelength_nm` | number | Pump laser wavelength in nm |
-| `pump_delay_ps` | number | Pump–probe delay in ps |
-| `current_phase` | string | `alignment`, `calibration`, `data_collection`, `dark_run`, `maintenance` |
-| `last_run_number` | int | Most recent run number |
-| `last_run_tag` | string | Free tag for the run type: `DATA`, `DARK`, `GEOM`, `SFX`, `SPEC`, etc. |
-| `_timestamps` | object | Maps each field name to its last-updated ISO timestamp |
-| `lute_config.yamls` | list | Absolute paths to the active config files |
-| `lute_config.workflows` | list | Registered workflow names, e.g. `["lute_xes", "lute_sfx_crystfel"]` |
-| `lute_config.configured_at` | string | ISO timestamp when `install_lute.py` last ran successfully |
-| `machine_state.beam_present` | bool | Whether beam is currently present |
-| `machine_state.daq_status` | string | e.g. `Ready`, `Running`, `Disconnected` |
-| `machine_state.detector_name` | string | Detector name from `daq.config_info()`, e.g. `Jungfrau 16M` |
-| `machine_state.hutch_ready` | bool | Whether all hutch-side checks passed (imagers, valves, DAQ, XTC2) |
-| `machine_state.last_checked` | string | ISO timestamp of last machine state refresh |
+Three properties you can rely on, and must not work around:
 
-### Updating `_timestamps`
-
-Whenever a field changes, record the ISO timestamp:
-```json
-"_timestamps": {
-  "sample_name": "2026-07-16T14:30:00",
-  "photon_energy_eV": "2026-07-16T09:15:00"
-}
-```
-
----
+- **`--source` is mandatory** and `--kind` is `resolved` (read from an authoritative
+  source), `operator` (a human said so) or `inferred` (reasoning only). This is what lets a
+  later reader tell a measurement from a claim — the old schema had timestamps but no
+  source, so a value typed at 03:00 looked identical to one read off the machine.
+- **Reads past a field's TTL fail.** Don't quote a stale number silently; re-resolve, or use
+  `--stale-ok` and say how old it is.
+- **Writes are atomic and lock-serialised.** Several agents plus the operator may write
+  during a shift, so never edit the JSON by hand alongside the tool.
 
 ## Initialization Flow
 
@@ -165,37 +85,32 @@ If the hutch and experiment are already known, try to read the state JSON:
 
 ### Step 1b — EPICS context discovery (runs right after Step 1)
 
-After the hutch and experiment are known (either recovered from state or just provided
-by the user), proactively read machine PVs to discover or verify photon energy and
-rep rate. These are authoritative machine values and should not require the user to
-type them.
-
-**For LCLS-I HXR experiments (default for MFX):**
+Photon energy and rep rate are authoritative machine values; the operator should not have to
+type them. Resolve the PV, then read it from a machine that can:
 
 ```bash
-ssh -o ConnectTimeout=10 psdev caget BLD:SYS0:500:ENERGYHXBR SIOC:SYS0:ML00:CALCOUT000
+bin/hutch-resolve pv    --hutch "$H" <beam-energy-device> --suffix <field>
+bin/hutch-resolve caget --hutch "$H" <PV> <PV>
 ```
 
-Expected output:
+> **This used to read `ssh psdev caget BLD:SYS0:500:ENERGYHXBR ...`, which cannot work.**
+> EPICS CA to IOCs is firewalled from psdev — the skill's own topology notes said so while
+> this section instructed otherwise. PV reads must run on `{hutch}-control`, which is what
+> `hutch-resolve caget` does. The hardcoded PV names are gone with it: LCLS-I HXR, LCLS-II
+> SXR and per-hutch rate PVs all differ, and a list of them in prose is a list that goes
+> stale.
+
+If the resolve or the read fails, **say so and ask the operator** — do not substitute a
+remembered PV or a remembered value. Store what you get with provenance:
+
+```bash
+bin/hutch-state set --hutch "$H" --experiment "$E" photon_energy_eV 9500.3 \
+    --source "caget <PV> on ${H}-control" --kind resolved
 ```
-BLD:SYS0:500:ENERGYHXBR   9500.3
-SIOC:SYS0:ML00:CALCOUT000 120.0
-```
 
-**For LCLS-II experiments (TMO, RIX, NEH instruments):** use `BLD:SYS0:500:ENERGYSXBR`
-for soft X-ray and `TPG:SYS0:1:DST00:RATE` for beam rate.
-
-**If the SSH call fails or returns no value:**
-- Fall back to asking the user: *"I couldn't read the photon energy PV — what is the
-  current photon energy?"*
-
-**Conflict handling:**
-- If the user already provided energy or rate (e.g. "9500 eV") and the PV returns a
-  significantly different value (> 50 eV or > 5 Hz), report the discrepancy and ask
-  the user to confirm which is correct.
-- Otherwise, silently adopt the PV values and report them as part of the init confirmation.
-
-Store the discovered values in `photon_energy_eV` and `rep_rate_Hz` in state.
+**Conflict handling:** if the operator already gave a value and the PV disagrees by more than
+50 eV or 5 Hz, report both with their provenance (`operator` vs `resolved`) and ask which is
+correct. Do not silently prefer either.
 
 ### Step 2 — Open or create the log file
 
@@ -295,22 +210,19 @@ Extract from **both** the user's message and hutch-copilot's response:
 
 ## Machine State Updates (trigger-based only)
 
-Run a lightweight bridge query **only** after these specific triggers:
+Refresh machine state **only** after these triggers, and at most two bridge calls each:
 
-| Trigger | Bridge call(s) |
+| Trigger | Call |
 |---|---|
-| `/take-run` completes | `daq.status()` |
-| Beam fault or "beam blocked" mentioned | `hutch-resolve pv` then `hutch-bridge exec` |
-| Alignment operation declared complete | Hutch beam-presence PV |
-| User runs `/are-we-ready` | Full are-we-ready output → update all `machine_state` fields |
+| `/take-run` completes | `hutch-resolve daq --hutch H` |
+| Beam fault or "beam blocked" mentioned | `hutch-resolve beampath --hutch H` |
+| Alignment declared complete | `hutch-resolve beampath --hutch H` |
+| `/are-we-ready` runs | that skill writes `machine_state.*` itself — do not duplicate it |
 
-Do not invent PV names, and do not read them from a documentation table — resolve them:
+Do not invent PV names and do not read them from a documentation table — resolve them:
 `hutch-resolve pv --hutch H <device> --suffix <field>` composes the name from the happi
-prefix and reports its provenance. The hand-maintained `references/beam-status-pvs.md` was
-deleted precisely because happi *is* the PV registry.
-Maximum two bridge calls per trigger. Update `machine_state.last_checked` after every query.
-
----
+prefix and reports its provenance. `machine_state.*` carries a 600 s TTL, so `last_checked`
+bookkeeping is handled for you by `hutch-state`.
 
 ## Explicit Condition Update Flow
 
@@ -415,61 +327,23 @@ ambient-extracted notes. Those go to the log file only.
 
 ## `/context` Command
 
-When the user says `/context`, `show current conditions`, or `what are the current conditions`:
+**Do not handle `/context` here.** It is a pure lookup:
 
-Print a structured summary of the current state object. Omit fields that are `null` or
-`false`. Flag stale machine state if `last_checked` is from a previous session or
-more than 10 minutes ago.
-
-```
-## Current Experiment Context
-
-Hutch: {hutch}          Experiment: {experiment}
-Date: {shift_date}      Shift start: {shift_start}
-Phase: {current_phase}
-
-### Sample
-- Name: {sample_name}
-- Concentration: {concentration}
-- Delivery: {sample_delivery} — {delivery_details}
-- Transmission: {transmission}
-
-### Beam
-- Photon energy: {photon_energy_eV} eV
-- Rep rate: {rep_rate_Hz} Hz
-- Pulse energy: {pulse_energy_uJ} µJ
-
-### Pump Laser
-- Active: {pump_laser}
-- Wavelength: {pump_wavelength_nm} nm
-- Delay: {pump_delay_ps} ps
-
-### Last Run
-- Run #: {last_run_number}  Tag: {last_run_tag}
-
-### Machine State  [last checked: {machine_state.last_checked}]
-- Beam present: {machine_state.beam_present}
-- DAQ status: {machine_state.daq_status}
-- Detector: {machine_state.detector_name}
-- Hutch ready: {machine_state.hutch_ready}
+```bash
+bin/hutch-state audit --hutch "$H" --experiment "$E"
 ```
 
----
+Format that output — grouped as sample / beam / laser / last run / machine state, omitting
+null fields. The audit is strictly better than the prose template this section used to carry,
+because it returns each field's age and provenance, so stale values announce themselves
+instead of being printed as though current. Flag anything with `"stale": true`.
 
 ## Context Propagation
 
-When any hutch-copilot sub-skill is invoked, inject the relevant fields from the current
-state so downstream skills do not re-ask for already-known information.
-
-| Sub-skill | Fields injected |
-|---|---|
-| `/take-run` | `sample_name`, `concentration`, `sample_delivery`, `delivery_details`, `photon_energy_eV`, `rep_rate_Hz`, `transmission`, `pump_laser`, `pump_delay_ps`, `last_run_tag` |
-| `/are-we-ready` | `hutch`, `experiment` |
-| `/align-beam` | `hutch`, `experiment`, `current_phase` |
-| `/analyze-data` | `hutch`, `experiment`, `photon_energy_eV`, `rep_rate_Hz`, `last_run_number`, `sample_name`, `sample_delivery`, `machine_state.detector_name` |
-| `@elog-copilot` posts | `hutch`, `experiment`, current timestamp |
-
----
+Nothing to propagate. Sub-skills read what they need through `hutch-state` and resolve what
+is missing, so there is no list of fields to inject and no chance of a sub-skill being handed
+a value whose age it cannot see. This section used to be a per-sub-skill field table; it was
+load-bearing only because three sub-skills were reading the state file from the wrong path.
 
 ## Context Recovery on Session Reset
 

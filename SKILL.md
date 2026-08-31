@@ -67,12 +67,11 @@ and silently observes every conversation turn after that.
 
 ## Bridge Detection
 
-> **Two distinct bridges exist.**
-> - **IPython bridge** — sends Python code to a running hutch-python session on the DAQ
->   machine (mfx-daq, etc.). Covered in this section.
-> - **CDS bridge** — reads `/cds/` config files (happi DB, conf.yml, presets) or runs
->   scripts on controls machines via SSH to `psdev` / `mfx-control`. See
->   `bridge-to-cds/SKILL.md`.
+> **Three transports, one tool.** `hutch-bridge` reaches a live hutch-python session on a
+> DAQ machine; `hutch-resolve cat/conf/preset/device` reads `/cds` via `psdev`; and
+> `hutch-resolve caget` reads live PVs from `{hutch}-control` (CA is firewalled from both
+> S3DF and psdev). The network topology and its constraints are documented in
+> `hutchlib/bridge.py`, next to the code that implements them.
 
 ### Setup (once per hutch-python session)
 
@@ -138,7 +137,10 @@ the Safety Protocol below for what to show the operator.
 
 ## Command Dispatch
 
-Route based on the user's slash command or closest natural-language intent:
+Route based on the user's slash command or closest natural-language intent. Entries marked
+**Tool only** are pure lookups — call the tool and format the result; do not load a
+sub-skill for them. Everything else needs judgment or a confirmation dialogue, so read the
+sub-skill.
 
 | Command / Intent | Action |
 |---|---|
@@ -147,7 +149,7 @@ Route based on the user's slash command or closest natural-language intent:
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
 | `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so and offer `/are-we-ready` plus manual guidance via `@experimental-hutch-python`. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
-| `/context` or "current conditions", "what is the sample", "experiment state" | Read `coordinate-experiment/SKILL.md` → `/context` summary |
+| `/context` or "current conditions", "what is the sample", "experiment state" | **Tool only** — `hutch-state audit`, then format. Do not read `coordinate-experiment/SKILL.md`: the audit already returns every field with its age and provenance, which the prose summary cannot. |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
 | `/handoff` or "end of shift", "shift summary", "write handoff" | Read `coordinate-experiment/SKILL.md` → `/handoff` flow |
 | `/sync-log` or "log is empty", "sync the log", "catch up the log" | Read `coordinate-experiment/SKILL.md` → `/sync-log` flow |
@@ -218,7 +220,7 @@ conversation; it does **not** cover `beam-critical`, which is confirmed every ti
 |---|---|
 | DAQ runs (DARK/GEOM/DATA), DAQ check, XTC2 verify, LUTE monitoring | `take-run/` sub-skill |
 | Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
-| CDS config files (`/cds/`), happi DB, conf.yml, presets | `hutch-resolve` / `hutch-cds`; narrative topology in `bridge-to-cds/` |
+| CDS config files (`/cds/`), happi DB, conf.yml, presets, live PVs | `hutch-resolve cat\|conf\|preset\|device\|pv\|caget` |
 | LUTE analysis setup, refinement | `analyze-data/` sub-skill; submission + job status via `hutch-lute` |
 | LUTE reference (task catalog, YAML syntax, hutch knowledge) | `@ask-lute` |
 | SFX indexing/merging parameter guidance (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |

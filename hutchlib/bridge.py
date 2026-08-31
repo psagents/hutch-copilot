@@ -7,11 +7,33 @@ fenced code block. Two of those copies hardcoded
 ``/sdf/home/f/fpoitevi/.claude/skills/...``, so the bridge setup and both
 readiness checks were broken for every user except the original author.
 
-Three transports, matching the three LCLS environments:
+Three transports, matching the three LCLS environments. This table is the
+load-bearing part of the retired ``bridge-to-cds`` sub-skill; it lives here,
+next to the code it explains, instead of in a 313-line markdown file whose
+recipes are now ``hutch-resolve`` subcommands.
+
+  environment          hosts                    filesystems    EPICS CA to IOCs
+  -------------------  -----------------------  -------------  ----------------
+  S3DF (batch)         s3dflogin, sdf-login     /sdf           no (firewalled)
+  CDS (controls-adj.)  psdev, psusr, pslogin    /cds           no (read gateway)
+  controls network     mfx-control, cxi-control /cds           yes
 
   ipython  -> hutch-python session on a DAQ machine (oc_bridge.py on :9999)
-  psdev    -> read /cds files; Python 3.9 stdlib only, no CA access
+  psdev    -> read /cds files; Python 3.9 stdlib only, no conda, no CA
   controls -> hutch control machine; full EPICS CA
+
+Key constraints, each of which has bitten:
+
+  * ``/sdf`` is NOT mounted on psdev and ``/cds`` is NOT mounted on S3DF. The
+    only bridge is ssh, so scripts must arrive on stdin and must not name /sdf
+    paths. ``psdev_read`` refuses a /sdf path rather than failing obscurely.
+  * ``/cds`` and ``/reg/neh`` are the same filesystem; ``/cds`` is canonical and
+    ``/reg`` is a deprecated alias. Never probe both.
+  * ``caget`` is on PATH on psdev but CA connections to IOCs (172.21.x.x) are
+    blocked there, so PV reads must run on ``{hutch}-control``.
+  * Beamline names in the happi DB are UPPERCASE; filesystem hutch names are
+    lowercase. ``paths`` and ``resolvers`` normalise in opposite directions.
+  * psdev is shared: keep remote scripts short and non-blocking.
 
 The remote client is passed to ssh as a single shell-quoted argv element, so
 there is no nested-quoting hazard at all -- the reason the markdown version was

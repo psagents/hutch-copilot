@@ -129,34 +129,65 @@ bin/hutch-lute sbatch --task CCTBXIndexer --time 00:10:00 --nodes 4 --ntasks-per
 
 ---
 
+### Skill restructure — applied
+
+The test: every sub-skill gets four sections (routing / tool calls in order / **decision
+points** / handoff), and **if the decision-points section is empty it is not a sub-skill.**
+
+| Sub-skill | Before | After | Why |
+|---|---|---|---|
+| `are-we-ready` | 417 | 142 | judgment kept: ERROR is not OUT, deliberate-vs-misconfigured attenuator, when to escalate |
+| `take-run` | 403 | 154 | judgment kept: the DAQ-state gate, the confirmation, the triage table. Phases 4–5 became `hutch-lute watch` |
+| `analyze-data/commands/setup.md` | 293 | 146 | the field-by-field wizard and the heredoc writes became `hutch-lute config`; the DAG design and the detector-alias human gate stayed |
+| `coordinate-experiment` | 588 | 462 | dropped the duplicated state schema and the context-propagation table; ambient classification, `/sync-log` and `/handoff` are irreducibly model work |
+| **`bridge-to-cds`** | 313 | **deleted** | no decision points at all — pure mechanism, and it duplicated both `hutch-resolve` and the standalone `cds-bridge` skill. Its topology table now lives in `hutchlib/bridge.py`, next to the code it explains |
+
+Markdown total 2,303 -> 1,470 lines. `coordinate-experiment` lands well above the ~200 first
+estimated, and should: `/sync-log`, `/handoff`, ambient classification and the note-taking
+conventions are ~250 lines of genuine judgment. Cutting to a target number would have removed
+content the tools cannot replace.
+
+Root dispatch is now split by whether judgment is needed. `/context` is marked **Tool only**:
+it is `hutch-state audit` plus formatting, and the audit is strictly better than the prose
+template it replaces because it reports each field's age and provenance.
+
+### Two more bugs found while restructuring
+
+- **`coordinate-experiment` Step 1b instructed `ssh psdev caget BLD:SYS0:500:ENERGYHXBR ...`,
+  which cannot work.** EPICS CA to IOCs is firewalled from psdev — the skill's own topology
+  notes said so while this section instructed otherwise. PV reads must run on
+  `{hutch}-control`. Now `hutch-resolve caget`, with the hardcoded PV names gone.
+- **`resolvers.cell()` disagreed with `setup-cctbx-pipeline`'s `read_cryst1` on float
+  formatting** (`90` vs `90.0`). That skill's validation greps the unit-cell string verbatim,
+  so the spelling is load-bearing. Aligned and pinned with a test. Its docstring advertises a
+  format its code does not produce.
+
+Deleting hutch-copilot's `references/hutches/mfx.md` was right for a second reason:
+`ask-lute/references/hutches/` carries all five hutches and is the proper owner, which the
+deleted file itself said.
+
+---
+
 ## What remains, in order
 
-1. **`lute-config`** — render + `--set TASK.block.key=value` + validate. Today
-   `setup-cctbx-pipeline/render.py` has no override facility, which is why the campaign
-   needed 250 lines of YAML text surgery (`render_iter.py`). Wire
-   `traps.template_whitelist()` in so an unknown phil key is a config-time error. This is
-   the highest-value remaining item.
-2. **`lute-stats --json`** — logs → metrics with a declared schema, reporting files scanned.
+1. **`lute-stats --json`** — logs -> metrics with a declared schema, reporting files scanned.
    The anchors are fixed strings in CCTBX source. Must include the indexing funnel and must
    never report a total without saying what it counted: the campaign's own harness silently
    truncated two rows because `timeout 120 cat | awk` sends SIGTERM to `cat`, so `pipefail`
-   never fired and `awk` printed a plausible partial.
-3. **`hutch-jobs watch`** — supersedes `take-run` Phase 5's prose squeue/sacct polling.
-4. **`hutch-resolve runs --exp --tag`** — eLog run/tag resolution. Deliberately not stubbed:
+   never fired and `awk` printed a plausible partial. This is now the highest-value item.
+2. **`refine.md` R.2** still asks the operator to run `h5py` and paste the output. Any
+   instruction of that shape is a missing tool; it becomes `lute-stats` once (1) exists.
+3. **`hutch-resolve runs --exp --tag`** — eLog run/tag resolution. Deliberately not stubbed:
    it needs Kerberos and belongs with `elog-search`, and a stub that looks like a resolver
    would be worse than its absence.
-5. **Thin the remaining skills** against the tools: `take-run` (395), `analyze-data` +
-   commands (514), `coordinate-experiment` (585). Target 80–120 lines each. In particular
-   `coordinate-experiment`'s context-propagation table becomes unnecessary — if sub-skills
-   resolve what they need, nothing needs injecting.
-6. **`refine.md` R.2** still asks the user to run `h5py` and paste the output. Any
-   instruction of that shape is a missing tool; it becomes `lute-stats` once (2) exists.
-7. **De-duplicate `bridge-to-cds/` against the standalone `cds-bridge` skill**, and move the
-   nominal pointing setpoint out of `check_beam_ready_mfx.py` into
-   `hutch-resolve preset`.
-8. **Extend the scenario harness.** `tests/sfx_basic/` (13 steps, assertions + mocks) is the
+4. **Move the nominal pointing setpoint** out of `check_beam_ready_mfx.py` (where
+   `mr1l4_homs.pitch ~= -562.035` is a literal) into `hutch-resolve preset`.
+5. **Extend the scenario harness.** `tests/sfx_basic/` (13 steps, assertions + mocks) is the
    best thing in the repo and should keep testing what it is good at — dispatch, safety
-   gating, handoff. Its `expected_lute_checks.yaml` will need updating for the tool calls.
+   gating, handoff. Its `expected_lute_checks.yaml` needs updating for the tool calls, and
+   `HUTCH_DS_ROOT` should point it at the fixture tree.
+6. **Beamtime dry-run before merge.** The tools are unit-tested and verified against real
+   campaign artifacts, but no sub-skill has been exercised end-to-end against a live bridge.
 
 ## Compatibility
 

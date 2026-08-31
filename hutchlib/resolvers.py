@@ -326,3 +326,20 @@ def cell(pdb_path: str) -> dict:
                     f"resolved:CRYST1 {pdb_path}",
                 )
     raise ResolveError(f"no CRYST1 record in {pdb_path}")
+
+
+def cds_file(path: str, *, timeout: int = bridge.T_QUERY) -> dict:
+    """Read any /cds file from S3DF. /cds is not mounted here; psdev bridges it."""
+    return _record(bridge.psdev_read(path, timeout=timeout), f"resolved:psdev cat {path}")
+
+
+def pv_values(pvs: list[str], *, hutch: str, timeout: int = bridge.T_QUERY) -> dict:
+    """Live PV values from a hutch control machine.
+
+    EPICS CA is firewalled from both S3DF and psdev, so this is the only route.
+    Compose the PV name with ``pv()`` rather than typing one.
+    """
+    return _record(
+        bridge.caget(pvs, hutch=hutch, timeout=timeout),
+        f"resolved:caget on {hutch.lower()}-control",
+    )
