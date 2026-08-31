@@ -15,13 +15,12 @@ For SFX-specific parameter adjustments, delegate to `@ask-cctbx-xfel`.
 
 ## Experiment State (silent context)
 
-Before asking the user for anything, read the current state from:
+```bash
+bin/hutch-state get --hutch "$H" --experiment "$E" last_run_number
 ```
-/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
-```
-Fields consumed by this command: `hutch`, `experiment`, `last_run_number`
 
-Use any non-null field directly — do not re-ask the user.
+Fields consumed: `hutch`, `experiment`, `last_run_number`. Never write the state path out —
+`hutch-state` owns it.
 
 ---
 
@@ -91,12 +90,17 @@ Common adjustments after first inspection:
 | ROI misses the signal stripe | `ROI` under `getROIs` | `SubmitSMD.producer_parameters` |
 | Spectrum projected along wrong axis | `invert_xes_axes` | `AnalyzeSmallDataXES` block |
 | Too many shots rejected | `min_ipm`, `min_Iscat` | `intensity_thresholds` block |
-| Indexing rate too low (SFX) | `min_peaks`, `pushres`, `indexing` | `IndexCrystFEL` block |
-| Wrong unit cell / space group (SFX) | `unit_cell`, `symmetry` | `IndexCrystFEL` / `MergePartialator` |
+| Indexing rate too low (SFX/CrystFEL) | `min_peaks`, `pushres`, `indexing` | `IndexCrystFEL` block |
+| Wrong unit cell / space group (SFX) | `unit_cell`, `symmetry` | `IndexCrystFEL` / `MergePartialator`; resolve with `hutch-resolve cell --pdb` |
+| **Indexing yield too low (SFX/CCTBX)** | `dispatch_hit_finder_minimum_number_of_reflections` — check the funnel before touching geometry | `IndexCCTBXXFEL.phil_parameters` |
+| Wall clock exhausted before the run ends (CCTBX) | `radial_average_enable` → false; `output_composite_output` → false so a kill keeps partial results | `IndexCCTBXXFEL.phil_parameters` |
+| An override appears to do nothing (CCTBX) | the key is not referenced by the phil template, so it is silently dropped | `bin/hutch-lute traps --scope phil-overrides` |
+| Job reported COMPLETED but produced nothing | `run_task.py` exits 0 on Task failure | `bin/hutch-lute status <job_id>` |
 
-For SFX-specific adjustments (low indexing rate, poor CC*, wrong unit cell), delegate
-to `@ask-cctbx-xfel` before editing. Cross-check against
-`analyze-data/references/sfx-analysis-defaults.md` for MFX typical values.
+For SFX-specific adjustments, delegate to `@ask-cctbx-xfel` before editing, and read
+`analyze-data/references/sfx-cctbx-patterns.md` — in particular that a low indexing rate is
+**not** reliably a geometry problem (the most common real cause found so far was a
+hit-finder floor set too high), and that `d_min` must never be used to rank two runs.
 
 Make the edit directly in the YAML, then set permissions:
 ```bash
@@ -138,8 +142,9 @@ Repeat R.2 → R.3 → R.4 until:
 - `ipm_var` filters bad shots without over-rejecting
 - ROI contains the full spectral stripe with no clipping
 - Downstream analysis plots look physically reasonable
-- (SFX) Indexing rate and merge statistics are within acceptable range
-  (see `analyze-data/references/sfx-analysis-defaults.md`)
+- (SFX) Indexing **yield** (images / events attempted) and merge statistics are
+  acceptable — compare on yield, not on `n_indexed`, which under a wall-clock limit is
+  coverage x yield. See `analyze-data/references/sfx-cctbx-patterns.md`.
 
 Once satisfied, the config is production-ready — the eLog workflow trigger applies
 it to all subsequent runs automatically.

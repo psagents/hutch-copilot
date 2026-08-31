@@ -16,6 +16,33 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 
 ---
 
+## Tool Layer (`hutchlib`) — read this before any procedure below
+
+Mechanism lives in `hutchlib`, not in prose. **Never interpolate a path, compose a PV
+name, or hand-write an SSH command** — call the tool. All four print JSON.
+
+| Tool | Use for |
+|---|---|
+| `bin/hutch-state path\|get\|set\|audit` | the experiment state file — the ONLY way to read or write it |
+| `bin/hutch-bridge ping\|install\|exec\|run\|classify` | anything sent to a live hutch-python session |
+| `bin/hutch-resolve devices\|device\|pv\|beampath\|detectors\|daq\|conf\|preset\|cell` | discovering machine truth from its authoritative source |
+| `bin/hutch-lute sbatch\|submit\|status\|traps\|kerberos` | LUTE submission and known-trap checking |
+
+Three rules that the tools enforce and you must not work around:
+
+1. **Every value carries provenance.** `hutch-state set` requires `--source`, and `--kind`
+   is one of `resolved` (read from an authoritative source), `operator` (a human said so),
+   `inferred` (reasoning only). A value without provenance cannot be told apart from a guess.
+2. **Stale reads fail.** `hutch-state get` refuses a value past its per-field TTL. Re-resolve
+   it, or pass `--stale-ok` and report the age to the user. Do not silently use old numbers.
+3. **A resolver that cannot reach its source raises.** Never substitute a remembered or
+   documented value. Report the failure and either use explicitly-stale state or ask the operator.
+
+Resolve, don't recall: device lists, PV prefixes, detector aliases, DAQ hosts and unit
+cells all come from `hutch-resolve`. This skill deliberately ships no tables of them.
+
+---
+
 ## Initialization
 
 > **Exception — `/review-scenario`:** If the first user message is `/review-scenario <dir>`,
@@ -26,9 +53,10 @@ On the **first user interaction**, always read `coordinate-experiment/SKILL.md` 
 run its initialization flow. coordinate-experiment is active for the **entire session**
 and silently observes every conversation turn after that.
 
-- The canonical experiment state lives in `{experiment}_state.json` (path defined in
-  `coordinate-experiment/SKILL.md`). All sub-skills should read this file as their
-  authoritative source of experiment state before executing.
+- The canonical experiment state lives in `{experiment}_state.json`. **Get its path from
+  `hutch-state path --hutch H --experiment E` — never write the path out.** Six SKILL.md
+  files used to restate it in prose and three of them were wrong, so those sub-skills read
+  a file nothing wrote and silently re-asked the user for everything.
 - Use any field already present in the state file without re-asking the user. If a field
   **required for the current task** is missing or null, ask the user for it — do not
   infer or assume a value.
@@ -48,82 +76,63 @@ and silently observes every conversation turn after that.
 
 ### Setup (once per hutch-python session)
 
-**Step 1 — Install the bridge script on the DAQ machine** (from S3DF):
+**Step 1 — Install the listener** (from S3DF). The script path is resolved from this
+skill's own install directory, so this works for any user:
 
 ```bash
-ssh -o ConnectTimeout=10 -J psdev mfx-daq "cat > /tmp/oc_bridge.py" \
-    < /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot/scripts/oc_bridge.py
+bin/hutch-bridge --hutch mfx install
 ```
 
-**Step 2 — Start the listener** (operator runs in hutch-python session):
+**Step 2 — Operator starts it** in the hutch-python session:
 
 ```python
 exec(open('/tmp/oc_bridge.py').read())
 # Expected output: "OpenCode bridge listening on port 9999"
 ```
 
-**Step 3 — Verify connectivity** (from S3DF):
+**Step 3 — Verify:**
 
 ```bash
-echo '{"code": "True"}' | \
-    ssh -o ConnectTimeout=10 -J psdev mfx-daq "python3 -c \"
-import socket, json, sys
-s = socket.socket()
-s.connect(('localhost', 9999))
-s.sendall(sys.stdin.buffer.read())
-s.shutdown(socket.SHUT_WR)
-data = b''
-while True:
-    chunk = s.recv(65536)
-    if not chunk: break
-    data += chunk
-print(json.loads(data.decode()).get('output', 'ERROR'))
-\""
+bin/hutch-bridge --hutch mfx ping     # -> {"ok": true, "mode": "live", ...}
 ```
 
-Expected response: `True`
-
-> **Why not `ssh -L 9999:localhost:9999 mfx-daq` + `nc localhost 9999`?**
-> TCP port forwarding (`-L`) is blocked by `AllowTcpForwarding` restrictions on DAQ
-> machines. The SSH pipe pattern above is the reliable alternative — it connects to
-> `localhost:9999` on the DAQ machine directly from within the SSH session.
-> See `bridge-to-cds/SKILL.md` for more on this topology.
+> **Why not `ssh -L 9999:localhost:9999`?** TCP forwarding is blocked by
+> `AllowTcpForwarding` on DAQ machines. `hutch-bridge` runs a client *on* the DAQ machine
+> that connects to `localhost:9999` there. It passes that client to `ssh` as a single
+> shell-quoted argument, so there is no nested-quoting hazard — which is why the six
+> hand-written copies of this pattern that used to live in markdown were fragile.
 
 ### Connectivity check
 
-On the first command that requires live execution, test the bridge:
+On the first command that requires live execution, run `hutch-bridge ping`:
 
-- **Connected** (`{"status": "ok", "output": "True"}`): live execution mode available.
-- **Not connected / error**: documentation/planning mode only. Walk the user through
-  the setup procedure above.
+- `"mode": "live"` — live execution available.
+- `"mode": "offline"` — planning mode only. Show the user the setup steps above, and when
+  quoting any state value say how old it is (`hutch-state get --stale-ok` reports `age_s`).
 
 ### Sending live commands
 
-All live bridge calls use the SSH pipe pattern. Replace `DAQ_HOST` with the actual
-DAQ hostname (e.g. `mfx-daq`):
-
 ```bash
-echo '{"code": "PYTHON_CODE_OR_SCRIPT"}' | \
-    ssh -o ConnectTimeout=TIMEOUT -J psdev DAQ_HOST "python3 -c \"
-import socket, json, sys
-s = socket.socket()
-s.connect(('localhost', 9999))
-s.sendall(sys.stdin.buffer.read())
-s.shutdown(socket.SHUT_WR)
-data = b''
-while True:
-    chunk = s.recv(65536)
-    if not chunk: break
-    data += chunk
-resp = json.loads(data.decode())
-print(resp.get('output', resp.get('error', '')))
-\""
+# read-only: needs no confirmation
+bin/hutch-bridge --hutch mfx exec 'daq.state'
+
+# check the safety class WITHOUT sending, to build the confirmation prompt
+bin/hutch-bridge --hutch mfx classify 'mfx_stopper_1.remove()'
+
+# after the operator approves, declare the class you actually got approval for
+bin/hutch-bridge --hutch mfx exec 'daq.begin(duration=180)' --confirm write --timeout 300
+
+# ship a script into the session and call into it
+bin/hutch-bridge --hutch mfx run are-we-ready/scripts/check_beam_ready_mfx.py \
+    --call 'check_beam_ready()'
 ```
 
-Timeout guidelines (ConnectTimeout in seconds):
-- `10` — queries, status reads
-- `30` — device operations, single moves
-- `300` — scans, DAQ runs (use 300+)
+`--timeout` in seconds: `10` queries, `30` device operations, `300+` scans and DAQ runs.
+
+**The gate is enforced, not advisory.** `hutch-bridge` classifies every snippet before
+transmitting and refuses if the class you declared is weaker than what the code actually
+does. Understating a beam-critical move as `write` is a refusal, not a downgrade. See
+the Safety Protocol below for what to show the operator.
 
 ---
 
@@ -136,7 +145,7 @@ Route based on the user's slash command or closest natural-language intent:
 | `/review-scenario <dir>` | Read `tests/review_scenario.md` — act as **reviewer agent only**; do NOT run coordinate-experiment init or any hutch-copilot startup |
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
-| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | Read `commands/align-spectrometer.md` |
+| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so and offer `/are-we-ready` plus manual guidance via `@experimental-hutch-python`. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
 | `/context` or "current conditions", "what is the sample", "experiment state" | Read `coordinate-experiment/SKILL.md` → `/context` summary |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
@@ -157,7 +166,13 @@ When the user invokes `/analyze-data` or asks to configure analysis:
 
 ## Safety Protocol
 
-Classify every action before executing. This protocol is mandatory for all commands.
+Classification is implemented in `hutchlib/safety.py` and enforced by `hutch-bridge`
+before anything is transmitted. Run `hutch-bridge classify '<code>'` to get the class and
+the reasons, then use them to write the confirmation prompt.
+
+The lists below document what the classifier does; they are **not** the mechanism. If you
+believe the classifier is wrong, fix `safety.py` and add a test — do not route around it.
+Unrecognised code is classified as `write`, never as read-only.
 
 ### Read-Only (execute without confirmation)
 
@@ -181,18 +196,19 @@ Classify every action before executing. This protocol is mandatory for all comma
 - Attenuator changes that modify delivered dose
 - Any move on a device listed as a lightpath component
 
-**Confirmation format:**
+**Confirmation format** — quote the classifier's own reasons so the operator sees why:
 
 > **I'd like to execute:**
 > ```python
 > daq.begin(duration=180)
 > ```
-> This will start a 3-minute DAQ run.
+> Class: **write** (DAQ begin). This will start a 3-minute DAQ run.
 >
 > **Shall I proceed?**
 
-If the user pre-authorizes a class of operations ("go ahead and run whatever you need"),
-skip per-command confirmation for that class within the conversation.
+For **beam-critical**, add the beam-risk warning and name the device the classifier
+flagged. A pre-authorization ("run whatever you need") covers `write` for the rest of the
+conversation; it does **not** cover `beam-critical`, which is confirmed every time.
 
 ---
 
@@ -202,8 +218,8 @@ skip per-command confirmation for that class within the conversation.
 |---|---|
 | DAQ runs (DARK/GEOM/DATA), DAQ check, XTC2 verify, LUTE monitoring | `take-run/` sub-skill |
 | Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
-| CDS config files (`/cds/`), happi DB, conf.yml, presets, controls machines | `bridge-to-cds/` sub-skill |
-| LUTE analysis setup, calibration, refinement, job monitoring | `analyze-data/` sub-skill |
+| CDS config files (`/cds/`), happi DB, conf.yml, presets | `hutch-resolve` / `hutch-cds`; narrative topology in `bridge-to-cds/` |
+| LUTE analysis setup, refinement | `analyze-data/` sub-skill; submission + job status via `hutch-lute` |
 | LUTE reference (task catalog, YAML syntax, hutch knowledge) | `@ask-lute` |
 | SFX indexing/merging parameter guidance (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
 | XPM timing sequences, event codes, rate calculation | `@xpm-seq` |
@@ -212,8 +228,8 @@ skip per-command confirmation for that class within the conversation.
 | AMI graph nodes, codebase questions | `@ask-ami` |
 | Data catalog, file finding | `@lcls-catalog` |
 | SLURM job submission | `@ask-slurm-s3df` |
-| DAQ error log queries | `@daq-logs` |
+| DAQ error log queries | `@elog-search` (there is no `daq-logs` skill) |
 | Experiment eLog posts | `@elog-copilot` |
 | Experiment context, condition tracking, beamtime log | `coordinate-experiment/` sub-skill |
 | EPICS PV documentation | `@ask-epics` |
-| LCLS Confluence docs | `@confluence-doc` |
+| LCLS Confluence docs | `@confluence-search` |

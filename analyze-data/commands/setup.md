@@ -38,17 +38,25 @@ lute_envs_dir   = {results_dir}/lute_envs
 | `version` | Ask — default `dev` |
 | `directory` | Ask — optional subdirectory under `results/`; default empty |
 
-### Kerberos check (run immediately after paths are derived)
+### Kerberos check — scoped, not unconditional
+
+A ticket is needed **only for eLog interaction**: resolving inputs from an eLog tag, and
+registering workflows with `install_lute.py`. Running a pipeline whose inputs are explicit
+paths needs no ticket at all. Ask the config, don't assume:
 
 ```bash
-klist -c FILE:$HOME/krb5cc.ticket
+bin/hutch-lute kerberos --yaml "$CONFIG"
+# -> {"needs_kerberos": false, "why": "config supplies explicit input paths; ...",
+#     "have_ticket": false}
 ```
 
-Valid → proceed silently. Missing/expired → show the user:
+If `needs_kerberos` is true and `have_ticket` is false, show the user:
 ```
 kinit -c FILE:$HOME/krb5cc.ticket <username>@SLAC.STANFORD.EDU
 ```
-Re-run `klist` to verify before continuing.
+If `needs_kerberos` is false, **proceed without a ticket** — do not block on it. This used
+to be an unconditional gate, which would have blocked a ten-iteration campaign that never
+touched the eLog.
 
 ---
 
@@ -69,7 +77,7 @@ Then ask `@ask-lute` for the appropriate reference.
 Build a minimal custom DAG — exactly the tasks needed, nothing more.
 
 **For SFX experiments with DARK / GEOM / DATA run types**, use `!run_type` branching
-(see canonical template in `references/sfx-analysis-defaults.md`):
+(see canonical template in `references/sfx-cctbx-patterns.md`):
 
 ```yaml
 !LUTE_DAG

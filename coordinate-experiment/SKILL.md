@@ -300,11 +300,14 @@ Run a lightweight bridge query **only** after these specific triggers:
 | Trigger | Bridge call(s) |
 |---|---|
 | `/take-run` completes | `daq.status()` |
-| Beam fault or "beam blocked" mentioned | Hutch beam-presence PV (see `references/beam-status-pvs.md`) |
+| Beam fault or "beam blocked" mentioned | `hutch-resolve pv` then `hutch-bridge exec` |
 | Alignment operation declared complete | Hutch beam-presence PV |
 | User runs `/are-we-ready` | Full are-we-ready output → update all `machine_state` fields |
 
-Do not invent PV names — look up the correct PV for the hutch in `references/beam-status-pvs.md`.
+Do not invent PV names, and do not read them from a documentation table — resolve them:
+`hutch-resolve pv --hutch H <device> --suffix <field>` composes the name from the happi
+prefix and reports its provenance. The hand-maintained `references/beam-status-pvs.md` was
+deleted precisely because happi *is* the PV registry.
 Maximum two bridge calls per trigger. Update `machine_state.last_checked` after every query.
 
 ---

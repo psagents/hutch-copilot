@@ -25,16 +25,19 @@ You are invoked from `hutch-copilot` when the user asks to set up or monitor ana
 
 ## Experiment State (silent context)
 
-Before asking the user for anything, read the current state from:
-```
-/sdf/data/lcls/ds/{hutch}/{experiment}/{experiment}_state.json
-```
-Fields consumed by this skill:
-`hutch`, `experiment`, `photon_energy_eV`, `last_run_number`, `sample_name`, `sample_delivery`
+Read state through the tool — never interpolate the path (this file used to name the
+wrong one, so every field silently came back missing and the wizard re-asked everything):
 
-Use any non-null field directly — do not re-ask the user. Ask only for fields that
-are still `null` after reading the file. If `hutch` or `experiment` are unknown,
-ask for them first, then read the file.
+```bash
+bin/hutch-state get --hutch "$H" --experiment "$E" <field>
+bin/hutch-state audit --hutch "$H" --experiment "$E"    # what do we actually know, and how old
+```
+
+Fields consumed by this skill: `hutch`, `experiment`, `photon_energy_eV`,
+`last_run_number`, `sample_name`, `sample_delivery`.
+
+A `MissingValue` error means ask the operator. A `StaleValue` error means re-resolve, or
+pass `--stale-ok` and report the age. Do not assume a value in either case.
 
 ---
 
@@ -62,6 +65,8 @@ ask for them first, then read the file.
 |---|---|
 | LUTE task catalog, YAML syntax, DAG structure, result passing | `@ask-lute` (reference brain) |
 | SFX crystallography parameters (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
+| CCTBX DAG pattern, d_min hazard, funnel diagnosis | `references/sfx-cctbx-patterns.md` |
+| LUTE submission, wall clock, known traps, Kerberos scoping | `bin/hutch-lute` |
 | SmallData detector parameters (ROI, droplet/photon, azimuthal integration) | `@ask-smalldata` |
 | SLURM job submission and monitoring | `@ask-lute/references/slurm-submission.md` |
 | File finding, XTC2 inventory, HDF5 verification | `@lcls-catalog` |

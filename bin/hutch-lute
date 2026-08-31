@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Entry point wrapper -- no install step required."""
+import pathlib, sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from hutchlib.cli import lute_main as main
+raise SystemExit(main())

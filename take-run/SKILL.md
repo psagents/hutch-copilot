@@ -26,16 +26,20 @@ Triggered by: `/take-run`, `/takerun`, "take a run", "start collecting",
 
 ## Experiment State (silent context)
 
-Before asking the user for anything, read the current state from:
-```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_state.json
+Read state through the tool, which owns the path:
+
+```bash
+bin/hutch-state audit --hutch "$H" --experiment "$E"   # everything known, with age + provenance
+bin/hutch-state get --hutch "$H" --experiment "$E" sample_name --value-only
 ```
 
 Fields consumed: `hutch`, `experiment`, `sample_name`, `concentration`,
 `sample_delivery`, `photon_energy_eV`, `rep_rate_Hz`, `transmission`,
 `lute_config`, `machine_state.detector_name`
 
-Use any non-null field directly — do not re-ask. Ask only if still `null`.
+`MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report the
+age. `machine_state.*` expires after 600 s, so a detector name recorded last shift will tell
+you it is old instead of looking current.
 
 ---
 
@@ -108,8 +112,12 @@ Do not infer silently — if ambiguous, ask with the three options.
 | "data", "collect", "science run", "sample run" | `DATA` | Uses `autorun()` |
 
 **`run_type` must always be uppercase** — this is the value LUTE reads to branch
-to the correct analysis workflow. Never pass `'data'` (lowercase) when `'DATA'`
-is expected.
+to the correct analysis workflow, and a lowercase value silently matches no branch.
+This is checked rather than remembered:
+
+```bash
+bin/hutch-lute traps --scope run-params    # the assertion and the evidence behind it
+```
 
 ### Duration
 
