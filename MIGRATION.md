@@ -206,6 +206,56 @@ deleted file itself said.
 
 ---
 
+### Self-contained: nothing load-bearing outside this repo
+
+Eleven of the fourteen sibling skills this skill referenced had been removed, and the
+CCTBX jinja template lived in one of them (`setup-cctbx-pipeline`), which left
+`hutch-config` with nothing to render.
+
+| Was outside | Now |
+|---|---|
+| `setup-cctbx-pipeline/templates/cctbx_pipeline.yaml.j2` | `templates/cctbx_pipeline.yaml.j2`, and `--template` defaults to it |
+| `setup-cctbx-pipeline/render.py` `read_cryst1` | `hutch-resolve cell` |
+| `setup-cctbx-pipeline/render.py` `make_env` delimiters | `config.DELIMITERS["lute"]` |
+| `setup-cctbx-pipeline/render.py` 7 validation assertions | `traps.py`, plus five more the campaign earned |
+| `cds-bridge` recipes | `hutch-resolve cat / conf / preset / device / pv / caget` |
+| eleven dead `@advisor` pointers | removed, replaced with in-repo guidance |
+
+**The template was reconstructed, and the reconstruction is proven rather than asserted.**
+The campaign's nine rendered configs survive, so `tests/unit/test_template.py` re-renders
+each one from its recorded context and overrides and diffs against the file on disk. All
+nine match. Two comment lines are normalised (the template now credits hutch-tools, not
+skills that no longer exist); every key and value is compared strictly.
+
+Two optional blocks are **reconstructed but unverified**, because the campaign passed
+`None` for them and so no rendering in the corpus exercises them: the per-shot wavelength
+calibration in `data_spec`, and `select_min_ct` / `select_max_ct`. Both are marked
+`UNVERIFIED` in the template and a test asserts those markers stay.
+
+One design detail the reproduction forced: the template must still emit
+`MergeCCTBXXFEL.phil_parameters.tag`, so that the Kerberos route-around shows up as a
+`deleted` override rather than `absent`, and so `hutch-lute kerberos` has something to
+detect. Fidelity here is behavioural, not only textual — a test pins it for all nine
+iterations. Relatedly, the explanatory comment about `tag` lives in the block header
+rather than directly above the key: a comment above a commonly-deleted key is left
+orphaned when the key goes, which is exactly how the first reconstruction attempt failed.
+
+Three sibling skills remain, reclassified as **optional advisors** — `ask-lute`,
+`ask-cctbx-xfel`, `ask-happi`. They are consultants, not dependencies: the skill must work
+with none of them installed, and must never block on one or assume a value one would have
+supplied. `tests/unit/test_self_contained.py` enforces the boundary:
+
+- every at-prefixed name in the docs must be in `DECLARED_ADVISORS`;
+- no code path may reference another skill directory;
+- no code path may hardcode a home directory (docstrings documenting the historical
+  `fpoitevi` bug are stripped via the AST first, so prose about the bug does not trip the
+  check aimed at code);
+- the default template must ship with the repo, render, parse, and pass the trap register.
+
+Both guards were verified to actually fail on an injected violation, not merely to pass.
+
+---
+
 ## What remains, in order
 
 1. **`lute-stats --json`** — logs -> metrics with a declared schema, reporting files scanned.

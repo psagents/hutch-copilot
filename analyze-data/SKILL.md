@@ -67,7 +67,6 @@ pass `--stale-ok` and report the age. Do not assume a value in either case.
 | SFX crystallography parameters (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
 | CCTBX DAG pattern, d_min hazard, funnel diagnosis | `references/sfx-cctbx-patterns.md` |
 | LUTE submission, wall clock, known traps, Kerberos scoping | `bin/hutch-lute` |
-| SmallData detector parameters (ROI, droplet/photon, azimuthal integration) | `@ask-smalldata` |
-| SLURM job submission and monitoring | `@ask-lute/references/slurm-submission.md` |
-| File finding, XTC2 inventory, HDF5 verification | `@lcls-catalog` |
-| psana2 data inspection, detector calibration check | `@ask-lcls2` |
+| SLURM submission, wall clock and job status | `bin/hutch-lute` |
+| XTC2 inventory | `hutch-state path` gives the xtc2 directory; `ls` it |
+| detector aliases from psana2 | `bin/hutch-resolve detectors` |

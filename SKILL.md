@@ -152,7 +152,7 @@ sub-skill.
 | `/review-scenario <dir>` | Read `tests/review_scenario.md` — act as **reviewer agent only**; do NOT run coordinate-experiment init or any hutch-copilot startup |
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
-| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so and offer `/are-we-ready` plus manual guidance via `@experimental-hutch-python`. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
+| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so, offer `/are-we-ready`, and guide the operator through moves by hand via `hutch-bridge` with the safety gate. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
 | `/context` or "current conditions", "what is the sample", "experiment state" | **Tool only** — `hutch-state audit`, then format. Do not read `coordinate-experiment/SKILL.md`: the audit already returns every field with its age and provenance, which the prose summary cannot. |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
@@ -219,24 +219,42 @@ conversation; it does **not** cover `beam-critical`, which is confirmed every ti
 
 ---
 
-## Sub-skill Reference
+## Capability Reference
 
-| Task | Skill |
+Everything load-bearing lives in this repo. Nothing here depends on another skill
+being installed.
+
+| Need | Where |
 |---|---|
-| DAQ runs (DARK/GEOM/DATA), DAQ check, XTC2 verify, LUTE monitoring | `take-run/` sub-skill |
-| Hutch-python bridge, device control, Bluesky scans | `@experimental-hutch-python` |
-| CDS config files (`/cds/`), happi DB, conf.yml, presets, live PVs | `hutch-resolve cat\|conf\|preset\|device\|pv\|caget` |
-| LUTE analysis setup, refinement | `analyze-data/` sub-skill; submission + job status via `hutch-lute` |
-| LUTE reference (task catalog, YAML syntax, hutch knowledge) | `@ask-lute` |
-| SFX indexing/merging parameter guidance (CrystFEL, CCTBX.XFEL) | `@ask-cctbx-xfel` |
-| XPM timing sequences, event codes, rate calculation | `@xpm-seq` |
-| psana2 / lcls2 data analysis | `@ask-lcls2` |
-| SmallData HDF5 analysis, DetObjectFunc | `@ask-smalldata` |
-| AMI graph nodes, codebase questions | `@ask-ami` |
-| Data catalog, file finding | `@lcls-catalog` |
-| SLURM job submission | `@ask-slurm-s3df` |
-| DAQ error log queries | `@elog-search` (there is no `daq-logs` skill) |
-| Experiment eLog posts | `@elog-copilot` |
-| Experiment context, condition tracking, beamtime log | `coordinate-experiment/` sub-skill |
-| EPICS PV documentation | `@ask-epics` |
-| LCLS Confluence docs | `@confluence-search` |
+| experiment state (read, write, provenance, staleness) | `hutch-state` |
+| live hutch-python session; safety classification | `hutch-bridge` |
+| device inventory, PV names, beampath, DAQ, detectors, presets, `/cds` files, live PVs | `hutch-resolve` |
+| LUTE submission, wall clock, job status, known traps, Kerberos scoping | `hutch-lute` |
+| LUTE config rendering with overrides and validation | `hutch-config` (templates in `templates/`) |
+| DAQ runs (DARK/GEOM/DATA), XTC2 verify, LUTE trigger watch | `take-run/` |
+| beam and hutch readiness | `are-we-ready/` |
+| LUTE analysis setup and refinement | `analyze-data/` |
+| experiment context, condition tracking, beamtime log, handoff | `coordinate-experiment/` |
+| CCTBX DAG pattern, d_min hazard, funnel diagnosis | `analyze-data/references/sfx-cctbx-patterns.md` |
+| network topology, why `ssh -L` fails, `/cds` vs `/sdf` | `hutch_tools/bridge.py` docstring |
+| pedestal deployment fallback for Jungfrau | `take-run/references/dark-run.md` |
+
+### Optional advisors
+
+These are separate skills. They are **consultants, not dependencies** — if one is
+not installed, say so and proceed with the in-repo guidance above plus your own
+reasoning. Never block on them, and never assume a value one would have supplied.
+
+| Advisor | Ask it about |
+|---|---|
+| `@ask-lute` | LUTE internals: task catalog, YAML syntax, DAG structure, per-hutch references |
+| `@ask-cctbx-xfel` | SFX parameter reasoning (CrystFEL and CCTBX.XFEL) |
+| `@ask-happi` | happi device database questions beyond what `hutch-resolve` returns |
+
+> Earlier versions of this file also pointed at eleven other skills —
+> `ask-smalldata`, `ask-lcls2`, `ask-ami`, `ask-epics`, `ask-slurm-s3df`,
+> `lcls-catalog`, `elog-copilot`, `elog-search`, `confluence-search`,
+> `experimental-hutch-python`, `xpm-seq`. None are installed, so those pointers
+> were dead ends mid-operation; they have been removed rather than left to fail.
+> (Written without the at-sign prefix on purpose: `tests/unit/test_self_contained.py`
+> treats every at-prefixed name in the docs as a claim that the advisor is declared.)

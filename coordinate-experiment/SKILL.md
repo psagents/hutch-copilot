@@ -242,7 +242,8 @@ When the user explicitly states a condition change (*"we just changed samples to
 - {field}: {new_value}
 ```
 
-6. **Post** a short human-readable note to eLog via `@elog-copilot`:
+6. **Post** a short human-readable note to the eLog. There is no eLog skill installed, so show the operator the text and ask them to post it, or use the
+   eLog web UI link. Do not claim it was posted unless you saw it succeed:
 
 ```
 Tag: condition-update
@@ -453,8 +454,9 @@ Summary: {one-word tone, e.g. "productive", "mixed", "rough"}
 {full handoff text}
 ```
 
-3. Ask the user: *"Post this to the eLog too?"* If yes, post via `@elog-copilot`
-   with tag `shift-handoff`.
+3. Ask the user: *"Post this to the eLog too?"* If yes, hand them the text for
+   the eLog with tag `shift-handoff` — there is no eLog skill installed to do it
+   for you.
 
 ### Inputs to ask for if not in state
 

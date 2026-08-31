@@ -176,21 +176,21 @@ def phil_templates(yaml_text: str) -> dict[str, str]:
     return out
 
 
-def whitelist_for(yaml_text: str, template_dir: str | pathlib.Path) -> dict[str, set[str]]:
+def whitelist_for(yaml_text: str, phil_dir: str | pathlib.Path) -> dict[str, set[str]]:
     """Legal phil keys per task, from the LUTE templates on disk."""
-    template_dir = pathlib.Path(template_dir)
-    if not template_dir.is_dir():
+    phil_dir = pathlib.Path(phil_dir)
+    if not phil_dir.is_dir():
         raise ConfigError(
-            f"phil template directory not found: {template_dir}. "
+            f"phil template directory not found: {phil_dir}. "
             f"Point --whitelist-dir at {{LUTE_PATH}}/config/templates, or pass "
             f"--no-whitelist to skip the check and accept that an unknown key "
             f"will be silently ignored."
         )
     out: dict[str, set[str]] = {}
     for task, basename in phil_templates(yaml_text).items():
-        path = template_dir / basename
+        path = phil_dir / basename
         if not path.exists():
-            raise ConfigError(f"{task} names phil_file {basename!r}, absent from {template_dir}")
+            raise ConfigError(f"{task} names phil_file {basename!r}, absent from {phil_dir}")
         out[task] = template_whitelist(path.read_text())
     return out
 
@@ -203,9 +203,9 @@ def whitelist_for(yaml_text: str, template_dir: str | pathlib.Path) -> dict[str,
 #: ``lute`` uses ``${{ }}`` for variables and ``$% %`` for blocks, so that
 #: LUTE's own native ``{{ work_dir }}`` and ``{{ run:04d }}`` placeholders pass
 #: through the render untouched and are substituted later at task runtime. This
-#: is the scheme ``setup-cctbx-pipeline`` uses and is the default: rendering a
-#: LUTE config with standard delimiters fails on ``{{ run:04d }}``, which is not
-#: valid jinja.
+#: is the default, and it is what the vendored templates use: rendering a LUTE
+#: config with standard delimiters fails on ``{{ run:04d }}``, which is not valid
+#: jinja.
 DELIMITERS = {
     "lute": {
         "variable_start_string": "${{",
@@ -217,6 +217,44 @@ DELIMITERS = {
     },
     "standard": {},
 }
+
+#: Templates ship with this repo, so rendering a config needs nothing outside it.
+#: They previously lived in a separate `setup-cctbx-pipeline` skill; when that was
+#: removed, `hutch-config` had no template to render at all.
+TEMPLATE_DIR_NAME = "templates"
+DEFAULT_TEMPLATE = "cctbx_pipeline"
+
+
+def template_dir() -> pathlib.Path:
+    from .paths import skill_root
+
+    return skill_root() / TEMPLATE_DIR_NAME
+
+
+def available_templates() -> list[str]:
+    d = template_dir()
+    return sorted({p.name.split(".")[0] for p in d.glob("*.j2")}) if d.is_dir() else []
+
+
+def resolve_template(name_or_path: str | pathlib.Path) -> pathlib.Path:
+    """Accept a filesystem path, or a bare name resolved against templates/.
+
+    A bare name keeps callers from hardcoding a path that can move -- the same
+    reason ``paths.skill_root()`` resolves itself rather than being written out.
+    """
+    text = str(name_or_path)
+    p = pathlib.Path(text)
+    if p.suffix or "/" in text:
+        if not p.exists():
+            raise ConfigError(f"template not found: {p}")
+        return p
+    for candidate in (template_dir() / f"{text}.yaml.j2", template_dir() / f"{text}.j2"):
+        if candidate.exists():
+            return candidate
+    raise ConfigError(
+        f"no template named {text!r} in {template_dir()}. "
+        f"Available: {', '.join(available_templates()) or '(none)'}"
+    )
 
 
 def render_template(
@@ -285,7 +323,7 @@ def build(
     quietly became a new entry is visible instead of looking like a null result.
     """
     overrides = overrides or {}
-    text = render_template(template, context, delims=delims)
+    text = render_template(resolve_template(template), context, delims=delims)
 
     lines = text.splitlines(keepends=True)
     actions: dict[str, str] = {}
@@ -376,7 +414,11 @@ def build_parser() -> "argparse.ArgumentParser":
     """
 
     ap = argparse.ArgumentParser(prog="hutch-config", description=_DOC)
-    ap.add_argument("--template", required=True, help="jinja template path")
+    ap.add_argument("--template", default=DEFAULT_TEMPLATE,
+                    help=f"template name from this repo's templates/ (default: "
+                         f"{DEFAULT_TEMPLATE}) or a path to one")
+    ap.add_argument("--list-templates", action="store_true",
+                    help="print the templates shipped with this repo and exit")
     ap.add_argument("--context", default=None, help="JSON file of template context")
     ap.add_argument("--set-context", nargs="*", default=[], metavar="K=V")
     ap.add_argument("--set", nargs="*", default=[], dest="sets", metavar="TASK.BLOCK.KEY=V",
@@ -398,6 +440,10 @@ def main(argv: "list[str] | None" = None) -> int:
     """hutch-config: render a LUTE config with overrides, validated."""
     args = build_parser().parse_args(argv)
     try:
+        if args.list_templates:
+            return out({"template_dir": str(template_dir()),
+                        "templates": available_templates()})
+
         ctx = json.load(open(args.context)) if args.context else {}
         ctx.update(parse_set(args.set_context))
 
