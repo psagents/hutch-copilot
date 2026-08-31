@@ -343,3 +343,78 @@ def pv_values(pvs: list[str], *, hutch: str, timeout: int = bridge.T_QUERY) -> d
         bridge.caget(pvs, hutch=hutch, timeout=timeout),
         f"resolved:caget on {hutch.lower()}-control",
     )
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
+    detectors | preset | cell | cat."""
+    from . import _cli
+
+    ap, sub = _cli.parser("hutch-resolve", main.__doc__)
+    ap.add_argument("--persist-to", nargs=2, metavar=("HUTCH", "EXPERIMENT"),
+                    help="also write the result into that experiment's state")
+    ap.add_argument("--field", default=None, help="state field to persist under")
+
+    for name in ("devices", "beampath", "daq", "conf"):
+        sub.add_parser(name).add_argument("--hutch", required=True)
+
+    d = sub.add_parser("device")
+    d.add_argument("--hutch", required=True)
+    d.add_argument("name")
+
+    p = sub.add_parser("pv", help="compose a PV name from the happi prefix")
+    p.add_argument("--hutch", required=True)
+    p.add_argument("name")
+    p.add_argument("--suffix", default="")
+
+    cg = sub.add_parser("caget", help="read PVs from a hutch control machine")
+    cg.add_argument("--hutch", required=True)
+    cg.add_argument("pv", nargs="+")
+
+    det = sub.add_parser("detectors")
+    det.add_argument("--experiment", required=True)
+    det.add_argument("--run", required=True, type=int)
+
+    pr = sub.add_parser("preset")
+    pr.add_argument("--hutch", required=True)
+    pr.add_argument("device")
+
+    sub.add_parser("cell").add_argument("pdb")
+    sub.add_parser("cat", help="read a /cds file from S3DF via psdev").add_argument("path")
+
+    args = ap.parse_args(argv)
+    try:
+        if args.cmd == "devices":
+            rec = devices(args.hutch)
+        elif args.cmd == "device":
+            rec = device(args.hutch, args.name)
+        elif args.cmd == "pv":
+            rec = pv(args.hutch, args.name, args.suffix)
+        elif args.cmd == "caget":
+            rec = pv_values(args.pv, hutch=args.hutch)
+        elif args.cmd == "beampath":
+            rec = beampath(args.hutch)
+        elif args.cmd == "daq":
+            rec = daq(args.hutch)
+        elif args.cmd == "conf":
+            rec = hutch_conf(args.hutch)
+        elif args.cmd == "detectors":
+            rec = detectors(args.experiment, args.run)
+        elif args.cmd == "preset":
+            rec = preset(args.hutch, args.device)
+        elif args.cmd == "cell":
+            rec = cell(args.pdb)
+        elif args.cmd == "cat":
+            rec = cds_file(args.path)
+        else:
+            return _cli.USAGE
+
+        if args.persist_to:
+            rec["persisted"] = persist(
+                state.State(*args.persist_to), args.field or args.cmd, rec)
+        return _cli.out(rec)
+    except (ResolveError, bridge.BridgeError, OSError) as exc:
+        return _cli.fail(exc, _cli.UNREACHABLE)

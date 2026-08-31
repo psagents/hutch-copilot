@@ -239,3 +239,86 @@ def job_status(job_id: str) -> dict:
         "exit_code": exit_code,
         "hit_wall_clock": st.startswith("TIMEOUT"),
     }
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-lute: sbatch | submit | status | watch | traps | kerberos.
+
+    Config rendering is a separate binary (``hutch-config``): it is a different
+    lifecycle phase, and it is the only part that needs jinja2 and PyYAML, so
+    keeping it out leaves this command stdlib-only.
+    """
+    from . import _cli
+
+    ap, sub = _cli.parser("hutch-lute", main.__doc__)
+
+    sb = sub.add_parser("sbatch", help="render a submission script")
+    sb.add_argument("--task", required=True)
+    sb.add_argument("--config", required=True)
+    sb.add_argument("--log-dir", required=True)
+    sb.add_argument("--lute-path", required=True)
+    sb.add_argument("--experiment", required=True)
+    sb.add_argument("--run", required=True, type=int)
+    sb.add_argument("--time", dest="time_limit", required=True,
+                    help="Slurm walltime, e.g. 00:10:00 -- mandatory, LUTE sets none")
+    sb.add_argument("--nodes", type=int, default=1)
+    sb.add_argument("--ntasks-per-node", type=int, default=1)
+    sb.add_argument("--no-mpi", action="store_true")
+    sb.add_argument("--submit", action="store_true")
+    sb.add_argument("--dependency", default=None)
+    sb.add_argument("--script-path", default=None)
+
+    sub.add_parser("status").add_argument("job_id")
+
+    w = sub.add_parser("watch", help="poll squeue for a workflow job to appear")
+    w.add_argument("--user", required=True, help="e.g. mfxopr")
+    w.add_argument("--since", default=None, help="ISO timestamp; ignore older jobs")
+    w.add_argument("--timeout", type=int, default=90)
+    w.add_argument("--names", nargs="*", default=None, help="exact workflow names to match")
+
+    tr = sub.add_parser("traps", help="list the incident register, or check a file")
+    tr.add_argument("--scope", default=None,
+                    choices=["sbatch", "lute-yaml", "run-params", "phil-overrides"])
+    tr.add_argument("--yaml", default=None)
+
+    kb = sub.add_parser("kerberos", help="does this config actually need a ticket?")
+    kb.add_argument("--yaml", required=True)
+
+    args = ap.parse_args(argv)
+    try:
+        if args.cmd == "sbatch":
+            text = build_sbatch(
+                task=args.task, config=args.config, log_dir=args.log_dir,
+                lute_path=args.lute_path, experiment=args.experiment, run=args.run,
+                time_limit=args.time_limit, nodes=args.nodes,
+                ntasks_per_node=args.ntasks_per_node, mpi=not args.no_mpi,
+            )
+            if not args.submit:
+                return _cli.out(text, plain=True)
+            path = args.script_path or f"{args.log_dir}/sbatch_{args.task}.sh"
+            return _cli.out({"job_id": submit(text, script_path=path,
+                                              dependency=args.dependency)})
+        if args.cmd == "status":
+            return _cli.out(job_status(args.job_id))
+        if args.cmd == "watch":
+            res = watch_for_jobs(args.user, since=args.since,
+                                 timeout_s=args.timeout, names=args.names)
+            _cli.out(res)
+            return _cli.OK if res["found"] else _cli.UNREACHABLE
+        if args.cmd == "traps":
+            if args.yaml:
+                return _cli.out(traps.check(args.scope or "lute-yaml",
+                                            {"yaml_text": open(args.yaml).read()}))
+            reg = traps.registry()
+            return _cli.out([e for e in reg
+                             if not args.scope or e["applies_to"] == args.scope])
+        if args.cmd == "kerberos":
+            needed, why = needs_kerberos(open(args.yaml).read())
+            return _cli.out({"needs_kerberos": needed, "why": why,
+                             "have_ticket": have_ticket()})
+    except (LuteError, OSError) as exc:
+        return _cli.fail(exc, _cli.UNREACHABLE)
+    return _cli.USAGE

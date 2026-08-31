@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import sys
 import subprocess
 from typing import Any
 
@@ -278,3 +279,58 @@ def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, st
     if missing:
         raise BridgeUnavailable(f"no value returned for {missing}")
     return values
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-bridge: ping | install | exec | run | classify."""
+    from . import _cli
+
+    ap, sub = _cli.parser("hutch-bridge", main.__doc__)
+    ap.add_argument("--hutch", required=True)
+    ap.add_argument("--host", default=None, help="override the DAQ host")
+
+    sub.add_parser("ping")
+    sub.add_parser("install", help="copy oc_bridge.py to the DAQ machine")
+
+    classes = [safety.READ_ONLY, safety.WRITE, safety.BEAM_CRITICAL]
+
+    e = sub.add_parser("exec", help="run python in the live hutch-python session")
+    e.add_argument("code", help="python source, or - to read stdin")
+    e.add_argument("--confirm", choices=classes,
+                   help="action class a human has approved")
+    e.add_argument("--timeout", type=int, default=T_QUERY)
+
+    r = sub.add_parser("run", help="ship a script into the session and call into it")
+    r.add_argument("script")
+    r.add_argument("--call", default=None, help="e.g. 'check_beam_ready()'")
+    r.add_argument("--confirm", choices=classes)
+    r.add_argument("--timeout", type=int, default=T_SCAN)
+
+    c = sub.add_parser("classify", help="show a snippet's safety class without sending it")
+    c.add_argument("code")
+
+    args = ap.parse_args(argv)
+    try:
+        if args.cmd == "ping":
+            res = ping(args.hutch, host=args.host)
+            _cli.out(res)
+            return _cli.OK if res["ok"] else _cli.UNREACHABLE
+        if args.cmd == "install":
+            return _cli.out(install_listener(args.hutch, host=args.host), plain=True)
+        if args.cmd == "classify":
+            return _cli.out(safety.classify(args.code))
+        if args.cmd == "exec":
+            code = sys.stdin.read() if args.code == "-" else args.code
+            return _cli.out(exec_code(code, hutch=args.hutch, confirm=args.confirm,
+                                      timeout=args.timeout, host=args.host))
+        if args.cmd == "run":
+            return _cli.out(run_script(args.script, hutch=args.hutch, call=args.call,
+                                       confirm=args.confirm, timeout=args.timeout))
+    except safety.SafetyRefusal as exc:
+        return _cli.fail(exc, _cli.REFUSED)
+    except BridgeError as exc:
+        return _cli.fail(exc, _cli.UNREACHABLE)
+    return _cli.USAGE

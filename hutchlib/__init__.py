@@ -14,5 +14,5 @@ Layers:
   lute       task-agnostic LUTE submission adapter
 """
 
-__all__ = ["paths", "state", "safety", "bridge", "resolvers", "traps", "lute"]
+__all__ = ["paths", "state", "safety", "bridge", "resolvers", "traps", "lute", "config"]
 __version__ = "0.1.0"

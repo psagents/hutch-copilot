@@ -355,3 +355,57 @@ def parse_set(pairs: list[str]) -> dict[str, Any]:
         except json.JSONDecodeError:
             out[key.strip()] = raw
     return out
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-config: render a LUTE config with overrides, validated."""
+    from . import _cli
+
+    ap = __import__("argparse").ArgumentParser(prog="hutch-config", description=main.__doc__)
+    ap.add_argument("--template", required=True, help="jinja template path")
+    ap.add_argument("--context", default=None, help="JSON file of template context")
+    ap.add_argument("--set-context", nargs="*", default=[], metavar="K=V")
+    ap.add_argument("--set", nargs="*", default=[], dest="sets", metavar="TASK.BLOCK.KEY=V",
+                    help=f"override; value {DELETE} removes the key")
+    ap.add_argument("--overrides", default=None,
+                    help="JSON file of overrides; a top-level 'overrides' key is unwrapped")
+    ap.add_argument("--whitelist-dir", default=None,
+                    help="{LUTE_PATH}/config/templates -- enables the silent-drop check")
+    ap.add_argument("--no-whitelist", action="store_true",
+                    help="skip the silent-drop check (an unknown key will be ignored)")
+    ap.add_argument("--delims", default="lute", choices=sorted(DELIMITERS),
+                    help="lute: ${{ }} for template vars so LUTE's own {{ }} survives")
+    ap.add_argument("--out", default=None, help="write here; omit to print the config")
+
+    args = ap.parse_args(argv)
+    try:
+        ctx = json.load(open(args.context)) if args.context else {}
+        ctx.update(parse_set(args.set_context))
+
+        ovr = json.load(open(args.overrides)) if args.overrides else {}
+        if isinstance(ovr, dict) and "overrides" in ovr:
+            ovr = ovr["overrides"]      # accept the campaign's params/*.json shape
+        ovr.update(parse_set(args.sets))
+
+        if not args.no_whitelist and not args.whitelist_dir:
+            raise ConfigError(
+                "pass --whitelist-dir {LUTE_PATH}/config/templates so unknown phil keys "
+                "are caught, or --no-whitelist to accept that they are dropped silently."
+            )
+
+        report = build(
+            template=args.template, context=ctx, overrides=ovr,
+            whitelist_dir=None if args.no_whitelist else args.whitelist_dir,
+            delims=args.delims,
+        )
+        if not args.out:
+            return _cli.out(report["text"], plain=True)
+        path = write(report, args.out)
+        summary = {k: v for k, v in report.items() if k != "text"}
+        summary["written"] = str(path)
+        return _cli.out(summary)
+    except (ConfigError, OSError) as exc:
+        return _cli.fail(exc, _cli.UNREACHABLE)

@@ -311,3 +311,67 @@ class State:
                 rows.append(self.get_entry(field))
         rows.sort(key=lambda r: (not r["stale"], -(r["age_s"] or 0)))
         return rows
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-state: path | get | set | unset | audit | dump."""
+    from . import _cli, paths
+
+    ap, sub = _cli.parser("hutch-state", main.__doc__)
+
+    for name in ("path", "audit", "dump"):
+        _cli.experiment_args(sub.add_parser(name))
+
+    g = sub.add_parser("get", help="read one field with its provenance")
+    _cli.experiment_args(g)
+    g.add_argument("field")
+    g.add_argument("--stale-ok", action="store_true",
+                   help="return a value past its TTL, with its age reported")
+    g.add_argument("--value-only", action="store_true")
+
+    s = sub.add_parser("set", help="write one field; --source is mandatory")
+    _cli.experiment_args(s)
+    s.add_argument("field")
+    s.add_argument("value", help="JSON if parseable, else a string")
+    s.add_argument("--source", required=True,
+                   help="specific enough to re-run, e.g. 'psana2 detinfo exp=.. run=36'")
+    s.add_argument("--kind", default=OPERATOR, choices=VALID_KINDS)
+    s.add_argument("--ttl", type=float, default=None)
+
+    u = sub.add_parser("unset")
+    _cli.experiment_args(u)
+    u.add_argument("field")
+
+    args = ap.parse_args(argv)
+    st = State(args.hutch, args.experiment)
+    try:
+        if args.cmd == "path":
+            return _cli.out({
+                "state": str(st.path),
+                "log": str(paths.log_file(args.hutch, args.experiment)),
+                "xtc2": str(paths.xtc2_dir(args.hutch, args.experiment)),
+                "exists": st.path.exists(),
+            })
+        if args.cmd == "dump":
+            return _cli.out(st.load())
+        if args.cmd == "audit":
+            return _cli.out(st.audit())
+        if args.cmd == "get":
+            entry = st.get_entry(args.field)
+            if entry["stale"] and not args.stale_ok:
+                raise StaleValue(args.field, entry["age_s"] or 0, entry["ttl_s"], entry)
+            return _cli.out(entry["value"] if args.value_only else entry,
+                            plain=args.value_only)
+        if args.cmd == "set":
+            return _cli.out(st.set(
+                args.field, _cli.json_or_str(args.value), source=args.source,
+                kind=args.kind, ttl_s=args.ttl if args.ttl is not None else -1.0))
+        if args.cmd == "unset":
+            st.unset(args.field)
+            return _cli.out({"unset": args.field})
+    except StateError as exc:
+        return _cli.fail(exc, _cli.STATE_ERROR)
+    return _cli.USAGE

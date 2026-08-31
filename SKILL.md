@@ -19,14 +19,19 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 ## Tool Layer (`hutchlib`) — read this before any procedure below
 
 Mechanism lives in `hutchlib`, not in prose. **Never interpolate a path, compose a PV
-name, or hand-write an SSH command** — call the tool. All four print JSON.
+name, or hand-write an SSH command** — call the tool. All five print JSON, and each is
+owned by one module so a fault in one cannot break the others.
 
 | Tool | Use for |
 |---|---|
-| `bin/hutch-state path\|get\|set\|audit` | the experiment state file — the ONLY way to read or write it |
+| `bin/hutch-state path\|get\|set\|unset\|audit\|dump` | the experiment state file — the ONLY way to read or write it |
 | `bin/hutch-bridge ping\|install\|exec\|run\|classify` | anything sent to a live hutch-python session |
-| `bin/hutch-resolve devices\|device\|pv\|beampath\|detectors\|daq\|conf\|preset\|cell` | discovering machine truth from its authoritative source |
-| `bin/hutch-lute sbatch\|submit\|status\|traps\|kerberos` | LUTE submission and known-trap checking |
+| `bin/hutch-resolve devices\|device\|pv\|caget\|beampath\|daq\|conf\|detectors\|preset\|cell\|cat` | discovering machine truth from its authoritative source |
+| `bin/hutch-lute sbatch\|submit\|status\|watch\|traps\|kerberos` | LUTE submission, job status, known-trap checking |
+| `bin/hutch-config` | render a LUTE config with overrides, validated |
+
+They run from a bare checkout with no install step. `pip install -e .` is optional and only
+adds the same commands to PATH — never require it.
 
 Three rules that the tools enforce and you must not work around:
 

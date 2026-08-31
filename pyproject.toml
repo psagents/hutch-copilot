@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hutchlib"
+version = "0.1.0"
+description = "Tool layer for the hutch-copilot LCLS beamline skill"
+requires-python = ">=3.9"          # psconda ships 3.9.20; do not use 3.10+ syntax
+license = { text = "SLAC" }
+dependencies = []                   # core is stdlib-only, by design
+
+# Rendering LUTE configs is the only part with third-party deps, and it is
+# isolated in hutchlib/config.py so that hutch-state, hutch-bridge, hutch-resolve
+# and hutch-lute stay stdlib-only. Both are already present in psconda.
+[project.optional-dependencies]
+config = ["jinja2>=3.0", "PyYAML>=5.4"]
+dev = ["pytest>=7", "ruff>=0.1"]
+
+# INSTALLATION IS OPTIONAL AND MUST STAY OPTIONAL.
+#
+# This package lives inside a Claude Code skill directory, which is loaded by
+# path. bin/hutch-* work from a bare checkout with no install step, and that is
+# a feature: making the tools require `pip install` would recreate the exact
+# failure this refactor removed -- a skill that is broken on arrival for anyone
+# who did not set it up the way its author did. At a beamline, `pip install -e`
+# into the shared psconda environment is often not possible, and standing up a
+# venv is friction nobody wants at 03:00.
+#
+# So these entry points are a convenience for CI and for developers who want
+# `pip install -e .`, never the only route.
+[project.scripts]
+hutch-state = "hutchlib.state:main"
+hutch-bridge = "hutchlib.bridge:main"
+hutch-resolve = "hutchlib.resolvers:main"
+hutch-lute = "hutchlib.lute:main"
+hutch-config = "hutchlib.config:main"
+
+[tool.setuptools]
+packages = ["hutchlib"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+# Makes hutchlib importable without an install and without a conftest sys.path
+# hack, so the suite behaves identically installed or from a checkout.
+pythonpath = ["."]
+addopts = "-q"
+# Set the option rather than filtering the warning: pytest-asyncio emits it during
+# plugin init, before ini filters are installed, so muting it does not work anyway.
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = [".ruff_cache", "__pycache__", "work"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
+ignore = [
+    "E501",    # long lines are usually evidence strings in traps.py
+    "UP006",   # keep py39-compatible typing under `from __future__ import annotations`
+    "UP007",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Remote scripts are strings executed elsewhere; local heuristics do not apply.
+"hutchlib/resolvers.py" = ["E731"]
+"tests/*" = ["B011"]

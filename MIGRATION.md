@@ -67,9 +67,26 @@ Three rules make it work rather than just moving the problem:
 | `resolvers.py` | devices, device, pv, beampath, detectors, daq, conf, preset, cell |
 | `traps.py` | executable incident register + the phil-template whitelist extractor |
 | `lute.py` | task-agnostic LUTE submission adapter, Kerberos scoping, job status |
-| `cli.py` | `hutch-state`, `hutch-bridge`, `hutch-resolve`, `hutch-lute` — JSON out |
+| `_cli.py` | the shared output contract only: `out`, `fail`, exit codes, common args |
 
-Entry points in `bin/`, no install step required.
+Each module owns its own `main(argv)`, so the argparse spec for `hutch-state` sits next to
+`State` and adding a flag is a one-file change. There is no central `cli.py`: it imported
+every module at module level, so **a syntax error in `config.py` broke `hutch-state`**, and
+`hutch-state` paid ~25 ms importing `resolvers` and `bridge` it never uses. Verified after
+the split: breaking `config.py` leaves `hutch-state` and `hutch-lute` at rc=0 and fails only
+`hutch-config`.
+
+Config rendering is its own binary (`hutch-config`) rather than `hutch-lute config`. It is a
+different lifecycle phase from submission, and it is the only module needing jinja2 and
+PyYAML — isolating it keeps the other four stdlib-only.
+
+`pyproject.toml` declares metadata, the optional `config`/`dev` extras, pytest settings
+(`pythonpath = ["."]`, which removed the `conftest.py` sys.path hack) and ruff settings.
+**Installation stays optional**: `bin/hutch-*` work from a bare checkout, because a skill is
+loaded by path and requiring `pip install` would recreate the "broken on arrival for the
+second user" failure this refactor removed. `[project.scripts]` is a convenience for CI and
+developers, not the only route. The ruff section is declared but unverified — ruff is not
+present in psconda (a `.ruff_cache` from 0.12.5 exists, so someone runs it elsewhere).
 
 ### Bugs fixed
 
