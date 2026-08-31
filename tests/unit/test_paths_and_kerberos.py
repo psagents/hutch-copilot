@@ -61,3 +61,21 @@ def test_explicit_input_path_does_not_need_kerberos():
     needed, why = lute.needs_kerberos(PATHED)
     assert needed is False
     assert "no eLog interaction" in why
+
+
+def test_cell_string_matches_the_format_in_production_use(tmp_path):
+    """Pin the unit_cell spelling.
+
+    setup-cctbx-pipeline's validation greps for this string verbatim in the
+    rendered YAML, so '90.0' vs '90' is the difference between passing and a
+    spurious failure. Its read_cryst1 emits str(float); match that.
+    """
+    from hutchlib import resolvers
+    pdb = tmp_path / "x.pdb"
+    pdb.write_text(
+        "CRYST1   77.050   77.050   37.210  90.00  90.00  90.00 P 43 21 2     8\n"
+    )
+    rec = resolvers.cell(str(pdb))
+    assert rec["value"]["unit_cell"] == "77.05 77.05 37.21 90.0 90.0 90.0"
+    assert rec["value"]["space_group"] == "P 43 21 2"
+    assert rec["source"].startswith("resolved:CRYST1 ")

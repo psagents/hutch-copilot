@@ -233,9 +233,48 @@ def _merge_version(ctx: dict) -> list[str]:
     return []
 
 
+@trap(
+    "d-min-mismatch",
+    applies_to="lute-yaml",
+    what="merging_d_min must agree between the scale and merge stages.",
+    evidence=(
+        "the scale stage's merging.d_min * scaling.resolution_scalar sets the "
+        "reference-model limit seen by the per-image scale fit, min_corr's Pearson CC "
+        "and postrefinement; the merge stage's d_min is the hard truncation in "
+        "group_reflections AND the statistics binner range, i.e. it defines the word "
+        "'overall'. Changing one without the other silently compares unlike things."
+    ),
+)
+def _d_min_mismatch(ctx: dict) -> list[str]:
+    text = ctx.get("yaml_text", "")
+    seen: dict[str, str] = {}
+    for m in re.finditer(r"^([A-Za-z_]\w*):$", text, re.M):
+        task = m.group(1)
+        rest = text[m.end():]
+        nxt = re.search(r"^[A-Za-z_]\w*:$", rest, re.M)
+        block = rest[: nxt.start()] if nxt else rest
+        dm = re.search(r"^\s+merging_d_min:\s*(\S+)", block, re.M)
+        if dm:
+            seen[task] = dm.group(1)
+    values = {float(v) for v in seen.values()}
+    if len(values) > 1:
+        pairs = ", ".join(f"{t}={v}" for t, v in sorted(seen.items()))
+        return [f"merging_d_min disagrees between stages ({pairs}); set it in one place"]
+    return []
+
+
 # --------------------------------------------------------------------------
 # Silent-drop guard (Category C)
 # --------------------------------------------------------------------------
+#: jinja syntax, filters and literals that are not phil parameter names.
+_JINJA_WORDS = frozenset(
+    """if elif else endif for endfor in is not and or none true false defined
+    set endset macro endmacro block endblock raw endraw with endwith include
+    import from as do filter endfilter loop length default join trim lower
+    upper string int float list items keys values none_ sameas""".split()
+)
+
+
 def template_whitelist(template_text: str) -> set[str]:
     """Variable names a jinja phil template actually references.
 
@@ -243,8 +282,21 @@ def template_whitelist(template_text: str) -> set[str]:
     and the fixed template then silently drops anything it does not reference.
     A typo, or a knob that does not exist, is an invisible no-op. This is what
     made the campaign's search for a ``max_events`` parameter a dead end.
+
+    Scans both ``{{ ... }}`` and ``{% ... %}``: the real LUTE phil templates
+    guard most values with ``{% if x is defined and x is not none %}``, so a
+    ``{{ }}``-only scan would under-report the legal key set and produce false
+    "unknown key" errors.
     """
-    return set(re.findall(r"\{\{-?\s*([A-Za-z_][\w]*)", template_text))
+    names: set[str] = set()
+    for block in re.findall(r"\{\{(.*?)\}\}|\{%(.*?)%\}", template_text, re.S):
+        for chunk in block:
+            if not chunk:
+                continue
+            for ident in re.findall(r"[A-Za-z_][\w]*", chunk):
+                if ident not in _JINJA_WORDS:
+                    names.add(ident)
+    return names
 
 
 @trap(

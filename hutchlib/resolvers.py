@@ -310,9 +310,15 @@ def cell(pdb_path: str) -> dict:
                 al, be, ga = line[33:40], line[40:47], line[47:54]
                 sg = line[55:66].strip()
                 nums = [float(x) for x in (a, b, c, al, be, ga)]
+                # Format exactly as setup-cctbx-pipeline's read_cryst1 does
+                # (plain str(float), so 90.0 not 90). That skill's validation
+                # assertion greps for this string verbatim in the rendered YAML,
+                # and this spelling is the one in production use. Note its own
+                # docstring advertises "90 90 90", which the code does not
+                # produce -- follow the code, not the docstring.
                 return _record(
                     {
-                        "unit_cell": " ".join(f"{v:g}" for v in nums),
+                        "unit_cell": " ".join(str(v) for v in nums),
                         "space_group": sg,
                         "a": nums[0], "b": nums[1], "c": nums[2],
                         "alpha": nums[3], "beta": nums[4], "gamma": nums[5],

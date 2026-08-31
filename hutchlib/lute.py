@@ -154,6 +154,62 @@ def submit(
     return proc.stdout.decode().strip().splitlines()[0]
 
 
+#: Job-name fragments that indicate a LUTE-triggered workflow job.
+WORKFLOW_HINTS = ("lute", "dag", "sfx", "xes", "xss", "crystfel", "smalldata",
+                  "geom", "dark", "peds", "cctbx", "bayfai")
+
+
+def watch_for_jobs(
+    user: str,
+    *,
+    since: str | None = None,
+    timeout_s: int = 90,
+    poll_s: int = 10,
+    names: list[str] | None = None,
+    hints: tuple[str, ...] = WORKFLOW_HINTS,
+) -> dict:
+    """Poll squeue for a workflow job appearing after ``since``.
+
+    Replaces the prose polling loop that ``take-run`` Phase 5 described and
+    analysis monitoring described again, differently. Reports how long it
+    actually waited, so "no job found" cannot be confused with "did not look".
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    seen: dict[str, dict] = {}
+    polls = 0
+    while True:
+        polls += 1
+        proc = subprocess.run(
+            ["squeue", "-u", user, "-h", "-o", "%i|%j|%T|%V"],
+            capture_output=True, timeout=60,
+        )
+        for line in proc.stdout.decode("utf-8", "replace").splitlines():
+            parts = line.split("|")
+            if len(parts) != 4:
+                continue
+            jid, name, state, submit = (p.strip() for p in parts)
+            if since and submit < since:
+                continue
+            lowered = name.lower()
+            if (names and name in names) or any(h in lowered for h in hints):
+                seen[jid] = {"job_id": jid, "job_name": name, "state": state,
+                             "submit_time": submit}
+        if seen or time.monotonic() >= deadline:
+            break
+        time.sleep(poll_s)
+
+    return {
+        "found": bool(seen),
+        "jobs": sorted(seen.values(), key=lambda j: j["job_id"]),
+        "polls": polls,
+        "waited_s": timeout_s if not seen else None,
+        "user": user,
+        "since": since,
+    }
+
+
 def job_status(job_id: str) -> dict:
     """sacct summary for one job, with the wall-clock verdict spelled out.
 

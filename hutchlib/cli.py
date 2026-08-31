@@ -3,7 +3,7 @@
   hutch-state    path | get | set | audit
   hutch-bridge   ping | install | exec | run
   hutch-resolve  devices | device | pv | beampath | detectors | daq | conf | preset | cell
-  hutch-lute     sbatch | submit | status | traps | kerberos
+  hutch-lute     sbatch | submit | status | watch | traps | kerberos | config
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ import json
 import sys
 from typing import Any
 
-from . import bridge, lute, paths, resolvers, safety, state, traps
+from . import bridge, config, lute, paths, resolvers, safety, state, traps
+
+DELETE_HINT = config.DELETE
 
 
 def _out(obj: Any, plain: bool = False) -> int:
@@ -234,6 +236,12 @@ def lute_main(argv: list[str] | None = None) -> int:
     stt = sub.add_parser("status")
     stt.add_argument("job_id")
 
+    w = sub.add_parser("watch", help="poll squeue for a workflow job to appear")
+    w.add_argument("--user", required=True, help="e.g. mfxopr")
+    w.add_argument("--since", default=None, help="ISO timestamp; ignore older jobs")
+    w.add_argument("--timeout", type=int, default=90)
+    w.add_argument("--names", nargs="*", default=None, help="exact workflow names to match")
+
     tr = sub.add_parser("traps", help="list the incident register, or check a file")
     tr.add_argument("--scope", default=None,
                     choices=["sbatch", "lute-yaml", "run-params", "phil-overrides"])
@@ -242,8 +250,47 @@ def lute_main(argv: list[str] | None = None) -> int:
     kb = sub.add_parser("kerberos", help="does this config actually need a ticket?")
     kb.add_argument("--yaml", required=True)
 
+    cf = sub.add_parser("config", help="render a LUTE config with overrides, validated")
+    cf.add_argument("--template", required=True, help="jinja template path")
+    cf.add_argument("--context", default=None, help="JSON file of template context")
+    cf.add_argument("--set-context", nargs="*", default=[], metavar="K=V")
+    cf.add_argument("--set", nargs="*", default=[], dest="sets", metavar="TASK.BLOCK.KEY=V",
+                    help=f"override; value {DELETE_HINT} removes the key")
+    cf.add_argument("--overrides", default=None, help="JSON file of overrides")
+    cf.add_argument("--whitelist-dir", default=None,
+                    help="{LUTE_PATH}/config/templates -- enables the silent-drop check")
+    cf.add_argument("--no-whitelist", action="store_true",
+                    help="skip the silent-drop check (an unknown key will be ignored)")
+    cf.add_argument("--delims", default="lute", choices=sorted(config.DELIMITERS),
+                    help="lute: ${{ }} for template vars so LUTE's own {{ }} survives")
+    cf.add_argument("--out", default=None, help="write here; omit to print the config")
+
     args = ap.parse_args(argv)
     try:
+        if args.cmd == "config":
+            ctx = json.load(open(args.context)) if args.context else {}
+            ctx.update(config.parse_set(args.set_context))
+            ovr = json.load(open(args.overrides)) if args.overrides else {}
+            if isinstance(ovr, dict) and "overrides" in ovr:
+                ovr = ovr["overrides"]          # accept the campaign's params/*.json shape
+            ovr.update(config.parse_set(args.sets))
+            if not args.no_whitelist and not args.whitelist_dir:
+                raise config.ConfigError(
+                    "pass --whitelist-dir {LUTE_PATH}/config/templates so unknown phil "
+                    "keys are caught, or --no-whitelist to accept that they are dropped "
+                    "silently."
+                )
+            report = config.build(
+                template=args.template, context=ctx, overrides=ovr,
+                whitelist_dir=None if args.no_whitelist else args.whitelist_dir,
+                delims=args.delims,
+            )
+            if args.out:
+                path = config.write(report, args.out)
+                report = {k: v for k, v in report.items() if k != "text"}
+                report["written"] = str(path)
+                return _out(report)
+            return _out(report["text"], plain=True)
         if args.cmd == "sbatch":
             text = lute.build_sbatch(
                 task=args.task, config=args.config, log_dir=args.log_dir,
@@ -258,6 +305,11 @@ def lute_main(argv: list[str] | None = None) -> int:
                                                dependency=args.dependency)})
         if args.cmd == "status":
             return _out(lute.job_status(args.job_id))
+        if args.cmd == "watch":
+            res = lute.watch_for_jobs(args.user, since=args.since,
+                                      timeout_s=args.timeout, names=args.names)
+            _out(res)
+            return 0 if res["found"] else 4
         if args.cmd == "traps":
             if args.yaml:
                 text = open(args.yaml).read()
@@ -268,6 +320,6 @@ def lute_main(argv: list[str] | None = None) -> int:
             needed, why = lute.needs_kerberos(open(args.yaml).read())
             return _out({"needs_kerberos": needed, "why": why,
                          "have_ticket": lute.have_ticket()})
-    except (lute.LuteError, OSError) as exc:
+    except (lute.LuteError, config.ConfigError, OSError) as exc:
         return _fail(exc, 4)
     return 2
