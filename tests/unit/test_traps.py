@@ -59,16 +59,17 @@ def test_swallowed_exit_code_is_caught():
 def test_build_sbatch_refuses_to_emit_a_trapped_script(monkeypatch):
     # If someone edits the template badly, generation fails rather than
     # producing a script that dies ten minutes into a beamtime.
-    monkeypatch.setattr(lute, "PSCONDA", "/a/psconda.sh")
-    orig = lute.build_sbatch.__globals__["traps"].check
+    #
+    # The named import (`from .traps import check as check_traps`) makes this a
+    # plain attribute patch; it previously had to reach into
+    # `build_sbatch.__globals__["traps"]` and restore the original by hand.
     monkeypatch.setattr(
-        lute.build_sbatch.__globals__["traps"], "check",
+        lute, "check_traps",
         lambda scope, ctx: [{"id": "synthetic", "problem": "boom", "evidence": "test"}],
     )
     with pytest.raises(lute.LuteError, match="violates known traps"):
         lute.build_sbatch(task="T", config="c", log_dir="/l", lute_path="/p",
                           experiment="e", run=1, time_limit="00:10:00")
-    monkeypatch.setattr(lute.build_sbatch.__globals__["traps"], "check", orig)
 
 
 # --------------------------------------------------------------------------

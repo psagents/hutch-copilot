@@ -32,7 +32,17 @@ import shutil
 import subprocess
 from typing import Any
 
-from . import bridge, state
+from ._cli import UNREACHABLE, USAGE, fail, out, parser
+from .bridge import (
+    T_DEVICE,
+    T_QUERY,
+    BridgeError,
+    caget,
+    exec_code,
+    psdev_python,
+    psdev_read,
+)
+from .state import RESOLVED, State, utcnow
 
 HAPPI_DB = "/cds/group/pcds/pyps/apps/hutch-python/device_config/db.json"
 HUTCH_PYTHON = "/cds/group/pcds/pyps/apps/hutch-python"
@@ -44,12 +54,12 @@ class ResolveError(RuntimeError):
 
 
 def _record(value: Any, source: str, **extra: Any) -> dict:
-    rec = {"value": value, "source": source, "retrieved_at": state.utcnow()}
+    rec = {"value": value, "source": source, "retrieved_at": utcnow()}
     rec.update(extra)
     return rec
 
 
-def persist(st: state.State, field: str, rec: dict, *, kind: str = state.RESOLVED) -> dict:
+def persist(st: State, field: str, rec: dict, *, kind: str = RESOLVED) -> dict:
     """Write a resolver result into state, carrying its provenance."""
     return st.set(field, rec["value"], source=rec["source"], kind=kind)
 
@@ -82,13 +92,13 @@ print(json.dumps(rows))
 """
 
 
-def devices(hutch: str, *, timeout: int = bridge.T_QUERY) -> dict:
+def devices(hutch: str, *, timeout: int = T_QUERY) -> dict:
     """Full device inventory for a beamline, ordered along the beam (z).
 
     Source: the happi database, which *is* the device and PV registry. There is
     no reason for a skill to carry a device list in prose.
     """
-    out = bridge.psdev_python(
+    out = psdev_python(
         _DEVICES_SCRIPT, {"db": HAPPI_DB, "beamline": hutch}, timeout=timeout
     )
     try:
@@ -170,7 +180,7 @@ print(json.dumps(report))
 """
 
 
-def beampath(hutch: str, *, timeout: int = bridge.T_DEVICE) -> dict:
+def beampath(hutch: str, *, timeout: int = T_DEVICE) -> dict:
     """Live beampath state, including which devices are blocking.
 
     ``are-we-ready`` used to re-implement this determination in prose plus 75
@@ -178,7 +188,7 @@ def beampath(hutch: str, *, timeout: int = bridge.T_DEVICE) -> dict:
     it; the fallback path is reported in ``method`` rather than taken silently.
     """
     code = _BEAMPATH_SCRIPT.format(hutch=hutch.strip().lower())
-    res = bridge.exec_code(code, hutch=hutch, timeout=timeout)
+    res = exec_code(code, hutch=hutch, timeout=timeout)
     if not res["ok"]:
         raise ResolveError(f"beampath query failed: {res.get('error') or res['output'][:200]}")
     try:
@@ -238,10 +248,10 @@ def detectors(experiment: str, run: int, *, timeout: int = 300) -> dict:
 # --------------------------------------------------------------------------
 # hutch-python config: DAQ host, load list
 # --------------------------------------------------------------------------
-def hutch_conf(hutch: str, *, timeout: int = bridge.T_QUERY) -> dict:
+def hutch_conf(hutch: str, *, timeout: int = T_QUERY) -> dict:
     """The hutch's conf.yml, source of the DAQ host and platform."""
     path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/conf.yml"
-    text = bridge.psdev_read(path, timeout=timeout)
+    text = psdev_read(path, timeout=timeout)
     parsed: dict[str, Any] = {}
     for line in text.splitlines():
         m = re.match(r"^([a-zA-Z_][\w-]*):\s*(.*)$", line)
@@ -250,7 +260,7 @@ def hutch_conf(hutch: str, *, timeout: int = bridge.T_QUERY) -> dict:
     return _record(parsed, f"resolved:{path}", raw=text)
 
 
-def daq(hutch: str, *, timeout: int = bridge.T_QUERY) -> dict:
+def daq(hutch: str, *, timeout: int = T_QUERY) -> dict:
     """Live DAQ state and configuration.
 
     One implementation for both ``take-run`` Phase 0/0b and ``are-we-ready``
@@ -272,7 +282,7 @@ def daq(hutch: str, *, timeout: int = bridge.T_QUERY) -> dict:
         "        out[key] = 'ERROR: %s' % exc\n"
         "print(json.dumps(out))\n"
     )
-    res = bridge.exec_code(code, hutch=hutch, timeout=timeout)
+    res = exec_code(code, hutch=hutch, timeout=timeout)
     if not res["ok"]:
         raise ResolveError(f"DAQ query failed: {res.get('error') or res['output'][:200]}")
     try:
@@ -282,7 +292,7 @@ def daq(hutch: str, *, timeout: int = bridge.T_QUERY) -> dict:
     return _record(payload, f"resolved:daq signals via {res['host']}")
 
 
-def preset(hutch: str, device_name: str, *, timeout: int = bridge.T_QUERY) -> dict:
+def preset(hutch: str, device_name: str, *, timeout: int = T_QUERY) -> dict:
     """A motor's saved positions.
 
     Nominal setpoints belong here, not as literals in a checker script.
@@ -290,7 +300,7 @@ def preset(hutch: str, device_name: str, *, timeout: int = bridge.T_QUERY) -> di
     that number should come from a preset or from last-known-good state.
     """
     path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/presets/{device_name}.yml"
-    text = bridge.psdev_read(path, timeout=timeout)
+    text = psdev_read(path, timeout=timeout)
     return _record(text, f"resolved:{path}")
 
 
@@ -328,19 +338,19 @@ def cell(pdb_path: str) -> dict:
     raise ResolveError(f"no CRYST1 record in {pdb_path}")
 
 
-def cds_file(path: str, *, timeout: int = bridge.T_QUERY) -> dict:
+def cds_file(path: str, *, timeout: int = T_QUERY) -> dict:
     """Read any /cds file from S3DF. /cds is not mounted here; psdev bridges it."""
-    return _record(bridge.psdev_read(path, timeout=timeout), f"resolved:psdev cat {path}")
+    return _record(psdev_read(path, timeout=timeout), f"resolved:psdev cat {path}")
 
 
-def pv_values(pvs: list[str], *, hutch: str, timeout: int = bridge.T_QUERY) -> dict:
+def pv_values(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict:
     """Live PV values from a hutch control machine.
 
     EPICS CA is firewalled from both S3DF and psdev, so this is the only route.
     Compose the PV name with ``pv()`` rather than typing one.
     """
     return _record(
-        bridge.caget(pvs, hutch=hutch, timeout=timeout),
+        caget(pvs, hutch=hutch, timeout=timeout),
         f"resolved:caget on {hutch.lower()}-control",
     )
 
@@ -348,12 +358,20 @@ def pv_values(pvs: list[str], *, hutch: str, timeout: int = bridge.T_QUERY) -> d
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
-def main(argv: "list[str] | None" = None) -> int:
-    """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
+#: Command help, shared by build_parser() and main().
+_DOC = """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
     detectors | preset | cell | cat."""
-    from . import _cli
 
-    ap, sub = _cli.parser("hutch-resolve", main.__doc__)
+
+def build_parser() -> "argparse.ArgumentParser":
+    """Construct this command's parser.
+
+    Separate from main() so the CLI surface can be introspected -- the
+    doc-drift test walks every invocation in the markdown and checks its
+    subcommand and flags against these parsers.
+    """
+
+    ap, sub = parser("hutch-resolve", _DOC)
     ap.add_argument("--persist-to", nargs=2, metavar=("HUTCH", "EXPERIMENT"),
                     help="also write the result into that experiment's state")
     ap.add_argument("--field", default=None, help="state field to persist under")
@@ -385,7 +403,13 @@ def main(argv: "list[str] | None" = None) -> int:
     sub.add_parser("cell").add_argument("pdb")
     sub.add_parser("cat", help="read a /cds file from S3DF via psdev").add_argument("path")
 
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
+    detectors | preset | cell | cat."""
+    args = build_parser().parse_args(argv)
     try:
         if args.cmd == "devices":
             rec = devices(args.hutch)
@@ -410,11 +434,11 @@ def main(argv: "list[str] | None" = None) -> int:
         elif args.cmd == "cat":
             rec = cds_file(args.path)
         else:
-            return _cli.USAGE
+            return USAGE
 
         if args.persist_to:
             rec["persisted"] = persist(
-                state.State(*args.persist_to), args.field or args.cmd, rec)
-        return _cli.out(rec)
-    except (ResolveError, bridge.BridgeError, OSError) as exc:
-        return _cli.fail(exc, _cli.UNREACHABLE)
+                State(*args.persist_to), args.field or args.cmd, rec)
+        return out(rec)
+    except (ResolveError, BridgeError, OSError) as exc:
+        return fail(exc, UNREACHABLE)

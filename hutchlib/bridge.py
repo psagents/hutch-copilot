@@ -39,7 +39,7 @@ The remote client is passed to ssh as a single shell-quoted argv element, so
 there is no nested-quoting hazard at all -- the reason the markdown version was
 fragile.
 
-Everything sent to a live session goes through ``safety.require_confirmation``
+Everything sent to a live session goes through ``require_confirmation``
 first.
 """
 
@@ -51,7 +51,16 @@ import sys
 import subprocess
 from typing import Any
 
-from . import paths, safety
+from ._cli import OK, REFUSED, UNREACHABLE, USAGE, fail, out, parser
+from .paths import script, skill_root
+from .safety import (
+    BEAM_CRITICAL,
+    READ_ONLY,
+    WRITE,
+    SafetyRefusal,
+    classify,
+    require_confirmation,
+)
 
 #: SSH jump host for both /cds access and DAQ machines.
 JUMP_HOST = "psdev"
@@ -154,7 +163,7 @@ def exec_code(
     Read-only snippets need no confirmation; anything else is refused without
     a matching class.
     """
-    verdict = safety.require_confirmation(code, confirm)
+    verdict = require_confirmation(code, confirm)
 
     host = host or daq_host(hutch)
     client = (
@@ -199,7 +208,7 @@ def run_script(
     Replaces the ``SCRIPT=/sdf/home/f/fpoitevi/...`` incantation: the path is
     resolved relative to this skill's own install directory.
     """
-    src = paths.skill_root() / path if not path.startswith("/") else None
+    src = skill_root() / path if not path.startswith("/") else None
     text = (src or __import__("pathlib").Path(path)).read_text()
     if call:
         text = f"{text}\n{call}\n"
@@ -209,7 +218,7 @@ def run_script(
 def install_listener(hutch: str, host: str | None = None) -> str:
     """Copy oc_bridge.py to /tmp on the DAQ machine. Operator still starts it."""
     host = host or daq_host(hutch)
-    src = paths.script("scripts", "oc_bridge.py")
+    src = script("scripts", "oc_bridge.py")
     _ssh(host, "cat > /tmp/oc_bridge.py", stdin=src.read_bytes(), timeout=T_QUERY)
     return (
         f"installed {src.name} on {host}:/tmp/oc_bridge.py\n"
@@ -284,18 +293,26 @@ def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, st
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
-def main(argv: "list[str] | None" = None) -> int:
-    """hutch-bridge: ping | install | exec | run | classify."""
-    from . import _cli
+#: Command help, shared by build_parser() and main().
+_DOC = """hutch-bridge: ping | install | exec | run | classify."""
 
-    ap, sub = _cli.parser("hutch-bridge", main.__doc__)
+
+def build_parser() -> "argparse.ArgumentParser":
+    """Construct this command's parser.
+
+    Separate from main() so the CLI surface can be introspected -- the
+    doc-drift test walks every invocation in the markdown and checks its
+    subcommand and flags against these parsers.
+    """
+
+    ap, sub = parser("hutch-bridge", _DOC)
     ap.add_argument("--hutch", required=True)
     ap.add_argument("--host", default=None, help="override the DAQ host")
 
     sub.add_parser("ping")
     sub.add_parser("install", help="copy oc_bridge.py to the DAQ machine")
 
-    classes = [safety.READ_ONLY, safety.WRITE, safety.BEAM_CRITICAL]
+    classes = [READ_ONLY, WRITE, BEAM_CRITICAL]
 
     e = sub.add_parser("exec", help="run python in the live hutch-python session")
     e.add_argument("code", help="python source, or - to read stdin")
@@ -312,25 +329,30 @@ def main(argv: "list[str] | None" = None) -> int:
     c = sub.add_parser("classify", help="show a snippet's safety class without sending it")
     c.add_argument("code")
 
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-bridge: ping | install | exec | run | classify."""
+    args = build_parser().parse_args(argv)
     try:
         if args.cmd == "ping":
             res = ping(args.hutch, host=args.host)
-            _cli.out(res)
-            return _cli.OK if res["ok"] else _cli.UNREACHABLE
+            out(res)
+            return OK if res["ok"] else UNREACHABLE
         if args.cmd == "install":
-            return _cli.out(install_listener(args.hutch, host=args.host), plain=True)
+            return out(install_listener(args.hutch, host=args.host), plain=True)
         if args.cmd == "classify":
-            return _cli.out(safety.classify(args.code))
+            return out(classify(args.code))
         if args.cmd == "exec":
             code = sys.stdin.read() if args.code == "-" else args.code
-            return _cli.out(exec_code(code, hutch=args.hutch, confirm=args.confirm,
+            return out(exec_code(code, hutch=args.hutch, confirm=args.confirm,
                                       timeout=args.timeout, host=args.host))
         if args.cmd == "run":
-            return _cli.out(run_script(args.script, hutch=args.hutch, call=args.call,
+            return out(run_script(args.script, hutch=args.hutch, call=args.call,
                                        confirm=args.confirm, timeout=args.timeout))
-    except safety.SafetyRefusal as exc:
-        return _cli.fail(exc, _cli.REFUSED)
+    except SafetyRefusal as exc:
+        return fail(exc, REFUSED)
     except BridgeError as exc:
-        return _cli.fail(exc, _cli.UNREACHABLE)
-    return _cli.USAGE
+        return fail(exc, UNREACHABLE)
+    return USAGE

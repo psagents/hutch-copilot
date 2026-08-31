@@ -91,7 +91,7 @@ Common adjustments after first inspection:
 | Spectrum projected along wrong axis | `invert_xes_axes` | `AnalyzeSmallDataXES` block |
 | Too many shots rejected | `min_ipm`, `min_Iscat` | `intensity_thresholds` block |
 | Indexing rate too low (SFX/CrystFEL) | `min_peaks`, `pushres`, `indexing` | `IndexCrystFEL` block |
-| Wrong unit cell / space group (SFX) | `unit_cell`, `symmetry` | `IndexCrystFEL` / `MergePartialator`; resolve with `hutch-resolve cell --pdb` |
+| Wrong unit cell / space group (SFX) | `unit_cell`, `symmetry` | `IndexCrystFEL` / `MergePartialator`; resolve with `hutch-resolve cell <pdb>` |
 | **Indexing yield too low (SFX/CCTBX)** | `dispatch_hit_finder_minimum_number_of_reflections` — check the funnel before touching geometry | `IndexCCTBXXFEL.phil_parameters` |
 | Wall clock exhausted before the run ends (CCTBX) | `radial_average_enable` → false; `output_composite_output` → false so a kill keeps partial results | `IndexCCTBXXFEL.phil_parameters` |
 | An override appears to do nothing (CCTBX) | the key is not referenced by the phil template, so it is silently dropped | `bin/hutch-lute traps --scope phil-overrides` |

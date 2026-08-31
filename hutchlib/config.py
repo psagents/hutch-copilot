@@ -29,12 +29,15 @@ of hutchlib is stdlib-only.
 
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 import re
 from typing import Any
 
-from . import traps
+from ._cli import UNREACHABLE, fail, out
+from .traps import check as check_traps
+from .traps import template_whitelist
 
 #: Sentinel: remove the key entirely rather than setting a value.
 DELETE = "__DELETE__"
@@ -188,7 +191,7 @@ def whitelist_for(yaml_text: str, template_dir: str | pathlib.Path) -> dict[str,
         path = template_dir / basename
         if not path.exists():
             raise ConfigError(f"{task} names phil_file {basename!r}, absent from {template_dir}")
-        out[task] = traps.template_whitelist(path.read_text())
+        out[task] = template_whitelist(path.read_text())
     return out
 
 
@@ -293,7 +296,7 @@ def build(
 
     docs = parse_documents(text)
 
-    violations: list[dict] = list(traps.check("lute-yaml", {"yaml_text": text}))
+    violations: list[dict] = list(check_traps("lute-yaml", {"yaml_text": text}))
 
     if whitelist_dir is not None:
         allowed = whitelist_for(text, whitelist_dir)
@@ -302,7 +305,7 @@ def build(
                 k: v for k, v in overrides.items()
                 if k.startswith(f"{task}.") and v != DELETE
             }
-            violations += traps.check("phil-overrides", {"whitelist": keys, "overrides": scoped})
+            violations += check_traps("phil-overrides", {"whitelist": keys, "overrides": scoped})
         # Also check what the template itself emitted, not only our overrides:
         # a context key that no template references is equally a silent no-op.
         for task, keys in allowed.items():
@@ -360,11 +363,19 @@ def parse_set(pairs: list[str]) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
-def main(argv: "list[str] | None" = None) -> int:
-    """hutch-config: render a LUTE config with overrides, validated."""
-    from . import _cli
+#: Command help, shared by build_parser() and main().
+_DOC = """hutch-config: render a LUTE config with overrides, validated."""
 
-    ap = __import__("argparse").ArgumentParser(prog="hutch-config", description=main.__doc__)
+
+def build_parser() -> "argparse.ArgumentParser":
+    """Construct this command's parser.
+
+    Separate from main() so the CLI surface can be introspected -- the
+    doc-drift test walks every invocation in the markdown and checks its
+    subcommand and flags against these parsers.
+    """
+
+    ap = argparse.ArgumentParser(prog="hutch-config", description=_DOC)
     ap.add_argument("--template", required=True, help="jinja template path")
     ap.add_argument("--context", default=None, help="JSON file of template context")
     ap.add_argument("--set-context", nargs="*", default=[], metavar="K=V")
@@ -380,7 +391,12 @@ def main(argv: "list[str] | None" = None) -> int:
                     help="lute: ${{ }} for template vars so LUTE's own {{ }} survives")
     ap.add_argument("--out", default=None, help="write here; omit to print the config")
 
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-config: render a LUTE config with overrides, validated."""
+    args = build_parser().parse_args(argv)
     try:
         ctx = json.load(open(args.context)) if args.context else {}
         ctx.update(parse_set(args.set_context))
@@ -402,10 +418,10 @@ def main(argv: "list[str] | None" = None) -> int:
             delims=args.delims,
         )
         if not args.out:
-            return _cli.out(report["text"], plain=True)
+            return out(report["text"], plain=True)
         path = write(report, args.out)
         summary = {k: v for k, v in report.items() if k != "text"}
         summary["written"] = str(path)
-        return _cli.out(summary)
+        return out(summary)
     except (ConfigError, OSError) as exc:
-        return _cli.fail(exc, _cli.UNREACHABLE)
+        return fail(exc, UNREACHABLE)

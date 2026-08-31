@@ -1,7 +1,7 @@
 # /setup — Configure a LUTE Analysis Workflow
 
 Planning is conversational; writing is not. Nothing is written until the operator approves
-the plan, and then it is written by `hutch-lute config`, not by a heredoc.
+the plan, and then it is written by `hutch-config`, not by a heredoc.
 
 **Reference brain:** `@ask-lute` for LUTE internals (task catalog, YAML syntax, DAG
 structure, templates). `@ask-cctbx-xfel` for SFX parameter reasoning.
@@ -77,7 +77,7 @@ The tool returns every key plus `area_candidates`. **Show the list and ask which
 detector** — there are many detectors per instrument and the auto-detected value can be
 ambiguous. Never write an alias the operator has not confirmed.
 
-Same rule for the other inputs: get the unit cell from `hutch-resolve cell --pdb` (never
+Same rule for the other inputs: get the unit cell from `hutch-resolve cell <pdb>` (never
 hand-typed), and `ls` the experiment's `results/common/` tree for geometry and mask rather
 than recalling paths — a campaign lost time to a mask path documented without its `.mask`
 extension.
@@ -87,7 +87,7 @@ extension.
 ## 4. Render the config
 
 ```bash
-bin/hutch-lute config \
+bin/hutch-config \
   --template  "$TEMPLATE" \
   --context   context.json \
   --set       TASK.phil_parameters.KEY=VALUE ... \

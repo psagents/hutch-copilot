@@ -8,7 +8,7 @@ are gone. Parameter values are resolved or measured:
 | Was a table here | Get it from |
 |---|---|
 | detector aliases | `hutch-resolve detectors --experiment E --run N` |
-| unit cell, space group | `hutch-resolve cell --pdb F` (CRYST1 — never hand-typed) |
+| unit cell, space group | `hutch-resolve cell F` (CRYST1 — never hand-typed) |
 | device / PV names | `hutch-resolve pv --hutch H <device>` |
 | geometry, mask paths | the experiment's `results/common/` tree; `ls` it, do not recall it |
 | indexing yield, CC1/2, Rsplit, completeness | the scale and merge logs |

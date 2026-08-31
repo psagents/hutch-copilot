@@ -29,7 +29,16 @@ import tempfile
 import time
 from typing import Any, Iterator
 
-from . import paths
+from ._cli import (
+    STATE_ERROR,
+    USAGE,
+    experiment_args,
+    fail,
+    json_or_str,
+    out,
+    parser,
+)
+from .paths import log_file, state_file, xtc2_dir
 
 # --------------------------------------------------------------------------
 # Provenance
@@ -146,7 +155,7 @@ class State:
     def __init__(self, hutch: str, experiment: str):
         self.hutch = hutch
         self.experiment = experiment
-        self.path = paths.state_file(hutch, experiment)
+        self.path = state_file(hutch, experiment)
 
     # -- io ---------------------------------------------------------------
     def load(self) -> dict:
@@ -316,24 +325,32 @@ class State:
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
-def main(argv: "list[str] | None" = None) -> int:
-    """hutch-state: path | get | set | unset | audit | dump."""
-    from . import _cli, paths
+#: Command help, shared by build_parser() and main().
+_DOC = """hutch-state: path | get | set | unset | audit | dump."""
 
-    ap, sub = _cli.parser("hutch-state", main.__doc__)
+
+def build_parser() -> "argparse.ArgumentParser":
+    """Construct this command's parser.
+
+    Separate from main() so the CLI surface can be introspected -- the
+    doc-drift test walks every invocation in the markdown and checks its
+    subcommand and flags against these parsers.
+    """
+
+    ap, sub = parser("hutch-state", _DOC)
 
     for name in ("path", "audit", "dump"):
-        _cli.experiment_args(sub.add_parser(name))
+        experiment_args(sub.add_parser(name))
 
     g = sub.add_parser("get", help="read one field with its provenance")
-    _cli.experiment_args(g)
+    experiment_args(g)
     g.add_argument("field")
     g.add_argument("--stale-ok", action="store_true",
                    help="return a value past its TTL, with its age reported")
     g.add_argument("--value-only", action="store_true")
 
     s = sub.add_parser("set", help="write one field; --source is mandatory")
-    _cli.experiment_args(s)
+    experiment_args(s)
     s.add_argument("field")
     s.add_argument("value", help="JSON if parseable, else a string")
     s.add_argument("--source", required=True,
@@ -342,36 +359,41 @@ def main(argv: "list[str] | None" = None) -> int:
     s.add_argument("--ttl", type=float, default=None)
 
     u = sub.add_parser("unset")
-    _cli.experiment_args(u)
+    experiment_args(u)
     u.add_argument("field")
 
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    """hutch-state: path | get | set | unset | audit | dump."""
+    args = build_parser().parse_args(argv)
     st = State(args.hutch, args.experiment)
     try:
         if args.cmd == "path":
-            return _cli.out({
+            return out({
                 "state": str(st.path),
-                "log": str(paths.log_file(args.hutch, args.experiment)),
-                "xtc2": str(paths.xtc2_dir(args.hutch, args.experiment)),
+                "log": str(log_file(args.hutch, args.experiment)),
+                "xtc2": str(xtc2_dir(args.hutch, args.experiment)),
                 "exists": st.path.exists(),
             })
         if args.cmd == "dump":
-            return _cli.out(st.load())
+            return out(st.load())
         if args.cmd == "audit":
-            return _cli.out(st.audit())
+            return out(st.audit())
         if args.cmd == "get":
             entry = st.get_entry(args.field)
             if entry["stale"] and not args.stale_ok:
                 raise StaleValue(args.field, entry["age_s"] or 0, entry["ttl_s"], entry)
-            return _cli.out(entry["value"] if args.value_only else entry,
+            return out(entry["value"] if args.value_only else entry,
                             plain=args.value_only)
         if args.cmd == "set":
-            return _cli.out(st.set(
-                args.field, _cli.json_or_str(args.value), source=args.source,
+            return out(st.set(
+                args.field, json_or_str(args.value), source=args.source,
                 kind=args.kind, ttl_s=args.ttl if args.ttl is not None else -1.0))
         if args.cmd == "unset":
             st.unset(args.field)
-            return _cli.out({"unset": args.field})
+            return out({"unset": args.field})
     except StateError as exc:
-        return _cli.fail(exc, _cli.STATE_ERROR)
-    return _cli.USAGE
+        return fail(exc, STATE_ERROR)
+    return USAGE

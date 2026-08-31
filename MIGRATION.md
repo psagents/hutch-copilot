@@ -69,6 +69,27 @@ Three rules make it work rather than just moving the problem:
 | `lute.py` | task-agnostic LUTE submission adapter, Kerberos scoping, job status |
 | `_cli.py` | the shared output contract only: `out`, `fail`, exit codes, common args |
 
+Internal imports name what they use -- `from .traps import check as check_traps`, not
+`from . import traps` plus `traps.check(...)` at the call site. The dependency is then visible
+in the import block rather than buried in call sites, and it made the `build_sbatch` trap test
+a plain `monkeypatch.setattr(lute, "check_traps", ...)` instead of reaching into
+`build_sbatch.__globals__["traps"]` and restoring it by hand. A test asserts no
+`from . import` form comes back.
+
+`__init__.py` exposes a curated public API (`from hutchlib import State, classify, build`)
+via PEP 562 `__getattr__`. It **must** stay lazy: importing any submodule executes
+`__init__.py`, so an eager `from .config import build` there would pull jinja2 and PyYAML into
+`import hutchlib.state` and a syntax error in `config.py` would break `hutch-state` again. A
+test pins the exact module set loaded by `import hutchlib.state` to
+`{_cli, paths, state}`.
+
+Each module also exposes `build_parser()` separately from `main()`, which makes the CLI
+surface introspectable. That exists to support a doc-drift guard: every `bin/hutch-*`
+invocation in the markdown is parsed and its subcommand and flags checked against the real
+parsers. It immediately caught two drifts introduced during this refactor --
+`hutch-resolve cell --pdb F` when the CLI takes a positional path, and `hutch-lute config`
+after config became its own binary.
+
 Each module owns its own `main(argv)`, so the argparse spec for `hutch-state` sits next to
 `State` and adding a flag is a one-file change. There is no central `cli.py`: it imported
 every module at module level, so **a syntax error in `config.py` broke `hutch-state`**, and
@@ -76,7 +97,7 @@ every module at module level, so **a syntax error in `config.py` broke `hutch-st
 the split: breaking `config.py` leaves `hutch-state` and `hutch-lute` at rc=0 and fails only
 `hutch-config`.
 
-Config rendering is its own binary (`hutch-config`) rather than `hutch-lute config`. It is a
+Config rendering is its own binary (`hutch-config`) rather than `hutch-config`. It is a
 different lifecycle phase from submission, and it is the only module needing jinja2 and
 PyYAML — isolating it keeps the other four stdlib-only.
 
@@ -134,7 +155,7 @@ trap firing on the configuration that caused it.
 Verified against real artifacts, not only fixtures:
 
 ```bash
-bin/hutch-resolve cell --pdb /sdf/data/lcls/ds/mfx/mfx101624926/results/pam/1dpx.pdb
+bin/hutch-resolve cell /sdf/data/lcls/ds/mfx/mfx101624926/results/pam/1dpx.pdb
 #   -> 77.05 77.05 37.21 / P 43 21 2, matching the campaign
 bin/hutch-lute kerberos --yaml <campaign iter10 yaml>
 #   -> needs_kerberos: false
@@ -155,7 +176,7 @@ points** / handoff), and **if the decision-points section is empty it is not a s
 |---|---|---|---|
 | `are-we-ready` | 417 | 142 | judgment kept: ERROR is not OUT, deliberate-vs-misconfigured attenuator, when to escalate |
 | `take-run` | 403 | 154 | judgment kept: the DAQ-state gate, the confirmation, the triage table. Phases 4–5 became `hutch-lute watch` |
-| `analyze-data/commands/setup.md` | 293 | 146 | the field-by-field wizard and the heredoc writes became `hutch-lute config`; the DAG design and the detector-alias human gate stayed |
+| `analyze-data/commands/setup.md` | 293 | 146 | the field-by-field wizard and the heredoc writes became `hutch-config`; the DAG design and the detector-alias human gate stayed |
 | `coordinate-experiment` | 588 | 462 | dropped the duplicated state schema and the context-propagation table; ambient classification, `/sync-log` and `/handoff` are irreducibly model work |
 | **`bridge-to-cds`** | 313 | **deleted** | no decision points at all — pure mechanism, and it duplicated both `hutch-resolve` and the standalone `cds-bridge` skill. Its topology table now lives in `hutchlib/bridge.py`, next to the code it explains |
 
