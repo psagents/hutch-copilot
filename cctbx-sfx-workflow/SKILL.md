@@ -48,6 +48,13 @@ The watcher polls every **60 seconds**, drives the full loop autonomously,
 and exits after **30 idle polls** (30 min with no new runs or state changes).
 Pass a custom interval in seconds as an optional argument: `--watch 120`.
 
+> **Agent note:** `--watch` always prints a `Monitor: tail -f
+> {output_dir}/logs/watch_workflow_{JOBID}.log` line (with the real SLURM job
+> ID substituted) once submission succeeds. Always surface that exact command
+> back to the user as its own line immediately after submitting — don't just
+> mention that logs exist, give the copy-pasteable command with the real job
+> ID filled in, the same way it would appear if they ran `--watch` themselves.
+
 ```bash
 # Follow the log live
 tail -f {output_dir}/logs/watch_workflow_JOBID.log
