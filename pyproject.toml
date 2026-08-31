@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hutchlib"
+name = "hutch-tools"          # import name is hutch_tools; hyphens are illegal in module names
 version = "0.1.0"
 description = "Tool layer for the hutch-copilot LCLS beamline skill"
 requires-python = ">=3.9"          # psconda ships 3.9.20; do not use 3.10+ syntax
@@ -11,7 +11,7 @@ license = { text = "SLAC" }
 dependencies = []                   # core is stdlib-only, by design
 
 # Rendering LUTE configs is the only part with third-party deps, and it is
-# isolated in hutchlib/config.py so that hutch-state, hutch-bridge, hutch-resolve
+# isolated in hutch_tools/config.py so that hutch-state, hutch-bridge, hutch-resolve
 # and hutch-lute stay stdlib-only. Both are already present in psconda.
 [project.optional-dependencies]
 config = ["jinja2>=3.0", "PyYAML>=5.4"]
@@ -30,18 +30,18 @@ dev = ["pytest>=7", "ruff>=0.1"]
 # So these entry points are a convenience for CI and for developers who want
 # `pip install -e .`, never the only route.
 [project.scripts]
-hutch-state = "hutchlib.state:main"
-hutch-bridge = "hutchlib.bridge:main"
-hutch-resolve = "hutchlib.resolvers:main"
-hutch-lute = "hutchlib.lute:main"
-hutch-config = "hutchlib.config:main"
+hutch-state = "hutch_tools.state:main"
+hutch-bridge = "hutch_tools.bridge:main"
+hutch-resolve = "hutch_tools.resolvers:main"
+hutch-lute = "hutch_tools.lute:main"
+hutch-config = "hutch_tools.config:main"
 
 [tool.setuptools]
-packages = ["hutchlib"]
+packages = ["hutch_tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
-# Makes hutchlib importable without an install and without a conftest sys.path
+# Makes hutch_tools importable without an install and without a conftest sys.path
 # hack, so the suite behaves identically installed or from a checkout.
 pythonpath = ["."]
 addopts = "-q"
@@ -64,5 +64,5 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Remote scripts are strings executed elsewhere; local heuristics do not apply.
-"hutchlib/resolvers.py" = ["E731"]
+"hutch_tools/resolvers.py" = ["E731"]
 "tests/*" = ["B011"]

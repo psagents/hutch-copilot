@@ -24,7 +24,7 @@ overrides are applied as line edits rather than by round-tripping through a
 YAML parser, which would drop them.
 
 Requires jinja2 and PyYAML; both are in the psana conda environment. The rest
-of hutchlib is stdlib-only.
+of hutch_tools is stdlib-only.
 """
 
 from __future__ import annotations

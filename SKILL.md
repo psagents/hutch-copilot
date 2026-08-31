@@ -16,9 +16,9 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 
 ---
 
-## Tool Layer (`hutchlib`) — read this before any procedure below
+## Tool Layer (`hutch-tools`) — read this before any procedure below
 
-Mechanism lives in `hutchlib`, not in prose. **Never interpolate a path, compose a PV
+Mechanism lives in `hutch-tools`, not in prose. **Never interpolate a path, compose a PV
 name, or hand-write an SSH command** — call the tool. All five print JSON, and each is
 owned by one module so a fault in one cannot break the others.
 
@@ -76,7 +76,7 @@ and silently observes every conversation turn after that.
 > DAQ machine; `hutch-resolve cat/conf/preset/device` reads `/cds` via `psdev`; and
 > `hutch-resolve caget` reads live PVs from `{hutch}-control` (CA is firewalled from both
 > S3DF and psdev). The network topology and its constraints are documented in
-> `hutchlib/bridge.py`, next to the code that implements them.
+> `hutch_tools/bridge.py`, next to the code that implements them.
 
 ### Setup (once per hutch-python session)
 
@@ -173,7 +173,7 @@ When the user invokes `/analyze-data` or asks to configure analysis:
 
 ## Safety Protocol
 
-Classification is implemented in `hutchlib/safety.py` and enforced by `hutch-bridge`
+Classification is implemented in `hutch_tools/safety.py` and enforced by `hutch-bridge`
 before anything is transmitted. Run `hutch-bridge classify '<code>'` to get the class and
 the reasons, then use them to write the confirmation prompt.
 

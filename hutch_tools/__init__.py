@@ -1,4 +1,4 @@
-"""hutchlib -- the tool layer for hutch-copilot.
+"""hutch_tools -- the tool layer for hutch-copilot.
 
 Mechanism lives here so that skills can carry only judgment. Every command
 returns JSON on stdout and a non-zero exit status with a structured error on
@@ -16,11 +16,11 @@ Layering (nothing above depends on anything below it, and there are no cycles):
 
 Public API, for consumers that want names rather than modules::
 
-    from hutchlib import State, classify, build, ConfigError
+    from hutch_tools import State, classify, build, ConfigError
 
 WHY THIS IS LAZY. Importing any submodule executes this file, so an eager
 ``from .config import build`` here would pull ``config`` -- and therefore jinja2
-and PyYAML -- into ``import hutchlib.state``. That would undo the decoupling the
+and PyYAML -- into ``import hutch_tools.state``. That would undo the decoupling the
 per-module CLI split bought: a syntax error in ``config.py`` would once again
 break ``hutch-state``. PEP 562 ``__getattr__`` resolves each name only when it
 is actually asked for, so ``bin/hutch-state`` still touches nothing but
@@ -34,7 +34,7 @@ from typing import Any
 
 __version__ = "0.1.0"
 
-#: Submodules, in dependency order. ``from hutchlib import state`` is resolved by
+#: Submodules, in dependency order. ``from hutch_tools import state`` is resolved by
 #: the import system; ``__getattr__`` below only covers the attribute form.
 MODULES = (
     "_cli",

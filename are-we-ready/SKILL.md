@@ -15,7 +15,7 @@ description: >
 
 Read-only readiness checks. You move nothing.
 
-**All mechanism is in `hutchlib`** — see the Tool Layer section of `../SKILL.md`. This
+**All mechanism is in `hutch-tools`** — see the Tool Layer section of `../SKILL.md`. This
 file contains only routing, what to look at, and how to judge it. It deliberately ships
 no device lists, no PV names and no pass-condition constants: those are resolved.
 

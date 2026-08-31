@@ -43,7 +43,7 @@ bin/hutch-state audit --hutch "$H" --experiment "$E"   # every field with age + 
 bin/hutch-state set   --hutch "$H" --experiment "$E" FIELD VALUE --source "..." --kind ...
 ```
 
-The field list, the defaults and the per-field TTLs live in `hutchlib/state.py`. They used
+The field list, the defaults and the per-field TTLs live in `hutch_tools/state.py`. They used
 to be duplicated here as a JSON literal plus a 30-row table, which is exactly the kind of
 copy that drifts from the thing it describes.
 

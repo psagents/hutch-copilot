@@ -7,51 +7,51 @@ import sys
 
 import pytest
 
-import hutchlib
+import hutch_tools
 
 
 def test_public_names_resolve():
-    assert hutchlib.State.__name__ == "State"
-    assert hutchlib.classify("daq.state")["class"] == hutchlib.READ_ONLY
-    assert hutchlib.RESOLVED == "resolved"
-    assert issubclass(hutchlib.ConfigError, RuntimeError)
+    assert hutch_tools.State.__name__ == "State"
+    assert hutch_tools.classify("daq.state")["class"] == hutch_tools.READ_ONLY
+    assert hutch_tools.RESOLVED == "resolved"
+    assert issubclass(hutch_tools.ConfigError, RuntimeError)
 
 
 def test_unknown_attribute_raises_attribute_error():
     with pytest.raises(AttributeError, match="has no attribute 'nope'"):
-        hutchlib.nope
+        hutch_tools.nope
 
 
 def test_submodules_are_reachable_as_attributes():
-    assert hutchlib.paths.AGENT_SUBDIR == "results/psagents"
-    assert callable(hutchlib.state.main)
+    assert hutch_tools.paths.AGENT_SUBDIR == "results/psagents"
+    assert callable(hutch_tools.state.main)
 
 
 def test_dir_lists_the_public_surface():
-    listed = dir(hutchlib)
+    listed = dir(hutch_tools)
     assert "State" in listed and "paths" in listed and "build" in listed
     assert listed == sorted(listed)
 
 
 def test_every_export_actually_exists():
-    for name in hutchlib._EXPORTS:
-        assert getattr(hutchlib, name) is not None, name
+    for name in hutch_tools._EXPORTS:
+        assert getattr(hutch_tools, name) is not None, name
 
 
 def test_every_module_imports():
-    for name in hutchlib.MODULES:
-        assert getattr(hutchlib, name) is not None, name
+    for name in hutch_tools.MODULES:
+        assert getattr(hutch_tools, name) is not None, name
 
 
 # --------------------------------------------------------------------------
 # The decoupling this layout exists to preserve
 # --------------------------------------------------------------------------
 def _imported_after(target: str) -> set[str]:
-    """Which hutchlib submodules end up in sys.modules after importing `target`?"""
+    """Which hutch_tools submodules end up in sys.modules after importing `target`?"""
     code = (
         "import sys; sys.path.insert(0, '.');"
         f"import {target};"
-        "print(' '.join(sorted(m for m in sys.modules if m.startswith('hutchlib.'))))"
+        "print(' '.join(sorted(m for m in sys.modules if m.startswith('hutch_tools.'))))"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, check=True)
     return set(out.stdout.decode().split())
@@ -64,16 +64,16 @@ def test_importing_state_does_not_drag_in_config_or_its_deps():
     pull config -- and jinja2/PyYAML -- into every command, and a syntax error in
     config.py would break hutch-state again.
     """
-    loaded = _imported_after("hutchlib.state")
-    assert "hutchlib.config" not in loaded
-    assert "hutchlib.resolvers" not in loaded
-    assert "hutchlib.bridge" not in loaded
-    assert loaded == {"hutchlib._cli", "hutchlib.paths", "hutchlib.state"}
+    loaded = _imported_after("hutch_tools.state")
+    assert "hutch_tools.config" not in loaded
+    assert "hutch_tools.resolvers" not in loaded
+    assert "hutch_tools.bridge" not in loaded
+    assert loaded == {"hutch_tools._cli", "hutch_tools.paths", "hutch_tools.state"}
 
 
 def test_importing_lute_does_not_drag_in_config():
-    loaded = _imported_after("hutchlib.lute")
-    assert "hutchlib.config" not in loaded
+    loaded = _imported_after("hutch_tools.lute")
+    assert "hutch_tools.config" not in loaded
 
 
 def test_no_module_object_relative_imports_remain():
@@ -86,7 +86,7 @@ def test_no_module_object_relative_imports_remain():
     import pathlib
     import re
 
-    root = pathlib.Path(hutchlib.__file__).parent
+    root = pathlib.Path(hutch_tools.__file__).parent
     offenders = {
         p.name: re.findall(r"^\s*from \. import .*$", p.read_text(), re.M)
         for p in sorted(root.glob("*.py"))

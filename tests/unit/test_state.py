@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from hutchlib import paths, state
+from hutch_tools import paths, state
 
 
 @pytest.fixture()
@@ -111,7 +111,7 @@ def _writer(args):
     root, field = args
     os.environ["HUTCH_DS_ROOT"] = str(root)
     import importlib
-    from hutchlib import paths as p, state as s
+    from hutch_tools import paths as p, state as s
     importlib.reload(p)
     importlib.reload(s)
     s.State("mfx", "e1").set(field, field, source="concurrency test")
@@ -123,7 +123,7 @@ def test_concurrent_writers_do_not_lose_updates(tmp_path):
         pool.map(_writer, [(tmp_path, f) for f in fields])
     os.environ["HUTCH_DS_ROOT"] = str(tmp_path)
     import importlib
-    from hutchlib import paths as p, state as s
+    from hutch_tools import paths as p, state as s
     importlib.reload(p)
     importlib.reload(s)
     data = s.State("mfx", "e1").load()

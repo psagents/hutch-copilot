@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutchlib import lute, traps
+from hutch_tools import lute, traps
 
 
 def _ids(violations):

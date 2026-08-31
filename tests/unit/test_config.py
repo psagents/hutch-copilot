@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from hutchlib import config, traps
+from hutch_tools import config, traps
 
 TEMPLATE = """\
 %YAML 1.3

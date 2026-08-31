@@ -17,9 +17,9 @@ import re
 
 import pytest
 
-import hutchlib
+import hutch_tools
 
-SKILL = pathlib.Path(hutchlib.__file__).resolve().parent.parent
+SKILL = pathlib.Path(hutch_tools.__file__).resolve().parent.parent
 
 #: binary suffix -> module that owns it
 BINARIES = {
@@ -38,7 +38,7 @@ def _parsers():
 
     out = {}
     for suffix, module in BINARIES.items():
-        mod = importlib.import_module(f"hutchlib.{module}")
+        mod = importlib.import_module(f"hutch_tools.{module}")
         out[suffix] = mod.build_parser()
     return out
 

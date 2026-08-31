@@ -12,7 +12,7 @@ description: >
 
 # /take-run — Start a DAQ Run
 
-All mechanism is in `hutchlib` (see the Tool Layer section of `../SKILL.md`). This file
+All mechanism is in `hutch-tools` (see the Tool Layer section of `../SKILL.md`). This file
 owns the gate, the confirmation, and the triage.
 
 ---

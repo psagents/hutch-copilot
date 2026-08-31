@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutchlib import safety
+from hutch_tools import safety
 
 
 @pytest.mark.parametrize("code", [

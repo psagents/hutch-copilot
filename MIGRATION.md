@@ -56,7 +56,7 @@ Three rules make it work rather than just moving the problem:
 
 ## What landed
 
-### `hutchlib/` — the tool layer (stdlib only, Python 3.9+)
+### `hutch-tools/` — the tool layer (stdlib only, Python 3.9+)
 
 | Module | Responsibility |
 |---|---|
@@ -76,11 +76,11 @@ a plain `monkeypatch.setattr(lute, "check_traps", ...)` instead of reaching into
 `build_sbatch.__globals__["traps"]` and restoring it by hand. A test asserts no
 `from . import` form comes back.
 
-`__init__.py` exposes a curated public API (`from hutchlib import State, classify, build`)
+`__init__.py` exposes a curated public API (`from hutch_tools import State, classify, build`)
 via PEP 562 `__getattr__`. It **must** stay lazy: importing any submodule executes
 `__init__.py`, so an eager `from .config import build` there would pull jinja2 and PyYAML into
-`import hutchlib.state` and a syntax error in `config.py` would break `hutch-state` again. A
-test pins the exact module set loaded by `import hutchlib.state` to
+`import hutch_tools.state` and a syntax error in `config.py` would break `hutch-state` again. A
+test pins the exact module set loaded by `import hutch_tools.state` to
 `{_cli, paths, state}`.
 
 Each module also exposes `build_parser()` separately from `main()`, which makes the CLI
@@ -97,7 +97,7 @@ every module at module level, so **a syntax error in `config.py` broke `hutch-st
 the split: breaking `config.py` leaves `hutch-state` and `hutch-lute` at rc=0 and fails only
 `hutch-config`.
 
-Config rendering is its own binary (`hutch-config`) rather than `hutch-config`. It is a
+Config rendering is its own binary (`hutch-config`) rather than a `hutch-lute` subcommand. It is a
 different lifecycle phase from submission, and it is the only module needing jinja2 and
 PyYAML — isolating it keeps the other four stdlib-only.
 
@@ -178,7 +178,7 @@ points** / handoff), and **if the decision-points section is empty it is not a s
 | `take-run` | 403 | 154 | judgment kept: the DAQ-state gate, the confirmation, the triage table. Phases 4–5 became `hutch-lute watch` |
 | `analyze-data/commands/setup.md` | 293 | 146 | the field-by-field wizard and the heredoc writes became `hutch-config`; the DAG design and the detector-alias human gate stayed |
 | `coordinate-experiment` | 588 | 462 | dropped the duplicated state schema and the context-propagation table; ambient classification, `/sync-log` and `/handoff` are irreducibly model work |
-| **`bridge-to-cds`** | 313 | **deleted** | no decision points at all — pure mechanism, and it duplicated both `hutch-resolve` and the standalone `cds-bridge` skill. Its topology table now lives in `hutchlib/bridge.py`, next to the code it explains |
+| **`bridge-to-cds`** | 313 | **deleted** | no decision points at all — pure mechanism, and it duplicated both `hutch-resolve` and the standalone `cds-bridge` skill. Its topology table now lives in `hutch_tools/bridge.py`, next to the code it explains |
 
 Markdown total 2,303 -> 1,470 lines. `coordinate-experiment` lands well above the ~200 first
 estimated, and should: `/sync-log`, `/handoff`, ambient classification and the note-taking
@@ -230,7 +230,7 @@ deleted file itself said.
 ## Compatibility
 
 - `state.py` mirrors every write into `_timestamps`, so pre-refactor readers keep working.
-- Nothing in `hutchlib` imports outside the standard library except `resolvers.detectors`,
+- Nothing in `hutch-tools` imports outside the standard library except `resolvers.detectors`,
   which shells out to psana2 under psconda.
 - `HUTCH_DS_ROOT` overrides the data root, for tests and for the scenario harness.
 

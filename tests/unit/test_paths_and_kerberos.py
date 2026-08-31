@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pathlib
 
-from hutchlib import lute, paths
+from hutch_tools import lute, paths
 
 
 def test_skill_root_is_self_resolving():
@@ -12,7 +12,7 @@ def test_skill_root_is_self_resolving():
     # /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot in three places, which
     # broke the bridge setup and both readiness checks for every other user.
     root = paths.skill_root()
-    assert (root / "hutchlib" / "paths.py").exists()
+    assert (root / "hutch_tools" / "paths.py").exists()
     assert (root / "SKILL.md").exists()
 
 
@@ -70,7 +70,7 @@ def test_cell_string_matches_the_format_in_production_use(tmp_path):
     rendered YAML, so '90.0' vs '90' is the difference between passing and a
     spurious failure. Its read_cryst1 emits str(float); match that.
     """
-    from hutchlib import resolvers
+    from hutch_tools import resolvers
     pdb = tmp_path / "x.pdb"
     pdb.write_text(
         "CRYST1   77.050   77.050   37.210  90.00  90.00  90.00 P 43 21 2     8\n"
