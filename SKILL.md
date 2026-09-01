@@ -27,7 +27,7 @@ owned by one module so a fault in one cannot break the others.
 | `bin/hutch-state path\|get\|set\|unset\|audit\|dump` | the experiment state file — the ONLY way to read or write it |
 | `bin/hutch-bridge ping\|install\|exec\|run\|classify` | anything sent to a live hutch-python session |
 | `bin/hutch-resolve devices\|device\|pv\|caget\|beampath\|daq\|conf\|detectors\|preset\|cell\|cat` | discovering machine truth from its authoritative source |
-| `bin/hutch-lute sbatch\|submit\|status\|watch\|traps\|kerberos` | LUTE submission, job status, known-trap checking |
+| `bin/hutch-lute sbatch\|submit\|status\|watch\|peds\|readiness\|traps\|kerberos` | LUTE submission, job status, pedestals, readiness, known-trap checking |
 | `bin/hutch-config` | render a LUTE config with overrides, validated |
 
 They run from a bare checkout with no install step. `pip install -e .` is optional and only
@@ -67,6 +67,20 @@ and silently observes every conversation turn after that.
   infer or assume a value.
 - After every command completes, silently pass the interaction to coordinate-experiment
   for ambient logging (sample changes, run metadata, beam events, operator remarks).
+
+### LUTE readiness — read-only, every session
+
+Once hutch and experiment are known, check whether analysis is configured:
+
+```bash
+bin/hutch-lute readiness --hutch "$H" --experiment "$E"
+```
+
+Report it in one line as part of the init confirmation — `LUTE: configured (2 workflows)` or
+`LUTE: not configured — /analyze-data will set it up`. **Never install as a side effect.**
+Installing creates a venv, patches a DAG and registers eLog workflows; those are writes and
+belong behind `/analyze-data` with a confirmation. This check only reads, and it reports what
+it could not verify (eLog registration needs a ticket).
 
 ---
 
@@ -163,7 +177,7 @@ sub-skill.
 
 When the user invokes `/analyze-data` or asks to configure analysis:
 
-1. Read `analyze-data/SKILL.md` and dispatch to the appropriate sub-command.
+1. Read `analyze-data/SKILL.md` — one file, covering setup (sections 1–5) and refinement (section 6).
 2. Pass all known experiment state (hutch, experiment, DAQ generation, detectors,
    photon energy) so `analyze-data` does not re-ask for it.
 3. `analyze-data` owns the wizard and handles calibration gating, LUTE configuration,
@@ -229,15 +243,15 @@ being installed.
 | experiment state (read, write, provenance, staleness) | `hutch-state` |
 | live hutch-python session; safety classification | `hutch-bridge` |
 | device inventory, PV names, beampath, DAQ, detectors, presets, `/cds` files, live PVs | `hutch-resolve` |
-| LUTE submission, wall clock, job status, known traps, Kerberos scoping | `hutch-lute` |
+| LUTE submission, wall clock, job status, pedestals, readiness, traps, Kerberos scoping | `hutch-lute` |
 | LUTE config rendering with overrides and validation | `hutch-config` (templates in `templates/`) |
 | DAQ runs (DARK/GEOM/DATA), XTC2 verify, LUTE trigger watch | `take-run/` |
 | beam and hutch readiness | `are-we-ready/` |
 | LUTE analysis setup and refinement | `analyze-data/` |
 | experiment context, condition tracking, beamtime log, handoff | `coordinate-experiment/` |
-| CCTBX DAG pattern, d_min hazard, funnel diagnosis | `analyze-data/references/sfx-cctbx-patterns.md` |
+| CCTBX DAG pattern, d_min hazard, coverage×yield, symptom→knob | `references/sfx-cctbx-patterns.md` |
 | network topology, why `ssh -L` fails, `/cds` vs `/sdf` | `hutch_tools/bridge.py` docstring |
-| pedestal deployment fallback for Jungfrau | `take-run/references/dark-run.md` |
+| pedestal deployment, incl. the Jungfrau fallback | `hutch-lute peds` |
 
 ### Optional advisors
 

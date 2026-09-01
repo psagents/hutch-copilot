@@ -89,3 +89,25 @@ It is `coverage × yield`. Iterations 8 and 9 of the campaign had **identical** 
 parameters, yet `n_indexed` went 4460 → 6019 because the job happened to attempt 33551
 events instead of 22839. Always report `events_attempted` and `yield = images/events`
 alongside `n_indexed`, and compare on yield.
+
+
+---
+
+## Symptom → knob
+
+The one table worth keeping from the retired `/refine` command. **Check the funnel before
+touching geometry** — that ordering is the campaign's most expensive lesson.
+
+| Symptom | First thing to change | Where |
+|---|---|---|
+| **Indexing yield too low (CCTBX)** | `dispatch_hit_finder_minimum_number_of_reflections` — read the funnel first; a low rate is *not* reliably a geometry problem | `IndexCCTBXXFEL.phil_parameters` |
+| Wall clock exhausted before the run ends | `radial_average_enable`→false; `output_composite_output`→false so a kill keeps partial results | `IndexCCTBXXFEL.phil_parameters` |
+| An override appears to do nothing | the key is not referenced by the phil template, so it is silently dropped | `hutch-config --whitelist-dir …` |
+| Job reported COMPLETED but produced nothing | `run_task.py` exits 0 on Task failure | `hutch-lute status <job_id>` |
+| Wrong unit cell / space group | never hand-type it | `hutch-resolve cell <pdb>` |
+| High Rsplit with many patterns | wrong symmetry, too few patterns, or partiality mismatch — check multiplicity before blaming parameters | scale/merge logs |
+| Indexing rate too low (CrystFEL) | `min_peaks`, `pushres`, `indexing` | `IndexCrystFEL` block |
+
+Inspecting output is a tool's job, not the operator's: the retired `/refine` asked the user
+to run `h5py` and paste the result. That becomes `lute-stats` (MIGRATION.md item 1); until it
+exists, read the scale and merge logs directly rather than asking for a paste.

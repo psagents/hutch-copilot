@@ -100,10 +100,20 @@ bin/hutch-bridge --hutch "$H" exec 'get_run()'
 ```
 
 `GEOM`: `geomrun(run_length={n}, record=True, runs=1)` — it presets sample, tag and
-`run_type` itself. `DARK`: `takepeds()`, then **after** XTC2 is confirmed, deploy pedestals
-with `ssh psdev "makepeds -e {experiment} -r {run} -u {hutch}opr"` (a separate write —
-confirm it separately). If `makepeds` fails, which is a known Jungfrau issue at MFX, see
-`references/dark-run.md` for the direct Jungfrau fallback.
+`run_type` itself.
+
+**`DARK` is two steps, and the second is a separate write.** `takepeds()` records the data
+through the bridge (self-timed by the gain-mode scan — do not pass a duration). Only **after
+XTC2 is confirmed** does the analysis side run:
+
+```bash
+bin/hutch-lute peds --experiment "$E" --run {run} --hutch "$H" \
+    --detector "{detector}" --confirm write
+```
+
+The tool refuses if no XTC2 has landed, and if `makepeds` fails it names the per-detector
+fallback and how to run it — `makepeds` has documented failures for Jungfrau at MFX. Confirm
+this step with the operator separately from the run itself.
 
 Record the time the run command returned — `watch` needs it in step 4.
 
@@ -129,7 +139,8 @@ Triage:
 | No XTC2 after 30 s | Retry once at 60 s, then warn: the run may not have recorded. Check `daq.state`. |
 | No LUTE job after 90 s | Point at the eLog run table. **Do not re-submit.** |
 | Job `COMPLETED` but no output | `run_task.py` exits 0 even when the Task failed — check the Executor log. `hutch-lute status` also flags `hit_wall_clock`. |
-| `takepeds()` raises | Report it; ask the operator to check detector config and DAQ state. |
+| `takepeds()` raises | Report it; ask the operator to check detector config and DAQ state. If it fails on an import, it may have sourced an analysis conda env — have them run `epixquad_pedestal_scan --record 1 --hutch {hutch}` from the DAQ terminal. |
+| `makepeds` fails | Expected for Jungfrau at MFX. Re-run `hutch-lute peds --fallback --detector {detector} --confirm write`; the tool reports the reason and the commands. |
 | Bridge offline | Give the operator the commands to run by hand, then infer the run number from `last_run_number + 1` and confirm it against the XTC2 directory. |
 
 ---

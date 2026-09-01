@@ -256,6 +256,46 @@ Both guards were verified to actually fail on an injected violation, not merely 
 
 ---
 
+### One file per sub-skill
+
+The first restructure thinned every `SKILL.md` but never re-applied the test to their
+*subdirectories*. Doing so found 937 lines of untested mechanism still living next to prose —
+about a quarter of the repo's mechanism had never reached the tool layer.
+
+| Was | Now | Why |
+|---|---|---|
+| `take-run/references/dark-run.md` (151) | **deleted** → `hutch-lute peds` + one trap | It was 40% mechanism (the makepeds chain and per-detector fallbacks), 30% a hand-maintained hardware table, and it still carried `/reg/g/pcds` paths this repo's own topology notes call the deprecated alias |
+| `analyze-data/commands/setup.md` (146) | folded into `analyze-data/SKILL.md` | `commands/` cost a 72-line router to save loading 300 lines; not worth the indirection at this size |
+| `analyze-data/commands/refine.md` (166) | **deleted**, symptom→knob table kept | The rest was mechanism already tooled, plus a step that asked the operator to run `h5py` and paste the output |
+| `analyze-data/references/` | hoisted to `references/` | The content is *technique*-scoped (CCTBX), not sub-skill-scoped |
+
+**Every sub-skill is now one file.** The rule that produced that: *if a sub-skill needs a
+subdirectory, it is holding something that is not judgment.* The two remaining `scripts/`
+directories are the acknowledged exceptions, and both are on the list below.
+
+`scripts/oc_bridge.py` at repo root stays where it is — it is not code we execute but a
+payload `cat`-ed onto a DAQ machine for the operator to `exec()`. It runs in someone else's
+interpreter, which makes it data.
+
+### `hutch-lute peds` and `hutch-lute readiness`
+
+`peds` deploys pedestal constants for a DARK run. It **refuses without `--confirm write`**
+(it writes to the calibration store, so the same rule applies as to a device move), it
+**refuses if no XTC2 has landed** for that run (new trap `peds-before-xtc2`), and when
+`makepeds` fails it names the per-detector fallback and how to run it. The Jungfrau-at-MFX
+failure is now data in `PEDS_FALLBACKS` with its Confluence evidence, not prose in a file
+nobody opens. `takepeds()` stays on the bridge — it runs inside the hutch-python session.
+
+`readiness` answers "is LUTE configured for this experiment?" and is **read-only by design**.
+It was proposed for `analyze-data`, but two things were wrong with that: installing LUTE
+creates a venv, patches a DAG and registers eLog workflows — all writes, none of which should
+happen because someone asked whether we are ready — and `analyze-data/SKILL.md` is only read
+when someone asks about analysis, so a check placed there would never have run at session
+start. It now runs in root `SKILL.md`'s initialization, reports in one line, and states what
+it could not verify (eLog registration needs a ticket).
+
+---
+
 ## What remains, in order
 
 1. **`lute-stats --json`** — logs -> metrics with a declared schema, reporting files scanned.
@@ -268,8 +308,11 @@ Both guards were verified to actually fail on an injected violation, not merely 
 3. **`hutch-resolve runs --exp --tag`** — eLog run/tag resolution. Deliberately not stubbed:
    it needs Kerberos and belongs with `elog-search`, and a stub that looks like a resolver
    would be worse than its absence.
-4. **Move the nominal pointing setpoint** out of `check_beam_ready_mfx.py` (where
-   `mr1l4_homs.pitch ~= -562.035` is a literal) into `hutch-resolve preset`.
+4. **Move the two `scripts/` directories into the tool layer** — the last mechanism still
+   living beside prose. `analyze-data/scripts/install_lute.py` (511 lines, untested, talks to
+   the eLog) becomes a command; `are-we-ready/scripts/check_*_mfx.py` (426 lines) fold into
+   `resolvers`, parameterized by hutch instead of MFX-only. Their nominal pointing setpoint
+   (`mr1l4_homs.pitch ~= -562.035`, currently a literal) becomes `hutch-resolve preset`.
 5. **Extend the scenario harness.** `tests/sfx_basic/` (13 steps, assertions + mocks) is the
    best thing in the repo and should keep testing what it is good at — dispatch, safety
    gating, handoff. Its `expected_lute_checks.yaml` needs updating for the tool calls, and

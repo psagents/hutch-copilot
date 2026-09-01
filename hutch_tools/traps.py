@@ -323,6 +323,31 @@ def _phil_keys(ctx: dict) -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# Pedestals
+# --------------------------------------------------------------------------
+@trap(
+    "peds-before-xtc2",
+    applies_to="peds",
+    what="makepeds reads the DARK run's XTC2 files, so they must have landed first.",
+    evidence=(
+        "documented prerequisite: 'The XTC2 files must already be present on S3DF' "
+        "(take-run dark-run reference, now retired into this register). Deploying "
+        "before arrival produces pedestals from absent or partial data, and the "
+        "calibration store then silently serves them to every later run."
+    ),
+)
+def _peds_before_xtc2(ctx: dict) -> list[str]:
+    if "xtc2_files" not in ctx:
+        return []
+    if not ctx["xtc2_files"]:
+        return [
+            f"no XTC2 files found for run {ctx.get('run')} -- verify the DARK run "
+            f"recorded before deploying pedestals"
+        ]
+    return []
+
+
+# --------------------------------------------------------------------------
 # Run parameters
 # --------------------------------------------------------------------------
 @trap(
