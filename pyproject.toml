@@ -35,6 +35,7 @@ hutch-bridge = "hutch_tools.bridge:main"
 hutch-resolve = "hutch_tools.resolvers:main"
 hutch-lute = "hutch_tools.lute:main"
 hutch-config = "hutch_tools.config:main"
+hutch-log = "hutch_tools.log:main"
 
 [tool.setuptools]
 packages = ["hutch_tools"]

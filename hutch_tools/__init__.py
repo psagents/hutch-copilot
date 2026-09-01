@@ -8,7 +8,9 @@ Layering (nothing above depends on anything below it, and there are no cycles):
 
     _cli                       output contract only: out, fail, exit codes
     paths  safety  traps       leaves; no intra-package dependencies
+    _fs                        lock + atomic append, shared by state and log
     state     -> paths
+    log       -> paths
     bridge    -> paths, safety
     lute      -> traps
     config    -> traps
@@ -38,6 +40,7 @@ __version__ = "0.1.0"
 #: the import system; ``__getattr__`` below only covers the attribute form.
 MODULES = (
     "_cli",
+    "_fs",
     "paths",
     "safety",
     "traps",
@@ -46,6 +49,7 @@ MODULES = (
     "lute",
     "config",
     "resolvers",
+    "log",
 )
 
 #: Curated public names -> the module that defines each. Anything absent is
@@ -88,6 +92,8 @@ _EXPORTS = {
     "build_sbatch": "lute",
     "job_status": "lute",
     "needs_kerberos": "lute",
+    # log
+    "LogError": "log",
     # config
     "ConfigError": "config",
     "DELETE": "config",

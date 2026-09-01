@@ -33,55 +33,44 @@ reads as its authoritative source of truth.
 
 ## Persistent Files and State
 
-`hutch-state` owns both paths and the schema. Never write a path out, and never hand-format
-the JSON:
+Two files, two tools. **Never write either by hand.**
 
 ```bash
-bin/hutch-state path  --hutch "$H" --experiment "$E"   # state + log + xtc2 paths
-bin/hutch-state dump  --hutch "$H" --experiment "$E"   # the whole object
-bin/hutch-state audit --hutch "$H" --experiment "$E"   # every field with age + provenance
-bin/hutch-state set   --hutch "$H" --experiment "$E" FIELD VALUE --source "..." --kind ...
+bin/hutch-state path|dump|audit|set   # the state JSON: facts, with provenance and TTL
+bin/hutch-log   init|append|section|tail   # the beamtime log: events, for humans
 ```
 
-The field list, the defaults and the per-field TTLs live in `hutch_tools/state.py`. They used
-to be duplicated here as a JSON literal plus a 30-row table, which is exactly the kind of
-copy that drifts from the thing it describes.
+`hutch-state set` requires `--source` and a `--kind` of `resolved` / `operator` / `inferred`,
+and reads past a field's TTL fail. `hutch-log append` stamps the time from the machine, can
+only add at the end of the file, and owns the `---` separator. The schema, the TTLs and the
+document conventions live in `hutch_tools/state.py` and `hutch_tools/log.py` — they used to be
+duplicated here as a JSON literal, a 30-row table and ~60 lines of formatting rules.
 
-Three properties you can rely on, and must not work around:
-
-- **`--source` is mandatory** and `--kind` is `resolved` (read from an authoritative
-  source), `operator` (a human said so) or `inferred` (reasoning only). This is what lets a
-  later reader tell a measurement from a claim — the old schema had timestamps but no
-  source, so a value typed at 03:00 looked identical to one read off the machine.
-- **Reads past a field's TTL fail.** Don't quote a stale number silently; re-resolve, or use
-  `--stale-ok` and say how old it is.
-- **Writes are atomic and lock-serialised.** Several agents plus the operator may write
-  during a shift, so never edit the JSON by hand alongside the tool.
+**Your job is neither store nor scribe — it is deciding what counts as either.**
 
 ## Initialization Flow
 
 Run **once** on the first hutch-copilot trigger.
 
-### Step 1 — Attempt state file recovery
+### Step 1 — Recover state
 
-If the hutch and experiment are already known, try to read the state JSON:
-
-```
-/sdf/data/lcls/ds/{hutch}/{experiment}/results/psagents/{experiment}_state.json
+```bash
+bin/hutch-state audit --hutch "$H" --experiment "$E"
 ```
 
-- **File found**: load the state object into context. Note the `machine_state.last_checked`
-  timestamp — if it is from a previous session or more than 10 minutes old, inform the user
-  that machine state may be stale and offer to refresh it via `/are-we-ready`. Confirm
-  restored context in one line:
+**Never write the state path out** — `hutch-state` owns it. (This section used to spell it
+out in prose, which is exactly the defect that made three other sub-skills read a file
+nothing wrote.)
+
+- **Fields returned**: load them into context. Anything with `"stale": true` is reported as
+  stale, not as current — say so and offer `/are-we-ready` to refresh machine state. Confirm
+  in one line, quoting ages rather than implying freshness:
   > *"Restored context: {sample_name}, {concentration}, {sample_delivery}, {photon_energy_eV} eV
-  > (last saved {_timestamps.sample_name}). Machine state last checked {machine_state.last_checked}.
-  > Still current?"*
+  > (recorded {age}s ago, source: {kind}). Machine state last checked {age}s ago. Still current?"*
 
-- **File not found**: ask for the following in one compact prompt:
+- **Nothing returned** (`MissingValue` on everything): ask in one compact prompt —
   > *"Starting experiment log. Please confirm: hutch, experiment ID, current sample
   > (name, concentration, delivery method)?"*
-  Then create the `psagents/` directory and both files.
 
 ### Step 1b — EPICS context discovery (runs right after Step 1)
 
@@ -112,26 +101,17 @@ bin/hutch-state set --hutch "$H" --experiment "$E" photon_energy_eV 9500.3 \
 50 eV or 5 Hz, report both with their provenance (`operator` vs `resolved`) and ask which is
 correct. Do not silently prefer either.
 
-### Step 2 — Open or create the log file
+### Step 2 — Open or create the log
 
-If creating fresh, initialize with:
-
-```markdown
-# {HUTCH} Beamtime Log
-**Date:** {shift_date}
-**Experiment:** {experiment}
-**Shift start:** {shift_start}
-
----
-
-## Shift Start
-
-- **{HH:MM}** Experiment context initialized.
-- Sample: {sample_name}, {concentration}, {sample_delivery} — {delivery_details}
-- Photon energy: {photon_energy_eV} eV
-- Transmission: {transmission}
-- Rep rate: {rep_rate_Hz} Hz
+```bash
+bin/hutch-log init --hutch "$H" --experiment "$E" --shift-date "$DATE" \
+    --field "Sample=$SAMPLE" --field "Photon energy=$ENERGY eV" \
+    --field "Transmission=$T" --field "Rep rate=$RATE Hz"
 ```
+
+Idempotent — it never overwrites an existing log, so it is safe to call on every session
+start. It writes the document header and the `## Shift Start` section; the format is
+`hutch_tools/log.py`'s business, not yours.
 
 ---
 
@@ -231,15 +211,15 @@ When the user explicitly states a condition change (*"we just changed samples to
 
 1. **Parse** the utterance → identify changed fields only.
 2. **Update** the state object in-context, recording the timestamp in `_timestamps`.
-3. **Write** the updated state to `{experiment}_state.json`.
-4. **Check current time**: `date +"%H:%M"` (24h).
-5. **Append** a timestamped section to `{experiment}_logs.md`:
+3. **Write** each changed field with `hutch-state set … --source … --kind operator` — an
+   operator-declared change is `operator`, never `resolved`.
+4. **Do not fetch the time** — `hutch-log append` stamps it from the machine clock.
+5. **Append** via the tool — one call per changed field, so each carries its own timestamp:
 
-```markdown
-### Condition Change – HH:MM
-
-- {field}: {new_value} *(changed from {old_value})*
-- {field}: {new_value}
+```bash
+bin/hutch-log section --hutch "$H" --experiment "$E" "Condition Change" --level 3
+bin/hutch-log append  --hutch "$H" --experiment "$E" \
+    "{field}: {new_value} (changed from {old_value})"
 ```
 
 6. **Post** a short human-readable note to the eLog. There is no eLog skill installed, so show the operator the text and ask them to post it, or use the
@@ -300,17 +280,18 @@ ambient-extracted notes. Those go to the log file only.
 
 ### Appending Rules
 
-1. **Always read the current log file** before any structural edit.
-2. **Append, don't restructure** unless explicitly asked.
-3. New phases get a `##` heading with a `---` separator after the previous section.
-4. Never insert a `---` or a new `##` inside an existing section.
-5. Keep entries **concise and factual** — do not rephrase the user's words.
+1. **Append, don't restructure.** `hutch-log append` can only add at the end of the file,
+   so this is enforced rather than remembered.
+2. New phases are `hutch-log section "<title>"` (level 2); topics are `--level 3`. The tool
+   owns the `---` separator and will not emit two in a row.
+3. Keep entries **concise and factual** — do not rephrase the operator's words. This one is
+   yours; no tool can check it.
 
 ### Formatting Conventions
 
 | Element | Convention |
 |---|---|
-| Timestamps | `**HH:MM**` prefix on bullet (24h); get time via `date +"%H:%M"` |
+| Timestamps | handled by `hutch-log append`; pass `--at HH:MM` only to backdate a reconstruction |
 | Mirror / optic names | Bold + exact case: **MR1L0**, **MR1L4** |
 | YAG / imager names | Bold: **DG1 YAG**, **IM3L0** |
 | Slit names | Bold: **SLITS1**, **SLITS 3M** |
@@ -326,35 +307,19 @@ ambient-extracted notes. Those go to the log file only.
 
 ---
 
-## `/context` Command
+## `/context` — not handled here
 
-**Do not handle `/context` here.** It is a pure lookup:
+Root dispatches it as **Tool only**: `hutch-state audit`, then format. The audit reports each
+field's age and provenance, which the prose template this section used to carry could not.
 
-```bash
-bin/hutch-state audit --hutch "$H" --experiment "$E"
-```
-
-Format that output — grouped as sample / beam / laser / last run / machine state, omitting
-null fields. The audit is strictly better than the prose template this section used to carry,
-because it returns each field's age and provenance, so stale values announce themselves
-instead of being printed as though current. Flag anything with `"stale": true`.
-
-## Context Propagation
-
-Nothing to propagate. Sub-skills read what they need through `hutch-state` and resolve what
-is missing, so there is no list of fields to inject and no chance of a sub-skill being handed
-a value whose age it cannot see. This section used to be a per-sub-skill field table; it was
-load-bearing only because three sub-skills were reading the state file from the wrong path.
+There is also nothing to propagate to sub-skills: they read what they need through
+`hutch-state` and resolve what is missing, so no field list needs injecting.
 
 ## Context Recovery on Session Reset
 
-1. Read `{experiment}_state.json`.
-2. Load all fields into context.
-3. Check `machine_state.last_checked` — if from a previous session, note it may be stale
-   and offer to refresh via `/are-we-ready` before the next operation.
-4. Confirm restored context with the user in one line before proceeding.
-
----
+`hutch-state audit` is the recovery step — it returns every field with its age. Flag anything
+`stale: true`, confirm the restored context with the operator in one line, and offer
+`/are-we-ready` before the next operation if machine state has expired.
 
 ## `/sync-log` Command
 
@@ -365,8 +330,12 @@ that were missed by the ambient observation step.
 
 ### Step 1 — Read current state
 
-Read `{experiment}_state.json` and `{experiment}_logs.md` to understand what has
-already been recorded.
+```bash
+bin/hutch-state audit --hutch "$H" --experiment "$E"
+bin/hutch-log   tail  --hutch "$H" --experiment "$E" -n 40
+```
+
+to see what has already been recorded.
 
 ### Step 2 — Replay the conversation
 
@@ -384,9 +353,15 @@ For each exchange, apply the ambient observation classification rules:
 
 ### Step 3 — Write missing entries
 
-Append all reconstructed entries to `{experiment}_logs.md` in chronological order.
-Prefix each reconstructed entry with `*(reconstructed)*` to distinguish from
-real-time entries:
+Append in chronological order with `--reconstructed`, which adds the marker that
+distinguishes them from real-time notes, and `--at HH:MM` to place them in time:
+
+```bash
+bin/hutch-log append --hutch "$H" --experiment "$E" --at 09:15 --reconstructed \
+    "LUTE configured. Workflows: lute_sfx_cctbx."
+```
+
+Rendered:
 
 ```markdown
 ### Sync – {HH:MM}
@@ -417,7 +392,7 @@ When the user says `/handoff`, `end of shift`, `shift summary`, or `write handof
 
 1. Read the full `{experiment}_logs.md` for this session.
 2. Review the current state object for beam conditions and sample summary.
-3. Check current time via `date +"%H:%M"` for end-of-shift timestamp.
+3. The end-of-shift timestamp comes from `hutch-log append`; do not fetch the clock.
 
 ### Step 2 — Draft the handoff
 
@@ -444,7 +419,8 @@ Summary: {one-word tone, e.g. "productive", "mixed", "rough"}
 
 1. Present the draft to the user: *"Here is the shift handoff draft. Please review and
    let me know if anything needs adjusting."*
-2. After user confirms, append to `{experiment}_logs.md` as a new section:
+2. After the operator confirms, append it as a new section
+   (`hutch-log section "Shift Handoff – …"`, then one `append` per paragraph):
 
 ```markdown
 ---

@@ -68,7 +68,19 @@ def test_importing_state_does_not_drag_in_config_or_its_deps():
     assert "hutch_tools.config" not in loaded
     assert "hutch_tools.resolvers" not in loaded
     assert "hutch_tools.bridge" not in loaded
-    assert loaded == {"hutch_tools._cli", "hutch_tools.paths", "hutch_tools.state"}
+    # _fs is a stdlib-only leaf holding the lock that state and log share.
+    assert loaded == {
+        "hutch_tools._cli", "hutch_tools._fs",
+        "hutch_tools.paths", "hutch_tools.state",
+    }
+
+
+def test_importing_log_stays_equally_narrow():
+    loaded = _imported_after("hutch_tools.log")
+    assert loaded == {
+        "hutch_tools._cli", "hutch_tools._fs",
+        "hutch_tools.paths", "hutch_tools.log",
+    }
 
 
 def test_importing_lute_does_not_drag_in_config():

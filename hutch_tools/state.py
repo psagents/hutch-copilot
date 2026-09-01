@@ -29,6 +29,7 @@ import tempfile
 import time
 from typing import Any, Iterator
 
+from ._fs import lock as fs_lock
 from ._cli import (
     STATE_ERROR,
     USAGE,
@@ -166,40 +167,9 @@ class State:
         data.setdefault("_provenance", {})
         return data
 
-    @contextlib.contextmanager
-    def _lock(self) -> Iterator[None]:
-        """Serialise writers with an O_EXCL lockfile.
-
-        Several agents plus the operator may write during a shift; two
-        read-modify-write cycles interleaving would silently drop one update.
-        """
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        lock = self.path.with_suffix(self.path.suffix + ".lock")
-        deadline = time.monotonic() + LOCK_TIMEOUT_S
-        fd = None
-        while fd is None:
-            try:
-                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-            except FileExistsError:
-                # Break a lock left behind by a killed process.
-                with contextlib.suppress(OSError):
-                    if _age_seconds(
-                        _dt.datetime.fromtimestamp(
-                            lock.stat().st_mtime, _dt.timezone.utc
-                        ).isoformat()
-                    ) > LOCK_TIMEOUT_S:
-                        lock.unlink()
-                        continue
-                if time.monotonic() > deadline:
-                    raise StateError(f"timed out waiting for {lock}")
-                time.sleep(0.05)
-        try:
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            yield
-        finally:
-            with contextlib.suppress(OSError):
-                lock.unlink()
+    def _lock(self):
+        """Serialise writers. Shared with log.py -- see _fs.lock."""
+        return fs_lock(self.path, LOCK_TIMEOUT_S)
 
     def _write_atomic(self, data: dict) -> None:
         """Write via a temp file in the same directory, then os.replace().

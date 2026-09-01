@@ -296,6 +296,41 @@ it could not verify (eLog registration needs a ticket).
 
 ---
 
+### `hutch-log` — the last file mutated by hand
+
+`coordinate-experiment` wrote the beamtime log with `cat >>` and carried ~60 lines of
+conventions for it: the `**HH:MM**` bullet format, heading levels, *append don't
+restructure*, *never insert a `---` inside an existing section*, the `*(reconstructed)*`
+marker, and *"get the time via `date +%H:%M`"*. Conventions in prose are requests. Now:
+
+| Convention | How it is enforced |
+|---|---|
+| append, don't restructure | `append` can only add at end of file — it is the only operation |
+| timestamp format and source | the tool stamps it from the machine clock; `--at` only to backdate |
+| `---` separates phases, never doubled | `section` owns the separator and checks for one already there |
+| reconstructed entries are marked | `--reconstructed` |
+| a log always has its header | `append` refuses if the log was never `init`-ed |
+| concurrent writers | lock + fsync, shared with `state` via the new `_fs` module |
+
+The division is now clean, and it answers the question that prompted this:
+**`hutch-state` stores facts, `hutch-log` records events, `coordinate-experiment` decides
+what counts as either.** It is not redundant with `hutch-state` — deleting `hutch-state`
+loses the store, while deleting `coordinate-experiment` leaves the store working but with
+nothing noticing that *"we swapped to the 50 µm nozzle"* means `sample_delivery` changed.
+That classification is ~72 lines of irreducibly model work.
+
+`state.py` and `log.py` now share `_fs.lock`; the decoupling test was updated to pin the
+new (still stdlib-only) import set, and `import hutch_tools.log` is pinned equally narrow.
+
+`coordinate-experiment` 588 → 440 lines. What went: the duplicated state schema, the
+context-propagation table, the `/context` template (root dispatches it as Tool-only), the
+session-recovery prose that `hutch-state audit` now does, and the log header template that
+`hutch-log init` owns. **One real defect went with them** — Step 1 still spelled the state
+file path out in prose, the exact bug that had made three other sub-skills read a file
+nothing wrote.
+
+---
+
 ## What remains, in order
 
 1. **`lute-stats --json`** — logs -> metrics with a declared schema, reporting files scanned.
@@ -313,7 +348,9 @@ it could not verify (eLog registration needs a ticket).
    the eLog) becomes a command; `are-we-ready/scripts/check_*_mfx.py` (426 lines) fold into
    `resolvers`, parameterized by hutch instead of MFX-only. Their nominal pointing setpoint
    (`mr1l4_homs.pitch ~= -562.035`, currently a literal) becomes `hutch-resolve preset`.
-5. **Extend the scenario harness.** `tests/sfx_basic/` (13 steps, assertions + mocks) is the
+5. **Extend the scenario harness.** It still pins `date +"%H:%M"` and literal
+   `results/psagents/...` paths, which the skills no longer use — those become
+   `hutch-log`/`hutch-state` calls. `tests/sfx_basic/` (13 steps, assertions + mocks) is the
    best thing in the repo and should keep testing what it is good at — dispatch, safety
    gating, handoff. Its `expected_lute_checks.yaml` needs updating for the tool calls, and
    `HUTCH_DS_ROOT` should point it at the fixture tree.
