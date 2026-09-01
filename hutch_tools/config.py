@@ -36,6 +36,7 @@ import re
 from typing import Any
 
 from ._cli import UNREACHABLE, fail, out
+from .paths import skill_root
 from .traps import check as check_traps
 from .traps import template_whitelist
 
@@ -226,8 +227,6 @@ DEFAULT_TEMPLATE = "cctbx_pipeline"
 
 
 def template_dir() -> pathlib.Path:
-    from .paths import skill_root
-
     return skill_root() / TEMPLATE_DIR_NAME
 
 

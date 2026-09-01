@@ -43,6 +43,7 @@ from .bridge import (
     psdev_python,
     psdev_read,
 )
+from .paths import xtc2_dir, xtc2_files
 from .state import RESOLVED, State, utcnow
 
 HAPPI_DB = "/cds/group/pcds/pyps/apps/hutch-python/device_config/db.json"
@@ -339,6 +340,22 @@ def cell(pdb_path: str) -> dict:
     raise ResolveError(f"no CRYST1 record in {pdb_path}")
 
 
+def xtc2(hutch: str, experiment: str, run: int) -> dict:
+    """Has the data for this run landed, and how much of it?
+
+    Replaces `ls -lh $XTC2_DIR | grep r0043` in take-run: reports the count and
+    total size rather than a wall of text, and can be asserted on.
+    """
+    files = xtc2_files(hutch, experiment, run)
+    total = sum(f.stat().st_size for f in files)
+    return _record(
+        {"present": bool(files), "count": len(files),
+         "total_bytes": total, "total_human": f"{total / 1e9:.1f} GB",
+         "files": [f.name for f in files]},
+        f"resolved:ls {xtc2_dir(hutch, experiment)} run={int(run)}",
+    )
+
+
 def cds_file(path: str, *, timeout: int = T_QUERY) -> dict:
     """Read any /cds file from S3DF. /cds is not mounted here; psdev bridges it."""
     return _record(psdev_read(path, timeout=timeout), f"resolved:psdev cat {path}")
@@ -361,7 +378,7 @@ def pv_values(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict:
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
 _DOC = """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
-    detectors | preset | cell | cat | skills."""
+    detectors | preset | cell | cat | skills | xtc2."""
 
 
 def build_parser() -> "argparse.ArgumentParser":
@@ -405,6 +422,11 @@ def build_parser() -> "argparse.ArgumentParser":
 
     sk = sub.add_parser("skills", help="which skills are installed, and where")
     sk.add_argument("name", nargs="?", default=None)
+
+    xt = sub.add_parser("xtc2", help="has this run's data landed on S3DF?")
+    xt.add_argument("--hutch", required=True)
+    xt.add_argument("--experiment", required=True)
+    xt.add_argument("--run", required=True, type=int)
     sub.add_parser("cat", help="read a /cds file from S3DF via psdev").add_argument("path")
 
     return ap
@@ -412,7 +434,7 @@ def build_parser() -> "argparse.ArgumentParser":
 
 def main(argv: "list[str] | None" = None) -> int:
     """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
-    detectors | preset | cell | cat | skills."""
+    detectors | preset | cell | cat | skills | xtc2."""
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "devices":
@@ -439,6 +461,8 @@ def main(argv: "list[str] | None" = None) -> int:
             rec = cds_file(args.path)
         elif args.cmd == "skills":
             rec = skills(args.name)
+        elif args.cmd == "xtc2":
+            rec = xtc2(args.hutch, args.experiment, args.run)
         else:
             return USAGE
 

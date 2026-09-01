@@ -125,3 +125,42 @@ def test_readiness_honours_the_optional_results_subdirectory(tmp_path, monkeypat
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
     res = lute.readiness("mfx", "e1", directory="lconreux")
     assert res["lute_output_dir"].endswith("results/lconreux/lute_output")
+
+
+# --------------------------------------------------------------------------
+# XTC2 arrival -- one definition, shared by the resolver and the peds guard
+# --------------------------------------------------------------------------
+def test_xtc2_resolver_reports_absence_without_guessing(tmp_path, monkeypatch):
+    from hutch_tools import resolvers
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    rec = resolvers.xtc2("mfx", "e1", 43)
+    assert rec["value"]["present"] is False
+    assert rec["value"]["count"] == 0
+    assert rec["source"].startswith("resolved:ls ")
+
+
+def test_xtc2_resolver_counts_and_sizes(tmp_path, monkeypatch):
+    from hutch_tools import resolvers
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    d = tmp_path / "mfx/e1/xtc2"
+    d.mkdir(parents=True)
+    for s in range(3):
+        (d / f"e1-r0043-s{s:03d}.xtc2").write_bytes(b"x" * 1000)
+    (d / "e1-r0044-s000.xtc2").write_bytes(b"x")        # a different run
+    rec = resolvers.xtc2("mfx", "e1", 43)
+    assert rec["value"]["count"] == 3
+    assert rec["value"]["total_bytes"] == 3000
+    assert all("r0043" in n for n in rec["value"]["files"])
+
+
+def test_the_resolver_and_the_peds_guard_agree(tmp_path, monkeypatch):
+    """Both read paths.xtc2_files, so 'the data has landed' has one definition."""
+    from hutch_tools import resolvers
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    d = tmp_path / "mfx/e1/xtc2"
+    d.mkdir(parents=True)
+    (d / "e1-r0043-s000.xtc2").write_bytes(b"x")
+    assert resolvers.xtc2("mfx", "e1", 43)["value"]["present"] is True
+    # the guard no longer blocks now that a file exists
+    assert traps.check("peds", {"xtc2_files": [p.name for p in
+                                paths.xtc2_files("mfx", "e1", 43)], "run": 43}) == []

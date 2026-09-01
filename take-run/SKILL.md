@@ -122,8 +122,7 @@ Record the time the run command returned — `watch` needs it in step 4.
 ## 4. Verify and watch — mandatory, do not skip
 
 ```bash
-bin/hutch-state path --hutch "$H" --experiment "$E"     # includes the xtc2 directory
-ls -lh "$XTC2_DIR" | grep "r{run:04d}"
+bin/hutch-resolve xtc2 --hutch "$H" --experiment "$E" --run {run}
 bin/hutch-lute watch --user "${H}opr" --since "$RUN_END_ISO" --timeout 90
 bin/hutch-lute status "$JOB_ID"
 ```
@@ -136,7 +135,7 @@ Triage:
 
 | Symptom | Response |
 |---|---|
-| No XTC2 after 30 s | Retry once at 60 s, then warn: the run may not have recorded. Check `daq.state`. |
+| `xtc2` reports `present: false` after 30 s | Retry once at 60 s, then warn: the run may not have recorded. Check `daq.state`. |
 | No LUTE job after 90 s | Point at the eLog run table. **Do not re-submit.** |
 | Job `COMPLETED` but no output | `run_task.py` exits 0 even when the Task failed — check the Executor log. `hutch-lute status` also flags `hit_wall_clock`. |
 | `takepeds()` raises | Report it; ask the operator to check detector config and DAQ state. If it fails on an import, it may have sourced an analysis conda env — have them run `epixquad_pedestal_scan --record 1 --hutch {hutch}` from the DAQ terminal. |

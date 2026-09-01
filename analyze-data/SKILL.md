@@ -148,6 +148,11 @@ python analyze-data/scripts/install_lute.py -e "$E" -v "$VERSION" [-D "$DIRECTOR
     -W "$WF_NAME" --trigger "$TRIGGER" [--partition milano] [--account "lcls:$E"]
 ```
 
+> **Known gap.** This step is the last mechanism in the repo still written as shell in prose —
+> `mkdir`/`chmod`/heredoc/`install_lute.py`. It is `MIGRATION.md` item 4: `install_lute.py`
+> (511 lines, untested) becomes a command, at which point this section collapses to one call.
+> Until then, run it exactly as written and check the result rather than trusting it.
+
 `install_lute.py` talks to the eLog, so this step **does** need a ticket. Verify with
 `hutch-lute readiness`, then confirm the workflow appears as `lute_{wf_name}` under Workflow
 Definitions in the eLog — that part `readiness` cannot check for you. Re-run with the same

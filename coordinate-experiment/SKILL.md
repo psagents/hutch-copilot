@@ -199,6 +199,10 @@ Refresh machine state **only** after these triggers, and at most two bridge call
 | Alignment declared complete | `hutch-resolve beampath --hutch H` |
 | `/are-we-ready` runs | that skill writes `machine_state.*` itself — do not duplicate it |
 
+Config files on `/cds` are read the same way — `hutch-resolve conf --hutch H` for the
+hutch-python `conf.yml`, `hutch-resolve cat --path /cds/...` for anything else. `/cds` is not
+mounted on S3DF; the tool bridges it.
+
 Do not invent PV names and do not read them from a documentation table — resolve them:
 `hutch-resolve pv --hutch H <device> --suffix <field>` composes the name from the happi
 prefix and reports its provenance. `machine_state.*` carries a 600 s TTL, so `last_checked`

@@ -54,6 +54,14 @@ Returns `{blocking: [...], devices: [{name, state, transmission}], method}`. `bl
 lightpath's own determination where available; `method` says whether the fallback was used —
 report it if it was.
 
+If a device name in the report is unfamiliar, or you need the beamline inventory ordered
+along the beam, resolve it — do not recall it:
+
+```bash
+bin/hutch-resolve devices --hutch "$H"          # full inventory, sorted by z
+bin/hutch-resolve device  --hutch "$H" <name>   # one happi entry
+```
+
 Then the two CRITICAL machine values. Resolve the PV rather than typing one:
 
 ```bash

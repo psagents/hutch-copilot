@@ -24,7 +24,9 @@ import shlex
 import subprocess
 
 from ._cli import OK, UNREACHABLE, USAGE, fail, out, parser
+from .paths import results_dir, xtc2_files
 # Aliased: bare `check`/`registry` would not say what is being checked.
+from .state import MissingValue, StaleValue, State
 from .traps import check as check_traps
 from .traps import registry as trap_registry
 
@@ -299,8 +301,6 @@ def deploy_pedestals(
     ``takepeds()`` is NOT done here: it runs inside the hutch-python session and
     goes through ``hutch-bridge``. This is only the analysis-side half.
     """
-    from .paths import xtc2_dir
-
     if confirm != "write":
         raise LuteError(
             "deploying pedestals writes to the calibration store. Show the command "
@@ -308,8 +308,7 @@ def deploy_pedestals(
         )
 
     # Ordering hazard: makepeds reads the XTC2 files, so they must have landed.
-    xtc2 = xtc2_dir(hutch, experiment)
-    present = sorted(p.name for p in xtc2.glob(f"*r{int(run):04d}*")) if xtc2.is_dir() else []
+    present = [p.name for p in xtc2_files(hutch, experiment, int(run))]
     violations = check_traps("peds", {"xtc2_files": present, "run": int(run)})
     if violations:
         detail = "\n".join(f"  [{v['id']}] {v['problem']}" for v in violations)
@@ -353,7 +352,7 @@ def deploy_pedestals(
         "detector_family": family,
         "xtc2_files": len(present),
         "steps": results,
-        "calib_dir": str(xtc2.parent / "calib"),
+        "calib_dir": str(results_dir(hutch, experiment).parent / "calib"),
     }
     if not ok and not fallback and family:
         out_rec["known_issue"] = (
@@ -377,9 +376,6 @@ def readiness(hutch: str, experiment: str, directory: str | None = None) -> dict
     state, and does not try to confirm eLog registration, which would need a
     ticket. It reports what it could and could not check.
     """
-    from .paths import results_dir
-    from .state import MissingValue, StaleValue, State
-
     base = results_dir(hutch, experiment, directory)
     out_dir = base / "lute_output"
     artifacts = {

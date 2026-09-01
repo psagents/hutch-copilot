@@ -54,6 +54,17 @@ def xtc2_dir(hutch: str, experiment: str) -> pathlib.Path:
     return experiment_dir(hutch, experiment) / "xtc2"
 
 
+def xtc2_files(hutch: str, experiment: str, run: int) -> list[pathlib.Path]:
+    """XTC2 files for one run. Shared by the resolver and the pedestal guard.
+
+    Lives here rather than in either caller so there is one definition of what
+    "the data has landed" means -- take-run used to check it with an inline
+    `ls | grep`, which cannot be tested and reports nothing about size.
+    """
+    d = xtc2_dir(hutch, experiment)
+    return sorted(d.glob(f"*r{int(run):04d}*")) if d.is_dir() else []
+
+
 def results_dir(hutch: str, experiment: str, subdir: str | None = None) -> pathlib.Path:
     base = experiment_dir(hutch, experiment) / "results"
     return base / subdir if subdir else base
