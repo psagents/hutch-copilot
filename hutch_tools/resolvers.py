@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 from typing import Any
@@ -226,7 +227,12 @@ def detectors(experiment: str, run: int, *, timeout: int = 300) -> dict:
     answer -- never accept a detector alias from prose.
     """
     snippet = _DETNAMES_SNIPPET % {"exp": experiment, "run": int(run)}
-    cmd = f"source {PSCONDA} >/dev/null 2>&1 && python -c {json.dumps(snippet)}"
+    # shlex.quote, not json.dumps: json.dumps emits a *double*-quoted string
+    # whose newlines are ``\n`` escapes, and bash does not expand those inside
+    # double quotes -- python then received a literal backslash-n and died with
+    # "SyntaxError: unexpected character after line continuation character".
+    # Single quotes carry the real newlines through untouched.
+    cmd = f"source {PSCONDA} >/dev/null 2>&1 && python -c {shlex.quote(snippet)}"
     if not shutil.which("bash"):  # pragma: no cover
         raise ResolveError("bash not available")
     proc = subprocess.run(["bash", "-lc", cmd], capture_output=True, timeout=timeout)
