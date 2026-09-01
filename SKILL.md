@@ -19,7 +19,7 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 ## Tool Layer (`hutch-tools`) — read this before any procedure below
 
 Mechanism lives in `hutch-tools`, not in prose. **Never interpolate a path, compose a PV
-name, or hand-write an SSH command** — call the tool. All five print JSON, and each is
+name, or hand-write an SSH command** — call the tool. All seven print JSON, and each is
 owned by one module so a fault in one cannot break the others.
 
 | Tool | Use for |
@@ -29,6 +29,8 @@ owned by one module so a fault in one cannot break the others.
 | `bin/hutch-resolve devices\|device\|pv\|caget\|beampath\|daq\|conf\|detectors\|preset\|cell\|cat` | discovering machine truth from its authoritative source |
 | `bin/hutch-lute sbatch\|submit\|status\|watch\|peds\|readiness\|traps\|kerberos` | LUTE submission, job status, pedestals, readiness, known-trap checking |
 | `bin/hutch-config` | render a LUTE config with overrides, validated |
+| `bin/hutch-install plan\|workspace\|dags\|envs\|register\|all` | LUTE workspace setup and eLog workflow registration |
+| `bin/hutch-log path\|init\|append\|section\|tail` | the beamtime log |
 
 They run from a bare checkout with no install step. `pip install -e .` is optional and only
 adds the same commands to PATH — never require it.
@@ -245,6 +247,8 @@ being installed.
 | device inventory, PV names, beampath, DAQ, detectors, presets, `/cds` files, live PVs | `hutch-resolve` |
 | LUTE submission, wall clock, job status, pedestals, readiness, traps, Kerberos scoping | `hutch-lute` |
 | LUTE config rendering with overrides and validation | `hutch-config` (templates in `templates/`) |
+| LUTE workspace, DAG patching, eLog workflow registration | `hutch-install` |
+| the beamtime log | `hutch-log` |
 | DAQ runs (DARK/GEOM/DATA), XTC2 verify, LUTE trigger watch | `take-run/` |
 | beam and hutch readiness | `are-we-ready/` |
 | LUTE analysis setup and refinement | `analyze-data/` |

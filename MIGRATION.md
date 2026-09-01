@@ -339,6 +339,41 @@ nothing wrote.
 
 ---
 
+### `hutch-install` — the largest untested file, ported
+
+`analyze-data/scripts/install_lute.py` (511 lines, by Gabriel Dorlhiac) was the largest file
+in the repo and had no tests, because `sys.exit()` inside its library functions made them
+unusable from anything but the command line. The logic is his; the shape changed, and
+**two bugs fell out of the reshaping**:
+
+| Bug | Consequence |
+|---|---|
+| **DAG patching was not idempotent.** It appended `--account`/`--partition` unconditionally | A second run produced `--account=X --partition=Y --account=X --partition=Y`. Its own docstring told you to *"re-run with the same -W to update registration"* |
+| **Preconditions were checked last.** The Kerberos check was step 4 | It ran *after* `create_virtual_envs` had `rmtree`-d the venv directory and after the DAGs were patched, so a missing ticket destroyed both environments and doubled the DAG parameters before failing |
+
+Both are now structural rather than remembered. `patch_slurm_params` strips any
+account/partition tokens already present before appending, so it is idempotent **and repairs a
+DAG an older version doubled** — while leaving every other parameter (`--nodes`, `--exclusive`,
+`--time`) alone, since those belong to whoever authored the DAG. And `plan()` is a pure,
+read-only function that evaluates every precondition; `all` refuses and changes nothing if any
+is unmet.
+
+Two smaller corrections followed the repo's own rules: the results path came from an f-string
+against `/sdf/data/lcls/ds/...` and now comes from `paths.results_dir`; and recreating the
+virtual environments deletes a directory, so it requires `--confirm write` and `plan` names it
+under `destructive`.
+
+`requests` and `krtc` are imported inside `register` and declared as the `elog` extra, so
+planning, patching and workspace setup work without them.
+
+Checked for damage in the wild: `mfx101624926`'s `smd.dag` was never patched (empty
+`slurm_params`), so no doubling to repair there.
+
+**With this, no skill markdown contains shell that is not a tool call.** The audit that found
+the last four lines (`mkdir`/`chmod`/heredoc/`install_lute.py`) now returns nothing.
+
+---
+
 ## What remains, in order
 
 1. **`lute-stats --json`** — logs -> metrics with a declared schema, reporting files scanned.
@@ -351,11 +386,11 @@ nothing wrote.
 3. **`hutch-resolve runs --exp --tag`** — eLog run/tag resolution. Deliberately not stubbed:
    it needs Kerberos and belongs with `elog-search`, and a stub that looks like a resolver
    would be worse than its absence.
-4. **Move the two `scripts/` directories into the tool layer** — the last mechanism still
-   living beside prose. `analyze-data/scripts/install_lute.py` (511 lines, untested, talks to
-   the eLog) becomes a command; `are-we-ready/scripts/check_*_mfx.py` (426 lines) fold into
-   `resolvers`, parameterized by hutch instead of MFX-only. Their nominal pointing setpoint
-   (`mr1l4_homs.pitch ~= -562.035`, currently a literal) becomes `hutch-resolve preset`.
+4. **Fold `are-we-ready/scripts/check_*_mfx.py` (426 lines) into `resolvers`**, parameterized
+   by hutch instead of MFX-only — the last mechanism still living beside prose. Their nominal
+   pointing setpoint (`mr1l4_homs.pitch ~= -562.035`, currently a literal) becomes
+   `hutch-resolve preset`. *(`install_lute.py`, the other half of this item, is done — see
+   `hutch-install` above.)*
 5. **Extend the scenario harness.** It still pins `date +"%H:%M"` and literal
    `results/psagents/...` paths, which the skills no longer use — those become
    `hutch-log`/`hutch-state` calls. `tests/sfx_basic/` (13 steps, assertions + mocks) is the

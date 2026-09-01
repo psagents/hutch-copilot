@@ -11,6 +11,7 @@ Layering (nothing above depends on anything below it, and there are no cycles):
     _fs                        lock + atomic append, shared by state and log
     state     -> paths
     log       -> paths
+    install   -> paths
     bridge    -> paths, safety
     lute      -> traps
     config    -> traps
@@ -50,6 +51,7 @@ MODULES = (
     "config",
     "resolvers",
     "log",
+    "install",
 )
 
 #: Curated public names -> the module that defines each. Anything absent is
@@ -94,6 +96,9 @@ _EXPORTS = {
     "needs_kerberos": "lute",
     # log
     "LogError": "log",
+    # install
+    "InstallError": "install",
+    "parse_trigger": "install",
     # config
     "ConfigError": "config",
     "DELETE": "config",

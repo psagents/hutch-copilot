@@ -136,27 +136,39 @@ Show the operator the rendered config **and** the report together, and get appro
 
 ## 5. Register the workflow
 
-```bash
-mkdir -p "$LUTE_OUTPUT_DIR" && chmod 777 "$LUTE_OUTPUT_DIR"
-cat > "$LUTE_OUTPUT_DIR/$WF_NAME.dag" << 'EOF'
-{approved DAG YAML}
-EOF
-chmod 666 "$LUTE_OUTPUT_DIR/$WF_NAME.dag"
+**Look before you touch.** `plan` is read-only and reports every path, every eLog payload and
+every precondition:
 
-source /sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh
-python analyze-data/scripts/install_lute.py -e "$E" -v "$VERSION" [-D "$DIRECTORY"] \
+```bash
+bin/hutch-install plan -e "$E" [--hutch "$H"] [-D "$DIRECTORY"] \
     -W "$WF_NAME" --trigger "$TRIGGER" [--partition milano] [--account "lcls:$E"]
 ```
 
-> **Known gap.** This step is the last mechanism in the repo still written as shell in prose —
-> `mkdir`/`chmod`/heredoc/`install_lute.py`. It is `MIGRATION.md` item 4: `install_lute.py`
-> (511 lines, untested) becomes a command, at which point this section collapses to one call.
-> Until then, run it exactly as written and check the result rather than trusting it.
+Show the operator the `checks` list and the payloads. `blocking` names anything that must be
+fixed first; a missing Kerberos ticket is listed but **not** blocking, because it is only
+needed for the final step.
 
-`install_lute.py` talks to the eLog, so this step **does** need a ticket. Verify with
-`hutch-lute readiness`, then confirm the workflow appears as `lute_{wf_name}` under Workflow
-Definitions in the eLog — that part `readiness` cannot check for you. Re-run with the same
-`-W` to update registration after a DAG or trigger change.
+Then, once approved:
+
+```bash
+bin/hutch-install all -e "$E" -W "$WF_NAME" --trigger "$TRIGGER" --confirm write
+```
+
+`all` re-checks the preconditions and **changes nothing if any is unmet**. The steps run in a
+safe order — workspace, DAG patching, virtual environments, eLog registration. You can also
+run them individually (`workspace`, `dags`, `envs`, `register`) when only one needs redoing.
+
+Two things to know, both of which were bugs in the script this replaced:
+
+- **`dags` is idempotent** and repairs a DAG that an older version doubled. It sets only
+  `--account` and `--partition`; every other parameter in `slurm_params` is the DAG author's
+  and is left alone.
+- **`envs` deletes and recreates both virtual environments**, so it requires `--confirm write`.
+  `plan` names it under `destructive` when the directory already exists.
+
+Afterwards, verify with `hutch-lute readiness`, then confirm the workflow appears as
+`lute_{wf_name}` under Workflow Definitions in the eLog — that part no tool can check for you.
+Re-running `all` with the same `-W` updates registration.
 
 ---
 
