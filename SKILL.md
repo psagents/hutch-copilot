@@ -255,20 +255,39 @@ being installed.
 
 ### Optional advisors
 
-These are separate skills. They are **consultants, not dependencies** — if one is
-not installed, say so and proceed with the in-repo guidance above plus your own
-reasoning. Never block on them, and never assume a value one would have supplied.
+Separate skills, installed across two roots — `~/.claude/skills` and
+`/sdf/group/lcls/ds/dm/apps/dev/opencode/skills`. **Don't assume; ask:**
+
+```bash
+bin/hutch-resolve skills                  # everything installed, and where
+bin/hutch-resolve skills ask-smalldata    # one, with the roots it searched
+```
+
+They are **consultants, not dependencies.** If one is missing, say so and proceed with the
+in-repo guidance above plus your own reasoning. Never block on one, and never assume a value
+one would have supplied.
 
 | Advisor | Ask it about |
 |---|---|
 | `@ask-lute` | LUTE internals: task catalog, YAML syntax, DAG structure, per-hutch references |
 | `@ask-cctbx-xfel` | SFX parameter reasoning (CrystFEL and CCTBX.XFEL) |
 | `@ask-happi` | happi device database questions beyond what `hutch-resolve` returns |
+| `@ask-smalldata` | SmallData detector parameters — ROI, droplet/photon, azimuthal integration |
+| `@ask-lcls2` | psana2 API, DataSource/Detector interfaces, calibration |
+| `@ask-ami` | AMI graph nodes, online monitoring |
+| `@ask-epics` | EPICS records, Channel Access, PVAccess |
+| `@ask-slurm-s3df` | pending reasons, partitions, fairshare, node health |
+| `@ask-s3df` | S3DF storage, conda, transfer, containers |
+| `@lcls-catalog` | file finding, XTC2 inventory, HDF5 verification |
+| `@elog-copilot` | eLog queries and posts (SQL over the elog DB) |
+| `@elog-search` | logbook search with the invoking user's own token |
+| `@confluence-search` | LCLS Confluence and wiki content |
+| `@experimental-hutch-python` | hutch-python config, conf.yml, presets, Bluesky plans |
+| `@xpm-seq` | XPM timing sequences, event codes, rate calculation |
 
-> Earlier versions of this file also pointed at eleven other skills —
-> `ask-smalldata`, `ask-lcls2`, `ask-ami`, `ask-epics`, `ask-slurm-s3df`,
-> `lcls-catalog`, `elog-copilot`, `elog-search`, `confluence-search`,
-> `experimental-hutch-python`, `xpm-seq`. None are installed, so those pointers
-> were dead ends mid-operation; they have been removed rather than left to fail.
-> (Written without the at-sign prefix on purpose: `tests/unit/test_self_contained.py`
-> treats every at-prefixed name in the docs as a claim that the advisor is declared.)
+> **A correction worth recording.** An earlier revision of this file deleted eleven of these,
+> claiming they were not installed. They were — all eleven live in the OpenCode root, and only
+> `~/.claude/skills` had been checked. Working references were removed, including the eLog one,
+> which left the skill telling operators to post by hand. Looking in one place and writing the
+> conclusion down as fact is the failure mode this whole refactor exists to prevent, which is
+> why `hutch-resolve skills` now answers the question instead.

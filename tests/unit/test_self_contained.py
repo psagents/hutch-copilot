@@ -1,12 +1,14 @@
 """Nothing load-bearing may live outside this repo.
 
-Eleven of the fourteen sibling skills this skill referenced had been removed, so
-those pointers were dead ends mid-operation, and the CCTBX template lived in a
-skill that was deleted -- which left `hutch-config` with nothing to render.
+Three sibling skills that this skill *depended* on were removed -- including the
+one that owned the CCTBX jinja template, which left `hutch-config` with nothing to
+render. These tests keep that from coming back.
 
-These tests keep that from coming back. They check the repo's own contents only,
-so they behave the same on any machine and never depend on which skills happen to
-be installed next door.
+They deliberately check only whether an advisor reference is **declared**, never
+whether it is installed, so they behave the same on any machine. Which skills
+exist is a question for `hutch-resolve skills`, not for a test -- and not for
+prose either: an earlier revision asserted eleven advisors were absent after
+checking a single skill root, and deleted working references on that basis.
 """
 
 from __future__ import annotations
@@ -23,7 +25,13 @@ ROOT = paths.skill_root()
 #: Skills that may be referenced as `@name` in the docs. They are consultants,
 #: never dependencies: the skill must work with none of them installed. Adding a
 #: name here is a deliberate act -- see the Optional advisors table in SKILL.md.
-DECLARED_ADVISORS = {"ask-lute", "ask-cctbx-xfel", "ask-happi"}
+DECLARED_ADVISORS = {
+    "ask-lute", "ask-cctbx-xfel", "ask-happi",          # ~/.claude/skills
+    "ask-smalldata", "ask-lcls2", "ask-ami", "ask-epics",
+    "ask-slurm-s3df", "ask-s3df", "lcls-catalog",
+    "elog-copilot", "elog-search", "confluence-search",
+    "experimental-hutch-python", "xpm-seq",             # opencode root
+}
 
 CODE_DIRS = ("hutch_tools", "bin")
 

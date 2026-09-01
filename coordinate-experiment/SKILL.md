@@ -222,8 +222,9 @@ bin/hutch-log append  --hutch "$H" --experiment "$E" \
     "{field}: {new_value} (changed from {old_value})"
 ```
 
-6. **Post** a short human-readable note to the eLog. There is no eLog skill installed, so show the operator the text and ask them to post it, or use the
-   eLog web UI link. Do not claim it was posted unless you saw it succeed:
+6. **Post** a short human-readable note to the eLog via `@elog-copilot`. Check it is
+   installed first (`hutch-resolve skills elog-copilot`); if it is not, show the operator the
+   text to post. Either way, do not claim it was posted unless you saw it succeed:
 
 ```
 Tag: condition-update
@@ -430,9 +431,8 @@ Summary: {one-word tone, e.g. "productive", "mixed", "rough"}
 {full handoff text}
 ```
 
-3. Ask the user: *"Post this to the eLog too?"* If yes, hand them the text for
-   the eLog with tag `shift-handoff` — there is no eLog skill installed to do it
-   for you.
+3. Ask the operator: *"Post this to the eLog too?"* If yes, post via `@elog-copilot` with
+   tag `shift-handoff`, or hand them the text if it is not installed.
 
 ### Inputs to ask for if not in state
 

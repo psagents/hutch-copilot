@@ -219,7 +219,7 @@ CCTBX jinja template lived in one of them (`setup-cctbx-pipeline`), which left
 | `setup-cctbx-pipeline/render.py` `make_env` delimiters | `config.DELIMITERS["lute"]` |
 | `setup-cctbx-pipeline/render.py` 7 validation assertions | `traps.py`, plus five more the campaign earned |
 | `cds-bridge` recipes | `hutch-resolve cat / conf / preset / device / pv / caget` |
-| eleven dead `@advisor` pointers | removed, replaced with in-repo guidance |
+| `@advisor` pointers | kept; reclassified as optional consultants, resolved via `hutch-resolve skills` |
 
 **The template was reconstructed, and the reconstruction is proven rather than asserted.**
 The campaign's nine rendered configs survive, so `tests/unit/test_template.py` re-renders
@@ -240,8 +240,16 @@ iterations. Relatedly, the explanatory comment about `tag` lives in the block he
 rather than directly above the key: a comment above a commonly-deleted key is left
 orphaned when the key goes, which is exactly how the first reconstruction attempt failed.
 
-Three sibling skills remain, reclassified as **optional advisors** — `ask-lute`,
-`ask-cctbx-xfel`, `ask-happi`. They are consultants, not dependencies: the skill must work
+Fifteen sibling skills are available as **optional advisors** across two roots
+(`~/.claude/skills` and the OpenCode root).
+
+> **Correction.** An earlier revision of this branch asserted that eleven of them were not
+> installed and deleted the references. Only `~/.claude/skills` had been checked; all eleven
+> live in `/sdf/group/lcls/ds/dm/apps/dev/opencode/skills`. Working pointers were removed,
+> including the eLog one, which left the skill telling operators to post by hand. Restored,
+> and the underlying mistake — looking in one place and writing the conclusion down as prose
+> — is now answered by `hutch-resolve skills`, which reports the roots it searched so
+> "not installed" is distinguishable from "looked in the wrong place". They are consultants, not dependencies: the skill must work
 with none of them installed, and must never block on one or assume a value one would have
 supplied. `tests/unit/test_self_contained.py` enforces the boundary:
 

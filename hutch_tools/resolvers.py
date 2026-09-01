@@ -27,6 +27,7 @@ Contract for every resolver here:
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import shutil
 import subprocess
@@ -360,7 +361,7 @@ def pv_values(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict:
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
 _DOC = """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
-    detectors | preset | cell | cat."""
+    detectors | preset | cell | cat | skills."""
 
 
 def build_parser() -> "argparse.ArgumentParser":
@@ -401,6 +402,9 @@ def build_parser() -> "argparse.ArgumentParser":
     pr.add_argument("device")
 
     sub.add_parser("cell").add_argument("pdb")
+
+    sk = sub.add_parser("skills", help="which skills are installed, and where")
+    sk.add_argument("name", nargs="?", default=None)
     sub.add_parser("cat", help="read a /cds file from S3DF via psdev").add_argument("path")
 
     return ap
@@ -408,7 +412,7 @@ def build_parser() -> "argparse.ArgumentParser":
 
 def main(argv: "list[str] | None" = None) -> int:
     """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
-    detectors | preset | cell | cat."""
+    detectors | preset | cell | cat | skills."""
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "devices":
@@ -433,6 +437,8 @@ def main(argv: "list[str] | None" = None) -> int:
             rec = cell(args.pdb)
         elif args.cmd == "cat":
             rec = cds_file(args.path)
+        elif args.cmd == "skills":
+            rec = skills(args.name)
         else:
             return USAGE
 
@@ -442,3 +448,57 @@ def main(argv: "list[str] | None" = None) -> int:
         return out(rec)
     except (ResolveError, BridgeError, OSError) as exc:
         return fail(exc, UNREACHABLE)
+
+
+# --------------------------------------------------------------------------
+# Which skills are installed
+# --------------------------------------------------------------------------
+#: Roots that hold Claude Code skills at LCLS, in precedence order. Overridable
+#: with HUTCH_SKILL_ROOTS (colon-separated) for other sites and for tests.
+#:
+#: This resolver exists because of a mistake worth recording: the advisor list in
+#: SKILL.md was rewritten to say eleven skills were "not installed" after checking
+#: only ~/.claude/skills. All eleven were present in the OpenCode root, so working
+#: references were deleted -- including the eLog one, which left the skill telling
+#: operators to post by hand. Looking in one place and encoding the conclusion as
+#: prose is the exact failure mode this refactor exists to prevent, so where skills
+#: live is now resolved rather than recalled.
+DEFAULT_SKILL_ROOTS = (
+    "~/.claude/skills",
+    "/sdf/group/lcls/ds/dm/apps/dev/opencode/skills",
+)
+
+
+def skill_roots() -> list[pathlib.Path]:
+    import os
+
+    raw = os.environ.get("HUTCH_SKILL_ROOTS")
+    roots = raw.split(":") if raw else list(DEFAULT_SKILL_ROOTS)
+    return [pathlib.Path(r).expanduser() for r in roots if r]
+
+
+def skills(name: str | None = None) -> dict:
+    """Enumerate installed skills across every known root.
+
+    A skill is a directory containing SKILL.md. Returns the roots searched even
+    when nothing is found, so "not installed" is distinguishable from
+    "looked in the wrong place" -- which is the distinction that was missed.
+    """
+    roots = skill_roots()
+    found: dict[str, str] = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for entry in sorted(root.iterdir()):
+            if (entry / "SKILL.md").is_file() and entry.name not in found:
+                found[entry.name] = str(root)
+
+    source = "resolved:skill roots " + ", ".join(str(r) for r in roots)
+    if name is not None:
+        return _record(
+            {"name": name, "installed": name in found, "root": found.get(name)},
+            source + f" name={name}",
+            roots_searched=[str(r) for r in roots],
+        )
+    return _record(found, source, count=len(found),
+                   roots_searched=[str(r) for r in roots])

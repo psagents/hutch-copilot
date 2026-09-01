@@ -20,8 +20,10 @@ owns the DAG design, the human gates, and the refinement judgment.
 
 **Reference:** `../references/sfx-cctbx-patterns.md` — the CCTBX DAG pattern, the `d_min`
 ranking hazard, coverage×yield, and the symptom→knob table.
-**Optional advisors:** `@ask-lute` for LUTE internals, `@ask-cctbx-xfel` for SFX parameter
-reasoning. Neither is required; if one is not installed, say so and reason from the reference.
+**Optional advisors:** `@ask-lute` (LUTE internals), `@ask-cctbx-xfel` (SFX parameters),
+`@ask-smalldata` (SmallData ROI / droplet / azimuthal integration), `@ask-lcls2` (psana2),
+`@lcls-catalog` (file and XTC2 inventory). None is required — check with
+`hutch-resolve skills` and, if one is missing, say so and reason from the reference.
 
 ---
 
