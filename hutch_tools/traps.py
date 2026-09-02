@@ -17,6 +17,7 @@ not belong here.
 
 from __future__ import annotations
 
+import glob
 import re
 from typing import Callable
 
@@ -362,4 +363,65 @@ def _run_type(ctx: dict) -> list[str]:
         return []
     if rt not in ("DARK", "GEOM", "DATA"):
         return [f"run_type={rt!r} must be exactly one of DARK, GEOM, DATA (uppercase)"]
+    return []
+
+
+# --------------------------------------------------------------------------
+# Index output (post-run): did every rank actually flush its composite output?
+# --------------------------------------------------------------------------
+@trap(
+    "composite-output-ordered-endrun",
+    applies_to="index-output",
+    what=(
+        "dials.stills_process shuts its MPI workers down in strict rank order, so "
+        "with output_composite_output: true a single unresponsive worker discards "
+        "the accumulated reflections of every higher-numbered rank."
+    ),
+    evidence=(
+        "job 36661611 (CCTBXIndexer mfx101624926 r0036, 240 ranks, 4 nodes) ran 39 min "
+        "and was cancelled. stills_process.py distributes work with "
+        "comm.recv(source=MPI.ANY_SOURCE) at line 811, but shuts down with an ORDERED "
+        "'for rankreq in range(root+1, size): rank = comm.recv(source=rankreq)' at "
+        "lines 815-819. The dispatcher log stopped at 'Processing 36599 / 36600 shots'; "
+        "one worker never reported ready again, so the server served endrun to a "
+        "contiguous prefix of ranks only -- 76 of 240 -- and blocked in recv on the "
+        "next. Exactly 76 of 237 *_integrated.expt were written and 1047 of 1485 "
+        "integrated lattices never reached disk. No phil parameter bounds this and a "
+        "shorter --time makes it worse: SIGKILL loses the same unflushed output."
+    ),
+)
+def _composite_ordered_endrun(ctx: dict) -> list[str]:
+    """Compare ranks that logged endrun against ranks that ran at all.
+
+    Checked after the indexer, not before: the config that triggers this is the
+    recommended one, so there is nothing to reject at render time -- only an
+    aftermath to refuse to average into a campaign statistic.
+    """
+    log_dir = ctx.get("index_logs_dir")
+    if not log_dir:
+        return []
+    logs = glob.glob(f"{log_dir}/log_rank*.out")
+    if not logs:
+        return []
+    # Compare against *worker* ranks, not every rank log. Of 240 ranks, 3 never
+    # receive endrun by design (the executor and the dispatcher/server), so
+    # comparing to len(logs) reports a healthy run as a 3-rank loss -- it did,
+    # on p005, which had a clean 237/237.
+    workers = endrun = 0
+    for f in logs:
+        try:
+            with open(f, errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        if "getting next task" not in text:
+            continue          # not a worker
+        workers += 1
+        if "received endrun" in text:
+            endrun += 1
+    if workers and endrun < workers:
+        return [f"only {endrun} of {workers} worker ranks received endrun; the "
+                f"composite output of the remaining {workers - endrun} was never "
+                f"written, so any indexed-count read from the debug files "
+                f"over-counts what reached disk"]
     return []
