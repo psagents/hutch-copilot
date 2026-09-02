@@ -173,3 +173,72 @@ def test_template_records_its_own_provenance():
     text = config.resolve_template(config.DEFAULT_TEMPLATE).read_text()
     assert "PROVENANCE" in text
     assert "UNVERIFIED" in text
+
+
+# --------------------------------------------------------------------------
+# Which skills are installed -- the resolver that exists because a prose claim
+# about this was wrong. It is pure local filesystem, so there is no excuse for
+# it to have been the one resolver without a test.
+# --------------------------------------------------------------------------
+def test_skills_resolver_finds_skills_across_multiple_roots(tmp_path, monkeypatch):
+    from hutch_tools import resolvers
+
+    a, b = tmp_path / "local", tmp_path / "shared"
+    for root, names in ((a, ["ask-lute", "hutch-copilot"]), (b, ["elog-copilot", "xpm-seq"])):
+        for name in names:
+            (root / name).mkdir(parents=True)
+            (root / name / "SKILL.md").write_text("---\nname: x\n---\n")
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", f"{a}:{b}")
+
+    rec = resolvers.skills()
+    assert set(rec["value"]) == {"ask-lute", "hutch-copilot", "elog-copilot", "xpm-seq"}
+    assert rec["count"] == 4
+    assert rec["value"]["elog-copilot"] == str(b)
+
+
+def test_a_directory_without_skill_md_is_not_a_skill(tmp_path, monkeypatch):
+    from hutch_tools import resolvers
+
+    (tmp_path / "not-a-skill").mkdir()
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "SKILL.md").write_text("x")
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", str(tmp_path))
+    assert set(resolvers.skills()["value"]) == {"real"}
+
+
+def test_earlier_roots_win(tmp_path, monkeypatch):
+    """Local overrides shared, matching how the skill loader resolves names."""
+    from hutch_tools import resolvers
+
+    a, b = tmp_path / "local", tmp_path / "shared"
+    for root in (a, b):
+        (root / "dup").mkdir(parents=True)
+        (root / "dup" / "SKILL.md").write_text("x")
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", f"{a}:{b}")
+    assert resolvers.skills()["value"]["dup"] == str(a)
+
+
+def test_querying_one_skill_reports_the_roots_it_searched(tmp_path, monkeypatch):
+    """The distinction that was missed: 'not installed' vs 'looked in the wrong place'."""
+    from hutch_tools import resolvers
+
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", str(tmp_path))
+    rec = resolvers.skills("elog-copilot")
+    assert rec["value"]["installed"] is False
+    assert rec["value"]["root"] is None
+    assert rec["roots_searched"] == [str(tmp_path)]
+
+
+def test_a_missing_root_is_skipped_not_fatal(tmp_path, monkeypatch):
+    from hutch_tools import resolvers
+
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "SKILL.md").write_text("x")
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", f"{tmp_path}:{tmp_path / 'nope'}")
+    assert set(resolvers.skills()["value"]) == {"real"}
+
+
+def test_every_declared_advisor_is_a_plausible_skill_name():
+    """Catches a typo in DECLARED_ADVISORS, which no other test would."""
+    for name in DECLARED_ADVISORS:
+        assert re.fullmatch(r"[a-z][a-z0-9-]*", name), name
