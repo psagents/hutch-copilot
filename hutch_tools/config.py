@@ -419,8 +419,14 @@ def build_parser() -> "argparse.ArgumentParser":
     ap.add_argument("--list-templates", action="store_true",
                     help="print the templates shipped with this repo and exit")
     ap.add_argument("--context", default=None, help="JSON file of template context")
-    ap.add_argument("--set-context", nargs="*", default=[], metavar="K=V")
-    ap.add_argument("--set", nargs="*", default=[], dest="sets", metavar="TASK.BLOCK.KEY=V",
+    # action="extend", not the default "store": with plain nargs="*" a second
+    # --set silently REPLACED the first, so `--set a=1 --set b=2` applied only
+    # b=2 and dropped a=1 with no diagnostic. That is the exact silent-drop
+    # failure --whitelist-dir exists to catch, occurring inside the tool meant
+    # to catch it. extend accumulates every occurrence instead.
+    ap.add_argument("--set-context", nargs="*", action="extend", default=[], metavar="K=V")
+    ap.add_argument("--set", nargs="*", action="extend", default=[], dest="sets",
+                    metavar="TASK.BLOCK.KEY=V",
                     help=f"override; value {DELETE} removes the key")
     ap.add_argument("--overrides", default=None,
                     help="JSON file of overrides; a top-level 'overrides' key is unwrapped")
