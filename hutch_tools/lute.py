@@ -38,6 +38,58 @@ class LuteError(RuntimeError):
     pass
 
 
+#: Config keys whose value is a per-run path LUTE expects to already exist.
+#: ``in_file`` and ``phil_file`` are the load-bearing pair: LUTE writes both
+#: while *parsing the config*, before any Task starts.
+_RUN_PATH_KEYS = ("phil_file", "in_file", "output_output_dir", "output_logging_dir")
+
+
+def ensure_run_dirs(config_path: str, run: int) -> list[str]:
+    """Create the per-run directories this config's own paths imply.
+
+    ``IndexCCTBXXFEL.in_file`` is a psana2 locator that LUTE writes during
+    pydantic validation of the config -- before the Task launches, and with no
+    ``mkdir`` of its own::
+
+        FileNotFoundError: [Errno 2] No such file or directory:
+          '.../iters/iter002/r0036/data_mfx101624926_36.loc'
+
+    Every config that puts per-run files under ``{{ work_dir }}/r{{ run:04d }}``
+    -- which is the layout that stops parallel runs racing on a shared phil
+    file -- therefore fails on a work_dir that has not been used before. The
+    directory cannot be created by ``hutch-config``, which never sees a run
+    number (``{{ run }}`` is a LUTE-runtime placeholder), so it belongs here:
+    ``sbatch`` is the first step that knows the config *and* the run.
+
+    Regex rather than PyYAML on purpose -- this module is stdlib-only so that
+    ``status``/``watch``/``kerberos`` keep working without the psana env.
+    """
+    text = pathlib.Path(config_path).read_text()
+    m = re.search(r"^work_dir:\s*(.+?)\s*$", text, re.M)
+    if not m:
+        raise LuteError(f"{config_path} has no top-level work_dir: key")
+    work_dir = m.group(1).strip().strip('"').strip("'")
+
+    def resolve(raw: str) -> str:
+        return (raw.replace("{{ work_dir }}", work_dir)
+                   .replace("{{ run:04d }}", f"{int(run):04d}")
+                   .replace("{{ run }}", str(int(run))))
+
+    created: list[str] = []
+    pat = re.compile(rf"^\s*({'|'.join(_RUN_PATH_KEYS)}):\s*(.+?)\s*$", re.M)
+    for key, raw in pat.findall(text):
+        value = resolve(raw.strip().strip('"').strip("'"))
+        if "{{" in value:          # an unresolved placeholder -- not ours to guess
+            continue
+        # a *_dir key names the directory itself; the rest name a file inside one
+        path = pathlib.Path(value)
+        target = path if key.endswith("_dir") else path.parent
+        if not target.exists():
+            target.mkdir(parents=True, exist_ok=True)
+            created.append(str(target))
+    return created
+
+
 def needs_kerberos(yaml_text: str) -> tuple[bool, str]:
     """Does this config require a Kerberos ticket?
 
@@ -495,9 +547,15 @@ def main(argv: "list[str] | None" = None) -> int:
             )
             if not args.submit:
                 return out(text, plain=True)
+            # LUTE writes in_file/phil_file while parsing the config, so their
+            # per-run directory has to exist before the job starts, not when
+            # the Task does. Reported, not silent: a created list that is
+            # unexpectedly long means the work_dir was not what you thought.
+            made = ensure_run_dirs(args.config, args.run)
             path = args.script_path or f"{args.log_dir}/sbatch_{args.task}.sh"
             return out({"job_id": submit(text, script_path=path,
-                                              dependency=args.dependency)})
+                                              dependency=args.dependency),
+                        "created_dirs": made})
         if args.cmd == "status":
             return out(job_status(args.job_id))
         if args.cmd == "watch":

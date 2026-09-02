@@ -79,3 +79,55 @@ def test_cell_string_matches_the_format_in_production_use(tmp_path):
     assert rec["value"]["unit_cell"] == "77.05 77.05 37.21 90.0 90.0 90.0"
     assert rec["value"]["space_group"] == "P 43 21 2"
     assert rec["source"].startswith("resolved:CRYST1 ")
+
+
+RUN_PATHS = """%YAML 1.3
+---
+work_dir: {WD}
+...
+---
+IndexCCTBXXFEL:
+  phil_file: "{{ work_dir }}/r{{ run:04d }}/cctbx_index.phil"
+  in_file: "{{ work_dir }}/r{{ run:04d }}/data_e_{{ run }}.loc"
+  phil_parameters:
+    output_output_dir: "{{ work_dir }}/r{{ run:04d }}/index"
+    output_logging_dir: "{{ work_dir }}/r{{ run:04d }}/index/logs"
+"""
+
+
+def test_ensure_run_dirs_creates_the_dirs_lute_writes_into(tmp_path):
+    """LUTE writes in_file/phil_file while *parsing* the config, not when the
+    Task runs, and never mkdirs their parent. Iteration 2 of the campaign died
+    with FileNotFoundError on r0036/data_mfx101624926_36.loc before the indexer
+    started, because a fresh per-iteration work_dir has no run subdirectory.
+    """
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(RUN_PATHS.replace("{WD}", str(tmp_path)))
+
+    made = lute.ensure_run_dirs(str(cfg), 36)
+
+    assert (tmp_path / "r0036").is_dir()            # in_file / phil_file parent
+    assert (tmp_path / "r0036" / "index" / "logs").is_dir()
+    assert str(tmp_path / "r0036") in made
+
+
+def test_ensure_run_dirs_is_idempotent(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(RUN_PATHS.replace("{WD}", str(tmp_path)))
+    lute.ensure_run_dirs(str(cfg), 36)
+    # second call reports nothing new -- callers surface this list, so a
+    # re-submission must not look like it rebuilt the workspace.
+    assert lute.ensure_run_dirs(str(cfg), 36) == []
+
+
+def test_ensure_run_dirs_needs_a_work_dir():
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write("IndexCCTBXXFEL:\n  phil_file: \"/tmp/x.phil\"\n")
+        name = f.name
+    try:
+        lute.ensure_run_dirs(name, 36)
+    except lute.LuteError as exc:
+        assert "work_dir" in str(exc)
+    else:
+        raise AssertionError("expected LuteError when work_dir is absent")
