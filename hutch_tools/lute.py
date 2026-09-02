@@ -136,11 +136,25 @@ def build_sbatch(
 
     prte = ""
     if mpi:
-        # LUTE strips the LUTE_TENV_ prefix and passes the rest into the Task
-        # environment; its own MCA dict does not set prte_tmpdir_base, so this
-        # value survives into mpirun.
+        # Per-job PRRTE session dir, set two ways and created on every node.
+        #
+        # The LUTE_TENV_ form is what LUTE forwards into the Task environment
+        # after stripping the prefix. The bare PRTE_MCA_ form is exported here so
+        # mpirun inherits it directly from this script -- belt and braces,
+        # because the CCTBX tasks are ThirdPartyTasks and relying on LUTE's env
+        # forwarding alone left concurrent jobs colliding.
+        #
+        # The mkdir has to run on EVERY node in the allocation: /tmp is
+        # node-local, so a base created only on the batch node leaves the remote
+        # daemons with nowhere to put their session dir, which surfaces as
+        # "srun returned non-zero exit status (36096) from launching the
+        # per-node daemon" -- the prte-session-collision trap, seen again in
+        # jobs 36669529 and 36669546 while sharing nodes with 36669535/36669553.
         prte = (
             'export LUTE_TENV_PRTE_MCA_prte_tmpdir_base="/tmp/prte_${SLURM_JOB_ID}"\n'
+            'export PRTE_MCA_prte_tmpdir_base="/tmp/prte_${SLURM_JOB_ID}"\n'
+            'srun --ntasks=${SLURM_NNODES} --ntasks-per-node=1 '
+            'mkdir -p "/tmp/prte_${SLURM_JOB_ID}" 2>/dev/null || '
             'mkdir -p "/tmp/prte_${SLURM_JOB_ID}"\n'
         )
 
