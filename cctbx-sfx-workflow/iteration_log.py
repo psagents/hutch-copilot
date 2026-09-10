@@ -99,6 +99,9 @@ def cmd_init(args: argparse.Namespace) -> None:
         "state": "WATCHING",
         "last_check": datetime.now(timezone.utc).isoformat(),
         "history": [],
+        "max_run_retries": 1,
+        "run_attempts": {},
+        "failed_runs": {},
         # Store original render args so re-renders are reproducible.
         # Calibration values are optional (None when not used); stored here so
         # re-renders in the workflow skill reproduce the original invocation exactly.

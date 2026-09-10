@@ -133,8 +133,13 @@ def check_runs(output_dir: str, lute_pythonpath: str) -> str:
     return "NO_NEW_RUNS"
 
 
-def check_jobs(output_dir: str) -> str:
-    """Returns PENDING / SCALE_COMPLETE / MERGE_COMPLETE / FAILED."""
+def check_jobs(output_dir: str, logger: Optional[logging.Logger] = None) -> str:
+    """Returns PENDING / SCALE_COMPLETE / MERGE_COMPLETE / FAILED:<runs>.
+
+    A FAILED result is preceded by detail lines (which task failed for which
+    run) — log every line so the diagnostic detail lands in the watcher log,
+    not just the final control-flow line.
+    """
     r = subprocess.run(
         [
             sys.executable,
@@ -146,7 +151,11 @@ def check_jobs(output_dir: str) -> str:
         capture_output=True,
         text=True,
     )
-    return r.stdout.strip().split("\n")[-1].strip()
+    lines = [l for l in r.stdout.splitlines() if l.strip()]
+    if logger:
+        for line in lines[:-1]:
+            logger.info("  %s", line)
+    return lines[-1].strip() if lines else "PENDING"
 
 
 def next_version(output_dir: str) -> str:
@@ -242,7 +251,20 @@ def render_versioned_config(
 
 def submit_index_run(state: dict, run_num: int, logger: logging.Logger) -> None:
     submit_script = _submit_script(state)
-    logger.info("Submitting --index-run %d", run_num)
+
+    # Track attempts separately from known_runs — a retried run is dropped
+    # from known_runs so it's re-detected as "new", but the attempt count
+    # must survive that drop or a persistently-broken run would retry forever.
+    output_dir = state["output_dir"]
+    fresh_state = load_state(output_dir)
+    attempts = fresh_state.setdefault("run_attempts", {})
+    key = str(run_num)
+    attempts[key] = attempts.get(key, 0) + 1
+    save_state(output_dir, fresh_state)
+
+    logger.info(
+        "Submitting --index-run %d (attempt %d)", run_num, attempts[key]
+    )
     r = subprocess.run(
         ["bash", submit_script, "--index-run", str(run_num)],
         capture_output=True,
@@ -252,6 +274,80 @@ def submit_index_run(state: dict, run_num: int, logger: logging.Logger) -> None:
         logger.info("  %s", line)
     if r.returncode != 0:
         logger.error("--index-run %d failed: %s", run_num, r.stderr.strip())
+
+
+def handle_failed_runs(
+    output_dir: str, failed_run_list: List[int], logger: logging.Logger
+) -> None:
+    """Drop a failed run from known_runs so it's retried automatically, up to
+    max_run_retries. A run that fails again after its retries are exhausted
+    is instead kept in known_runs (so it stops being re-submitted forever)
+    and recorded in failed_runs for the operator/agent to investigate."""
+    state = load_state(output_dir)
+    max_retries = state.get("max_run_retries", 1)
+    run_attempts = state.get("run_attempts", {})
+    failed_runs_record = state.get("failed_runs", {})
+    known = set(state.get("known_runs", []))
+
+    retry_runs = []
+    give_up_runs = []
+    for run_num in failed_run_list:
+        attempts = run_attempts.get(str(run_num), 1)
+        if attempts <= max_retries:
+            retry_runs.append(run_num)
+            known.discard(run_num)
+        else:
+            give_up_runs.append(run_num)
+            known.add(run_num)
+
+    if retry_runs:
+        logger.warning(
+            "Run(s) %s failed — removed from known_runs for automatic retry "
+            "(attempt %d of max %d).",
+            retry_runs,
+            run_attempts.get(str(retry_runs[0]), 1),
+            max_retries,
+        )
+
+    for run_num in give_up_runs:
+        key = str(run_num)
+        failed_runs_record[key] = {
+            "attempts": run_attempts.get(key, 1),
+            "last_failed": datetime.now(timezone.utc).isoformat(),
+        }
+        work_dir = state.get("work_dir", output_dir)
+        logger.error(
+            "Run %d failed %d time(s) (retries exhausted) — will NOT be "
+            "retried automatically. To diagnose: check %s/r%04d/index/logs/ "
+            "and %s/r%04d/scale/ for the underlying cctbx.xfel error. Common "
+            "causes: wrong --detector-address, a bad/misaligned geometry file, "
+            "or a genuinely bad run (detector glitch, no crystal hits). Once "
+            "fixed, resubmit manually with: bash submit_cctbx_%s.sh "
+            "--index-run %d — or exclude the run from the tag if it's bad "
+            "data. If the cause isn't obvious from the logs, ask an agent "
+            "(e.g. Claude via hutch-copilot) to read those logs and diagnose.",
+            run_num,
+            run_attempts.get(key, 1),
+            work_dir,
+            run_num,
+            work_dir,
+            run_num,
+            state["experiment"],
+            run_num,
+        )
+
+    state["known_runs"] = sorted(known)
+    state["failed_runs"] = failed_runs_record
+    remaining = [
+        r
+        for r in state.get("indexing_scale_runs", [])
+        if r not in failed_run_list
+    ]
+    state["indexing_scale_runs"] = remaining
+    if not remaining:
+        state["state"] = "WATCHING"
+        logger.info("State → WATCHING (nothing left to wait on in this batch)")
+    save_state(output_dir, state)
 
 
 def submit_merge(state: dict, config_path: str, logger: logging.Logger) -> None:
@@ -354,18 +450,23 @@ def _parse_new_runs(line: str) -> List[int]:
 # Main loop
 # ---------------------------------------------------------------------------
 def run_watcher(
-    output_dir: str, poll_interval: int, idle_timeout: int, lute_pythonpath: str
+    output_dir: str,
+    poll_interval: int,
+    idle_timeout: int,
+    lute_pythonpath: str,
+    submit_stagger: int = 60,
 ) -> None:
     logger = setup_logging(output_dir)
     logger.info("=" * 60)
     logger.info("watch_workflow starting")
-    logger.info("  output_dir    : %s", output_dir)
-    logger.info("  poll_interval : %ds", poll_interval)
+    logger.info("  output_dir      : %s", output_dir)
+    logger.info("  poll_interval   : %ds", poll_interval)
     logger.info(
-        "  idle_timeout  : %d polls (%.0f min)",
+        "  idle_timeout    : %d polls (%.0f min)",
         idle_timeout,
         idle_timeout * poll_interval / 60,
     )
+    logger.info("  submit_stagger  : %ds between per-run indexer submissions", submit_stagger)
     logger.info("=" * 60)
 
     idle_count = 0
@@ -414,7 +515,20 @@ def run_watcher(
             if result.startswith("NEW_RUNS:"):
                 new_runs = _parse_new_runs(result)
                 logger.info("New runs detected: %s", new_runs)
-                for run_num in new_runs:
+                for i, run_num in enumerate(new_runs):
+                    if i > 0:
+                        # Stagger heavy (4-node/240-task) indexer submissions —
+                        # two landing on the same node at the same instant can
+                        # collide launching MPI's per-node daemon (srun exit
+                        # 36096). Not a guaranteed fix (SLURM still owns node
+                        # placement), just a cheap way to cut how often two
+                        # submissions land at literally the same moment.
+                        logger.info(
+                            "Waiting %ds before submitting next run "
+                            "(stagger to avoid node-launch collisions)...",
+                            submit_stagger,
+                        )
+                        time.sleep(submit_stagger)
                     submit_index_run(state, run_num, logger)
                 # Update state
                 state = load_state(output_dir)
@@ -429,7 +543,7 @@ def run_watcher(
 
         # ------------------------------------------------------------------
         elif current_state == "INDEXING_SCALING":
-            result = check_jobs(output_dir)
+            result = check_jobs(output_dir, logger)
             logger.info("check-jobs: %s", result)
             if result == "SCALE_COMPLETE":
                 state = load_state(output_dir)
@@ -451,10 +565,15 @@ def run_watcher(
                 save_state(output_dir, state)
                 logger.info("State → MERGING (%s)", ver)
                 acted = True
+            elif result.startswith("FAILED:"):
+                run_list_str = result.split(":", 1)[1].strip()
+                failed_run_list = [int(x) for x in run_list_str.split(",") if x]
+                handle_failed_runs(output_dir, failed_run_list, logger)
+                acted = True
 
         # ------------------------------------------------------------------
         elif current_state == "MERGING":
-            result = check_jobs(output_dir)
+            result = check_jobs(output_dir, logger)
             logger.info("check-jobs: %s", result)
             if result == "MERGE_COMPLETE":
                 state = load_state(output_dir)
@@ -556,6 +675,13 @@ def main() -> None:
         help="Path to LUTE install lib/pythonX.Y/site-packages. "
         "Auto-detected from {output_dir}/lute/ if not given.",
     )
+    p.add_argument(
+        "--submit-stagger",
+        type=int,
+        default=60,
+        help="Seconds to wait between submitting each new run's indexer "
+        "when multiple runs are detected at once (default: 60).",
+    )
     args = p.parse_args()
 
     # Auto-detect LUTE pythonpath from work_dir/lute/install/
@@ -578,6 +704,7 @@ def main() -> None:
         poll_interval=args.poll_interval,
         idle_timeout=args.idle_timeout,
         lute_pythonpath=lute_pythonpath,
+        submit_stagger=args.submit_stagger,
     )
 
 

@@ -24,6 +24,33 @@ Requires `@setup-cctbx-pipeline` skill to have been run first
 
 ---
 
+## TUI (operator dashboard)
+
+`tui.py` is a Textual terminal app covering the whole loop in one place —
+Setup (gathers inputs and calls `render.py`), LUTE (clone+build only if
+`{work_dir}/lute` doesn't already exist), Kerberos (status + a `kinit`
+button that suspends the app and hands the terminal to `kinit` directly,
+so the password never passes through the app), and Watcher (state,
+iteration history, live log tail, start/restart/cancel, approve pending
+d_min). "Start/restart" cancels any watcher job this same TUI instance
+previously started before submitting a new one.
+
+```bash
+python3 ~/.claude/skills/hutch-copilot/cctbx-sfx-workflow/tui.py \
+  --output-dir OUTPUT_DIR
+```
+
+Requires `textual` (`pip install textual`; `rich` is a transitive dep it
+needs anyway). Tracks its own submitted job id in
+`{output_dir}/.tui_watcher.json` (separate from `workflow_state.json`,
+which other scripts read expecting a fixed schema) — a watcher started
+from the plain CLI (`submit_cctbx_*.sh --watch`) instead of the TUI won't
+be tracked there until "Start/restart" is clicked from the TUI itself, so
+the SLURM-status line reads "never started from this TUI" until then; it's
+still reading the real `workflow_state.json`/log correctly regardless.
+
+---
+
 ## Trigger conditions
 
 Use this skill when a user asks to:
@@ -100,6 +127,45 @@ Fields:
 - `last_merge_submission_time` — ISO timestamp set when `--merge` is submitted; used
   by `check-jobs` to filter MergeCCTBXXFEL completions to only those after this time,
   avoiding false MERGE_COMPLETE from prior merge records
+- `run_attempts` — `{run_num: count}`, incremented on every `--index-run` submission
+  (initial or retry) for that run; persists even while the run is dropped from
+  `known_runs` for a retry, so a persistently-broken run isn't retried forever
+- `max_run_retries` — automatic retries allowed per run before giving up (default 1,
+  i.e. one retry / two total attempts)
+- `failed_runs` — `{run_num: {attempts, last_failed}}` for runs that exhausted
+  `max_run_retries` and are no longer retried automatically; stays in `known_runs`
+  so it's not re-detected as new. Surfaced in the TUI's Watcher tab and in the
+  watcher log with a diagnostic message pointing at the relevant log paths.
+
+### Failed-run handling (`check-jobs` → `FAILED:`)
+
+`monitor.py`'s `check-jobs` checks each run in `indexing_scale_runs` for its
+**most recent** IndexCCTBXXFEL/ScaleCCTBXXFEL attempt in `lute.db`
+(`TaskStatus.FAILED` — only the latest attempt matters, so a run that failed
+once and later succeeded on retry does not still read as failed). If any are
+failed, it prints detail lines plus a final `FAILED: 38,39` line instead of
+`PENDING`.
+
+`watch_workflow.py`'s `handle_failed_runs`:
+1. **First failure** (`run_attempts[run] <= max_run_retries`): drops the run
+   from `known_runs` so the next `WATCHING` poll's `check-runs` re-detects it
+   as new and automatically resubmits `--index-run` for it.
+2. **Failure after retries exhausted**: keeps the run in `known_runs` (so it
+   stops being re-submitted), records it in `failed_runs`, and logs a
+   diagnostic error naming the exact `r{run:04d}/index/logs/` and
+   `r{run:04d}/scale/` paths to check, common causes (wrong detector address,
+   bad geometry, a genuinely bad run), the manual resubmit command, and a
+   suggestion to ask an agent to read those logs if the cause isn't obvious.
+3. Either way, the failed run(s) are dropped from the current batch's
+   `indexing_scale_runs` so the rest of the batch isn't blocked waiting on
+   them — a successful subset still proceeds to merge normally.
+
+Before this existed, `check-jobs` had no failure detection at all for
+`INDEXING_SCALING` — a single failed run would leave the watcher reporting
+`PENDING` forever (since it waits for *every* tracked run to scale-complete)
+until it hit the 30-min idle-timeout and exited having produced no merge,
+even for runs that succeeded. `MERGING` still has no equivalent failure
+detection — a failed merge also just reads as `PENDING` until idle-timeout.
 
 ---
 

@@ -105,6 +105,47 @@ def scale_complete_for_runs(db_path: str, run_nums: List[int]) -> bool:
     return completed_runs == set(run_nums)
 
 
+def latest_task_status(db_path: str, task_name: str, run_num: int) -> Optional[str]:
+    """Return the status of the most recent `task_name` execution for run_num,
+    or None if it has never been attempted. Only the latest attempt matters —
+    a run that failed once and later succeeded on retry must not still read
+    as failed."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT r.status
+        FROM executions e
+        JOIN tasks t        ON e.task_id   = t.id
+        JOIN config c       ON e.config_id = c.id
+        LEFT JOIN results r ON e.result_id = r.id
+        WHERE t.name = ? AND CAST(c.run AS INTEGER) = ?
+        ORDER BY e.timestamp DESC
+        LIMIT 1
+        """,
+        (task_name, run_num),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return row["status"] if row else None
+
+
+def failed_runs_for(db_path: str, run_nums: List[int]) -> dict:
+    """Return {run_num: task_name} for runs whose most recent Index or Scale
+    attempt ended in TaskStatus.FAILED."""
+    failed = {}
+    for run_num in run_nums:
+        idx_status = latest_task_status(db_path, "IndexCCTBXXFEL", run_num)
+        if idx_status == "TaskStatus.FAILED":
+            failed[run_num] = "IndexCCTBXXFEL"
+            continue
+        scale_status = latest_task_status(db_path, "ScaleCCTBXXFEL", run_num)
+        if scale_status == "TaskStatus.FAILED":
+            failed[run_num] = "ScaleCCTBXXFEL"
+    return failed
+
+
 def merge_complete_since(db_path: str, since_iso: str) -> bool:
     """Return True if a MergeCCTBXXFEL COMPLETED after since_iso.
 
@@ -191,6 +232,13 @@ def cmd_check_jobs(args: argparse.Namespace) -> None:
         if not pending_runs:
             # No runs tracked — fall back to PENDING to avoid false trigger
             print("PENDING")
+            return
+        failed = failed_runs_for(db_path, pending_runs)
+        if failed:
+            for run_num, task in sorted(failed.items()):
+                print(f"  {task} FAILED for run {run_num}")
+            run_list = ",".join(str(r) for r in sorted(failed))
+            print(f"FAILED: {run_list}")
             return
         if scale_complete_for_runs(db_path, pending_runs):
             print("SCALE_COMPLETE")
