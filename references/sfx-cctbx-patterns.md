@@ -60,8 +60,9 @@ empty: `takepeds`/`makepeds` happen outside LUTE.
 - `GEOM`: the `.poni` output must be deployed to the psana calibration DB before DATA runs.
 - `DATA`: `SmallDataProducer2` is not needed for pure SFX — `CCTBXIndexer` reads psana directly.
 - `wf_name = sfx_cctbx`, `--trigger END_OF_RUN`.
-- `slurm_params` carries no `--time`. Nothing in LUTE does. If a wall-clock limit matters,
-  submit through `hutch-lute sbatch --time`, which refuses to emit a script without one.
+- `slurm_params` carries no `--time`, and nothing in LUTE sets one, so a job inherits the
+  partition default (24 h on milano). If a run is truncated, check `hit_wall_clock` from
+  `hutch-lute status` before comparing its statistics against another run's.
 
 ---
 
@@ -102,12 +103,11 @@ touching geometry** — that ordering is the campaign's most expensive lesson.
 |---|---|---|
 | **Indexing yield too low (CCTBX)** | `dispatch_hit_finder_minimum_number_of_reflections` — read the funnel first; a low rate is *not* reliably a geometry problem | `IndexCCTBXXFEL.phil_parameters` |
 | Wall clock exhausted before the run ends | `radial_average_enable`→false; `output_composite_output`→false so a kill keeps partial results | `IndexCCTBXXFEL.phil_parameters` |
-| An override appears to do nothing | the key is not referenced by the phil template, so it is silently dropped | `hutch-lute render --whitelist-dir …` |
+| An override appears to do nothing | the key is not referenced by the phil template, so it is silently dropped — inspect the rendered YAML, do not assume the override took | the config YAML |
 | Job reported COMPLETED but produced nothing | `run_task.py` exits 0 on Task failure | `hutch-lute status <job_id>` |
 | Wrong unit cell / space group | never hand-type it | `hutch-resolve cell <pdb>` |
 | High Rsplit with many patterns | wrong symmetry, too few patterns, or partiality mismatch — check multiplicity before blaming parameters | scale/merge logs |
 | Indexing rate too low (CrystFEL) | `min_peaks`, `pushres`, `indexing` | `IndexCrystFEL` block |
 
-Inspecting output is a tool's job, not the operator's: the retired `/refine` asked the user
-to run `h5py` and paste the result. That becomes `lute-stats` (MIGRATION.md item 1); until it
-exists, read the scale and merge logs directly rather than asking for a paste.
+Inspecting output is your job, not the operator's. Read the scale and merge logs directly —
+`hutch-lute status` returns their paths — rather than asking for a paste.

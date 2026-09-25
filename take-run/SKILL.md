@@ -49,11 +49,7 @@ may not be configured.
 ## 2. Resolve run parameters
 
 `run_type` first, and it is **uppercase**: LUTE's `!run_type` DAG keys are `DARK`/`GEOM`/`DATA`
-and a lowercase value matches no branch. Checked, not remembered:
-
-```bash
-bin/hutch-lute traps --scope run-params    # the assertion and the evidence behind it
-```
+and a lowercase value matches no branch.
 
 | Operator says | `run_type` | Command |
 |---|---|---|

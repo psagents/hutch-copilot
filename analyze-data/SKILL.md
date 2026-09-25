@@ -1,22 +1,24 @@
 ---
 name: analyze-data
 description: >
-  LUTE analysis setup and refinement sub-skill for hutch-copilot. Configures LUTE
-  workflows after data collection — DAG design, detector-alias confirmation, config
-  rendering, workflow registration — and drives the inspect/adjust/re-run loop once
-  output exists. Calibration runs (GEOM, DARK) are handled by /take-run via run_type
-  tags. Works entirely offline from S3DF. Triggers on: set up analysis, configure
-  lute, sfx pipeline, refine parameters, check output, analyze data, lute setup,
-  lute wizard, indexing rate is low, re-run lute.
+  Reads LUTE analysis output and judges the dataset for hutch-copilot. Finds the job,
+  reads its logs, extracts the SFX metrics, names the limiting factor, and says whether
+  to collect more or stop. Does NOT configure LUTE — workspace setup, DAG patching and
+  eLog workflow registration happen outside this skill, before a shift. Calibration runs
+  (GEOM, DARK) are handled by /take-run via run_type tags. Works entirely offline from
+  S3DF. Triggers on: how does the data look, assess the run, is the dataset good, check
+  output, analyze data, indexing rate is low, sfx metrics, read the merge log, one more
+  run, are we done collecting.
 ---
 
 # analyze-data
 
-You own LUTE configuration and parameter refinement. You do not run calibration —
-`/take-run` handles GEOM and DARK via `run_type` tags. You control no hardware.
+You read what LUTE produced and say what it means. You control no hardware, you run no
+calibration (`/take-run` handles GEOM and DARK via `run_type` tags), and **you do not
+configure LUTE** — see "Scope" below.
 
 All mechanism is in `hutch-tools` (see the Tool Layer section of `../SKILL.md`). This file
-owns the DAG design, the human gates, and the refinement judgment.
+owns the judgment: which number is limiting, and whether the dataset is done.
 
 **Reference:** `../references/sfx-cctbx-patterns.md` — the CCTBX DAG pattern, the `d_min`
 ranking hazard, coverage×yield, and the symptom→knob table.
@@ -27,184 +29,109 @@ ranking hazard, coverage×yield, and the symptom→knob table.
 
 ---
 
+## Scope — what this skill does not do
+
+LUTE **configuration** is out of scope for these tools: no config rendering, no workspace
+creation, no DAG patching, no eLog workflow registration. Those are writes that happen
+once, outside a shift, by hand.
+
+If no workflow fires after a run, or the config needs changing, say so plainly and name
+what a human has to do — patch the YAML, or check the eLog ARP registration. Do not
+improvise a substitute. A YAML-only change needs no re-registration; the next trigger
+picks it up.
+
+---
+
 ## 1. Context
 
 ```bash
-bin/hutch-lute readiness --hutch "$H" --experiment "$E"   # already configured?
 bin/hutch-state audit --hutch "$H" --experiment "$E"
 bin/hutch-state path  --hutch "$H" --experiment "$E"
 ```
 
-If `readiness` reports `configured: true`, **say so and ask what needs changing** rather than
-reconfiguring from scratch. A YAML-only change needs no re-registration.
-
-Ask only for what is genuinely missing: `version` (default `dev`) and an optional `directory`
-under `results/`. Get the experiment root from `hutch-state path` — never interpolate it here.
-
-`MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report the
-age. Do not assume a value in either case.
-
-### Kerberos — scoped, not unconditional
-
-A ticket is needed **only for eLog interaction**: resolving inputs from an eLog tag, and
-registering workflows with `install_lute.py`. A pipeline whose inputs are explicit paths needs
-none. Ask the config:
-
-```bash
-bin/hutch-lute kerberos --yaml "$CONFIG"
-```
-
-If `needs_kerberos` is true and `have_ticket` is false, show
-`kinit -c FILE:$HOME/krb5cc.ticket <username>@SLAC.STANFORD.EDU`.
-If false, **proceed without a ticket** — this used to be an unconditional gate, which would
-have blocked a ten-iteration campaign that never touched the eLog.
+`MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
+the age. Do not assume a value in either case. Get the experiment root from
+`hutch-state path` — never interpolate it.
 
 ---
 
-## 2. Design the DAG — the judgment part
+## 2. Find the job
 
-Ask `@ask-lute` (if available) for the task chain and starting template for this hutch and
-technique. If the technique is unknown, ask one framing question first — SFX, TR-SAXS, XES,
-RIXS, other?
+If a run has just finished and the eLog ARP should have triggered a workflow:
 
-Build a **minimal** DAG: exactly the tasks needed. For SFX with DARK/GEOM/DATA run types use
-`!run_type` branching — canonical shape in `../references/sfx-cctbx-patterns.md`. Otherwise a
-linear DAG is right.
+```bash
+bin/hutch-lute watch --user "$USER" --since "$SUBMIT_TIME"
+```
 
-Decisions that are yours, not the tool's:
+`watch` reports `polls` and `waited_s`, so **"no job found" is distinguishable from "did
+not look"**. If `found` is false after a full timeout, the workflow did not fire — report
+that as a registration or trigger problem, not as an analysis result.
 
-- Which tasks belong in the chain at all. `SmallDataProducer2` is not needed for pure SFX.
-- `slurm_params` per task — default `--nodes=1 --ntasks-per-node=1`; ask whether more compute
-  is warranted, which it usually is for `MPIExecutor` tasks.
-- Trigger: `END_OF_RUN` for offline analysis, `START_OF_RUN` for live SmallData, `MANUAL` for
-  calibration or one-off computation.
-- `wf_name` (e.g. `sfx_cctbx`, `xes`).
+```bash
+bin/hutch-lute status "$JOB_ID"
+```
 
-`slurm_params` carries no `--time` — nothing in LUTE does. If a wall-clock limit matters,
-submit through `hutch-lute sbatch --time`, which refuses to emit a script without one.
-
-Show the plan — chain, workflow name, DAG path, trigger, full DAG YAML — and get approval
-before continuing.
+`COMPLETED` is a Slurm verdict, not a scientific one — a Task can fail inside a job that
+Slurm considers successful. Check `hit_wall_clock`: if true, the run was truncated and its
+statistics are coverage-limited, which matters for rule 2 below.
 
 ---
 
-## 3. Detector alias — a human gate, not a guess
+## 3. Read the output yourself
 
-```bash
-bin/hutch-resolve detectors --experiment "$E" --run "$RUN" \
-    --persist-to "$H" "$E" --field detectors
-```
+`status` returns the job's output paths. **Read those files directly — do not ask the
+operator to paste log contents.** The CCTBX index, scale and merge logs carry the numbers
+you need.
 
-The tool returns every key plus `area_candidates`. **Show the list and ask which is the area
-detector** — instruments carry many, and the auto-detected value can be ambiguous. Never write
-an alias the operator has not confirmed.
+Report the metrics that exist, and say which ones you could not find rather than
+estimating them:
 
-Same rule for the other inputs: unit cell from `hutch-resolve cell <pdb>` (never hand-typed),
-and `ls` the experiment's `results/common/` tree for geometry and mask rather than recalling
-paths — a campaign lost time to a mask path documented without its `.mask` extension.
-
----
-
-## 4. Render the config
-
-```bash
-bin/hutch-lute render \
-  --template  cctbx_pipeline \
-  --context   context.json \
-  --set       TASK.phil_parameters.KEY=VALUE ... \
-  --whitelist-dir "$LUTE_PATH/config/templates" \
-  --out       "$CONFIG"
-```
-
-`--template` defaults to the vendored `cctbx_pipeline`; `--list-templates` shows what ships.
-
-**Read the report before showing anything to the operator:**
-
-- **`overrides`** says `replaced` or `inserted` per override. An `inserted` where you expected
-  `replaced` means the key is misspelled — say so rather than reporting success.
-- **Unknown phil keys are refused.** `phil_parameters` is pydantic `extra='allow'`, so LUTE
-  accepts anything and the fixed template silently ignores what it does not reference.
-  `--whitelist-dir` turns that invisible no-op into an error. Use `--no-whitelist` only if the
-  operator accepts that an unknown key will be dropped.
-- The incident register runs automatically: `parallel_a2a`, `modify` in the merge step list,
-  missing merge suffixes, `phil_file` without `{{ run }}`, merge-version padding, and
-  `merging_d_min` disagreeing between the scale and merge stages.
-
-Show the operator the rendered config **and** the report together, and get approval.
+| Metric | What it tells you |
+|---|---|
+| CC½ | signal in the outer resolution shell |
+| Completeness | fraction of unique reflections measured |
+| Multiplicity | how many times each was measured |
+| Rsplit | self-consistency between half-datasets |
+| indexing rate, `n_indexed` | how much of the data is usable at all |
 
 ---
 
-## 5. Register the workflow
+## 4. The verdict — name the limiting factor
 
-**Look before you touch.** `plan` is read-only and reports every path, every eLog payload and
-every precondition:
+Say whether to keep collecting or stop, and **name the number that decided it**. "The data
+looks good" is not a verdict; "multiplicity is 4.2 against a target above 5, so one more
+run" is.
 
-```bash
-bin/hutch-lute plan -e "$E" [--hutch "$H"] [-D "$DIRECTORY"] \
-    -W "$WF_NAME" --trigger "$TRIGGER" [--partition milano] [--account "lcls:$E"]
-```
-
-Show the operator the `checks` list and the payloads. `blocking` names anything that must be
-fixed first; a missing Kerberos ticket is listed but **not** blocking, because it is only
-needed for the final step.
-
-Then, once approved:
-
-```bash
-bin/hutch-lute all -e "$E" -W "$WF_NAME" --trigger "$TRIGGER" --confirm write
-```
-
-`all` re-checks the preconditions and **changes nothing if any is unmet**. The steps run in a
-safe order — workspace, DAG patching, virtual environments, eLog registration. You can also
-run them individually (`workspace`, `dags`, `envs`, `register`) when only one needs redoing.
-
-Two things to know, both of which were bugs in the script this replaced:
-
-- **`dags` is idempotent** and repairs a DAG that an older version doubled. It sets only
-  `--account` and `--partition`; every other parameter in `slurm_params` is the DAG author's
-  and is left alone.
-- **`envs` deletes and recreates both virtual environments**, so it requires `--confirm write`.
-  `plan` names it under `destructive` when the directory already exists.
-
-Afterwards, verify with `hutch-lute readiness`, then confirm the workflow appears as
-`lute_{wf_name}` under Workflow Definitions in the eLog — that part no tool can check for you.
-Re-running `all` with the same `-W` updates registration.
-
----
-
-## 6. Refine — the inspect / adjust / re-run loop
-
-Once output exists. Read it yourself; do not ask the operator to paste log contents.
-
-```bash
-bin/hutch-lute status "$JOB_ID"     # COMPLETED can still mean the Task failed
-```
-
-Then work the symptom→knob table in `../references/sfx-cctbx-patterns.md`. Three rules the
-campaign paid for:
+Three rules the reference campaign paid for:
 
 1. **Check the funnel before touching geometry.** A low indexing rate is not reliably a
-   geometry problem; the one large effect found in ten iterations was a hit-finder floor set
-   too high, discarding 407 frames that carried ≥20 spots.
+   geometry problem; the one large effect found in ten iterations was a hit-finder floor
+   set too high, discarding 407 frames that carried ≥20 spots.
 2. **Compare on yield, not `n_indexed`.** Under a wall-clock limit `n_indexed` is
-   coverage × yield, so two runs with identical parameters can differ by 35%.
-3. **Never rank two runs with different `d_min`.** All three overall statistics are monotone
-   in it — cutting `d_min` improves them without adding information.
+   coverage × yield, so two runs with identical parameters can differ by 35%. This is why
+   `hit_wall_clock` from `status` matters.
+3. **Never rank two runs with different `d_min`.** All three overall statistics are
+   monotone in it — cutting `d_min` improves them without adding information.
 
-Change **one concept per iteration**, write the expected readout *before* submitting, and
-record a null result as a result. A YAML-only change needs no re-registration; the next
-trigger picks it up.
+Then work the symptom→knob table in `../references/sfx-cctbx-patterns.md`. Change **one
+concept per iteration**, state the expected readout *before* the next run, and record a
+null result as a result.
+
+> **Publication thresholds are not settled.** CC½ > 0.5 in the outer shell, completeness
+> > 95%, multiplicity > 5, Rsplit < 30% are plausible working numbers, **not** confirmed
+> reference values (PLAN.md TBD-3 — needs a crystallographer). Quote them as the working
+> targets they are, and say who has not yet signed off.
 
 ---
 
 ## → coordinate-experiment handoff (mandatory)
 
 ```bash
-bin/hutch-state set --hutch "$H" --experiment "$E" lute_config \
-    '{"yaml_path": "'"$CONFIG"'", "workflows": ["lute_'"$WF_NAME"'"]}' \
-    --source "install_lute.py -W $WF_NAME, verified in eLog Workflow Definitions" \
+bin/hutch-state set --hutch "$H" --experiment "$E" analysis_verdict \
+    '{"job_id": "'"$JOB_ID"'", "limiting_factor": "multiplicity", "recommend": "one more run"}' \
+    --source "cctbx merge log $LOG_PATH, job $JOB_ID" \
     --kind resolved
 ```
 
-Then pass to coordinate-experiment for logging, and note any `# FILL IN` items still
-outstanding in the config.
+The `--source` must name the log you actually read, so the verdict can be re-derived.
+Then pass to coordinate-experiment for logging.

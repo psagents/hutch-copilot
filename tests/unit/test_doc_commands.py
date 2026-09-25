@@ -89,7 +89,7 @@ def test_every_binary_is_covered():
 
     Without this, adding a binary silently opts its documentation out of the
     drift check: `_documented` skips any suffix it does not know. That is how
-    `hutch-log` and `hutch-install` went unchecked from the day they landed.
+    `hutch-log` went unchecked from the day it landed.
     """
     shipped = {p.name.split("hutch-", 1)[1] for p in (SKILL / "bin").glob("hutch-*")}
     missing = sorted(shipped - set(BINARIES))

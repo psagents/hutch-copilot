@@ -19,17 +19,15 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 ## Tool Layer (`hutch-tools`) — read this before any procedure below
 
 Mechanism lives in `hutch-tools`, not in prose. **Never interpolate a path, compose a PV
-name, or hand-write an SSH command** — call the tool. All five print JSON, and each is
-owned by one module so a fault in one cannot break the others.
+name, or hand-write an SSH command** — call the tool. All five print JSON, and one module
+owns one tool.
 
 | Tool | Use for |
 |---|---|
 | `bin/hutch-state path\|get\|set\|unset\|audit\|dump` | the experiment state file — the ONLY way to read or write it |
 | `bin/hutch-daq ping\|install\|exec\|status\|logs` | the DAQ machine: live hutch-python session, process states, log files |
 | `bin/hutch-resolve` (see below) | discovering machine truth from its authoritative source |
-| `bin/hutch-lute sbatch\|status\|watch\|peds\|readiness\|traps\|kerberos` | LUTE submission, job status, pedestals, readiness, known-trap checking |
-| `bin/hutch-lute render` | render a LUTE config with overrides, validated |
-| `bin/hutch-lute plan\|workspace\|dags\|envs\|register\|all` | LUTE workspace setup and eLog workflow registration |
+| `bin/hutch-lute watch\|status\|peds` | finding the LUTE job, its state and output paths, pedestal deployment |
 | `bin/hutch-log init\|append` | the beamtime log |
 
 They run from a bare checkout with no install step. `pip install -e .` is optional and only
@@ -72,28 +70,18 @@ run its initialization flow. coordinate-experiment is active for the **entire se
 and silently observes every conversation turn after that.
 
 - The canonical experiment state lives in `{experiment}_state.json`. **Get its path from
-  `hutch-state path --hutch H --experiment E` — never write the path out.** Six SKILL.md
-  files used to restate it in prose and three of them were wrong, so those sub-skills read
-  a file nothing wrote and silently re-asked the user for everything.
+  `hutch-state path --hutch H --experiment E` — never write the path out.**
 - Use any field already present in the state file without re-asking the user. If a field
   **required for the current task** is missing or null, ask the user for it — do not
   infer or assume a value.
 - After every command completes, silently pass the interaction to coordinate-experiment
   for ambient logging (sample changes, run metadata, beam events, operator remarks).
 
-### LUTE readiness — read-only, every session
-
-Once hutch and experiment are known, check whether analysis is configured:
-
-```bash
-bin/hutch-lute readiness --hutch "$H" --experiment "$E"
-```
-
-Report it in one line as part of the init confirmation — `LUTE: configured (2 workflows)` or
-`LUTE: not configured — /analyze-data will set it up`. **Never install as a side effect.**
-Installing creates a venv, patches a DAG and registers eLog workflows; those are writes and
-belong behind `/analyze-data` with a confirmation. This check only reads, and it reports what
-it could not verify (eLog registration needs a ticket).
+> **LUTE setup is out of scope for these tools.** Workspace creation, DAG patching and
+> eLog workflow registration are done once, outside this skill, before a shift. The
+> tools observe LUTE (`hutch-lute watch`, `status`); they do not configure it. If no
+> workflow fires after a run, say so and point at the eLog ARP registration rather
+> than trying to fix it.
 
 ---
 
@@ -103,7 +91,7 @@ it could not verify (eLog registration needs a ticket).
 > DAQ machine; `hutch-resolve cat/conf/preset/device` reads `/cds` via `psdev`; and
 > `hutch-resolve caget` reads live PVs from `{hutch}-control` (CA is firewalled from both
 > S3DF and psdev). The network topology and its constraints are documented in
-> `hutch_tools/daq.py`, next to the code that implements them.
+> `README.md`.
 
 ### Setup (once per hutch-python session)
 
@@ -181,7 +169,7 @@ sub-skill.
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
 | `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so, offer `/are-we-ready`, and guide the operator through moves by hand via `hutch-daq` with the safety gate. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
-| `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
+| `/analyze-data` or "how does the data look", "assess the run", "is the dataset good", "sfx metrics", "read the merge log" | Read `analyze-data/SKILL.md` |
 | `/context` or "current conditions", "what is the sample", "experiment state" | **Tool only** — `hutch-state audit`, then format. Do not read `coordinate-experiment/SKILL.md`: the audit already returns every field with its age and provenance, which the prose summary cannot. |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
 | `/handoff` or "end of shift", "shift summary", "write handoff" | Read `coordinate-experiment/SKILL.md` → `/handoff` flow |
@@ -189,25 +177,24 @@ sub-skill.
 
 ### `/analyze-data` delegation
 
-When the user invokes `/analyze-data` or asks to configure analysis:
+When the user asks how the data looks:
 
-1. Read `analyze-data/SKILL.md` — one file, covering setup (sections 1–5) and refinement (section 6).
-2. Pass all known experiment state (hutch, experiment, DAQ generation, detectors,
-   photon energy) so `analyze-data` does not re-ask for it.
-3. `analyze-data` owns the wizard and handles calibration gating, LUTE configuration,
-   and SFX parameter guidance internally — do not duplicate those steps here.
+1. Read `analyze-data/SKILL.md`.
+2. Pass all known experiment state (hutch, experiment, detectors, photon energy) so
+   `analyze-data` does not re-ask for it.
+3. It reads the LUTE output log directly and reasons about the metrics. It does **not**
+   configure LUTE — see the note under Initialization.
 
 ---
 
 ## Safety Protocol
 
-Classification is implemented in `hutch_tools/safety.py` and enforced by `hutch-daq`
-before anything is transmitted. Run `hutch-daq exec '<code>'` **without `--confirm`** to get
-the class and the reasons without sending anything, then use them to write the confirmation
-prompt.
+Classification lives in `hutch_tools/daq.py` and is enforced before anything is
+transmitted. Run `hutch-daq exec '<code>'` **without `--confirm`** to get the class and the
+reasons without sending anything, then use them to write the confirmation prompt.
 
 The lists below document what the classifier does; they are **not** the mechanism. If you
-believe the classifier is wrong, fix `safety.py` and add a test — do not route around it.
+believe the classifier is wrong, fix `daq.py` and add a test — do not route around it.
 Unrecognised code is classified as `write`, never as read-only.
 
 ### Read-Only (execute without confirmation)
@@ -258,16 +245,14 @@ being installed.
 | experiment state (read, write, provenance, staleness) | `hutch-state` |
 | live hutch-python session; safety classification; DAQ process states and logs | `hutch-daq` |
 | device inventory, PV names, beampath, DAQ, detectors, presets, `/cds` files, live PVs | `hutch-resolve` |
-| LUTE submission, wall clock, job status, pedestals, readiness, traps, Kerberos scoping | `hutch-lute` |
-| LUTE config rendering with overrides and validation | `hutch-lute render` (templates in `templates/`) |
-| LUTE workspace, DAG patching, eLog workflow registration | `hutch-lute plan\|workspace\|dags\|envs\|register\|all` |
+| finding the LUTE job, its state, elapsed time and output paths | `hutch-lute watch\|status` |
 | the beamtime log | `hutch-log` |
 | DAQ runs (DARK/GEOM/DATA), XTC2 verify, LUTE trigger watch | `take-run/` |
 | beam and hutch readiness | `are-we-ready/` |
-| LUTE analysis setup and refinement | `analyze-data/` |
+| reading LUTE output and judging the dataset | `analyze-data/` |
 | experiment context, condition tracking, beamtime log, handoff | `coordinate-experiment/` |
 | CCTBX DAG pattern, d_min hazard, coverage×yield, symptom→knob | `references/sfx-cctbx-patterns.md` |
-| network topology, why `ssh -L` fails, `/cds` vs `/sdf` | `hutch_tools/daq.py` docstring |
+| network topology, why `ssh -L` fails, `/cds` vs `/sdf`, exit codes | `README.md` |
 | pedestal deployment, incl. the Jungfrau fallback | `hutch-lute peds` |
 
 ### Optional advisors

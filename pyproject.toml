@@ -4,19 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hutch-tools"          # import name is hutch_tools; hyphens are illegal in module names
-version = "0.1.0"
+version = "0.2.0"
 description = "Tool layer for the hutch-copilot LCLS beamline skill"
 requires-python = ">=3.9"          # psconda ships 3.9.20; do not use 3.10+ syntax
 license = { text = "SLAC" }
 dependencies = []                   # core is stdlib-only, by design
 
-# Rendering LUTE configs is the only part with third-party deps, and it is
-# isolated in hutch_tools/config.py so that hutch-state, hutch-daq, hutch-resolve
-# and hutch-lute stay stdlib-only. Both are already present in psconda.
+# The package itself is stdlib-only, and test_package_api.py walks the AST of every
+# module to keep it that way: a third-party import here is a command that fails on
+# arrival for anyone whose environment lacks it.
 [project.optional-dependencies]
-config = ["jinja2>=3.0", "PyYAML>=5.4"]
-# eLog registration only; imported lazily so everything else works without them.
-elog = ["requests>=2.25", "krtc"]
 dev = ["pytest>=7", "ruff>=0.1"]
 
 # INSTALLATION IS OPTIONAL AND MUST STAY OPTIONAL.
@@ -34,7 +31,7 @@ dev = ["pytest>=7", "ruff>=0.1"]
 [project.scripts]
 hutch-state = "hutch_tools.state:main"
 hutch-daq = "hutch_tools.daq:main"
-hutch-resolve = "hutch_tools.resolvers:main"
+hutch-resolve = "hutch_tools.resolve:main"
 hutch-lute = "hutch_tools.lute:main"
 hutch-log = "hutch_tools.log:main"
 
@@ -66,5 +63,5 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Remote scripts are strings executed elsewhere; local heuristics do not apply.
-"hutch_tools/resolvers.py" = ["E731"]
+"hutch_tools/resolve.py" = ["E731"]
 "tests/*" = ["B011"]
