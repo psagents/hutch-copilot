@@ -81,7 +81,7 @@ def test_reconstructed_entries_are_marked(logged):
 
 def test_append_only_ever_lands_at_the_end(logged):
     """This is what makes 'append, don't restructure' structural, not advisory."""
-    log.section("mfx", "e1", "Data Collection")
+    log.append("mfx", "e1", "Data Collection begins", at="09:59")
     log.append("mfx", "e1", "first", at="10:00")
     log.append("mfx", "e1", "second", at="10:05")
     lines = [ln for ln in logged.read_text().splitlines() if ln.strip()]
@@ -102,62 +102,21 @@ def test_append_repairs_a_missing_trailing_newline(logged):
 
 
 # --------------------------------------------------------------------------
-# section
+# Removed surface
+#
+# `section` and `tail` were subcommands until Sep 2026, with eight tests between
+# them. `section` let a caller impose headings on an append-only log -- the one
+# structure an append-only log exists not to have -- and `tail` re-read a file
+# the agent can read directly. `path` and `exists` were never invoked from any
+# skill file. The `path()` *function* stays: _require, init and append all use it.
 # --------------------------------------------------------------------------
-def test_phase_section_gets_a_separator(logged):
-    log.append("mfx", "e1", "an entry", at="09:00")
-    log.section("mfx", "e1", "Data Collection")
-    text = logged.read_text()
-    assert "\n---\n\n## Data Collection\n" in text
-
-
-def test_no_double_separator(logged):
-    """The convention: never two rules in a row."""
-    log.section("mfx", "e1", "First")
-    log.section("mfx", "e1", "Second")
-    assert "---\n\n---" not in logged.read_text()
-
-
-@pytest.mark.parametrize("level,prefix", [(2, "## "), (3, "### "), (4, "#### ")])
-def test_heading_levels(logged, level, prefix):
-    log.section("mfx", "e1", "Topic", level=level)
-    assert f"{prefix}Topic" in logged.read_text()
-
-
-def test_sub_sections_get_no_separator(logged):
-    log.append("mfx", "e1", "x", at="09:00")
-    log.section("mfx", "e1", "A topic", level=3)
-    text = logged.read_text()
-    assert "### A topic" in text
-    assert text.count("---") == 1          # only the one from init
-
-
-def test_bad_heading_level_is_refused(logged):
-    with pytest.raises(log.LogError, match="level must be 2, 3 or 4"):
-        log.section("mfx", "e1", "Nope", level=5)
-
-
-def test_untitled_section_is_refused(logged):
-    with pytest.raises(log.LogError, match="untitled"):
-        log.section("mfx", "e1", "  ")
-
-
-# --------------------------------------------------------------------------
-# tail
-# --------------------------------------------------------------------------
-def test_tail_reports_totals_and_the_last_lines(logged):
-    for i in range(5):
-        log.append("mfx", "e1", f"entry {i}", at="10:00")
-    res = log.tail("mfx", "e1", n=3)
-    assert res["total_lines"] > 5
-    assert res["tail"][-1].endswith("entry 4")
-    assert len(res["tail"]) == 3
-
-
-def test_tail_on_a_missing_log_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
-    with pytest.raises(log.LogError, match="no log at"):
-        log.tail("mfx", "e1")
+def test_only_init_and_append_are_exposed():
+    import argparse
+    for action in log.build_parser()._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            assert set(action.choices) == {"init", "append"}
+            return
+    raise AssertionError("no subparsers found")
 
 
 # --------------------------------------------------------------------------

@@ -11,9 +11,15 @@ requests; here they are behaviour:
   * The timestamp comes from the machine. The old convention was "get the time
     via `date +%H:%M`", which a model could omit, or copy stale from earlier in
     the conversation.
-  * ``section`` owns the `---` separator, so it cannot land inside a section.
   * Appending to a log that was never initialised is refused, rather than
     silently producing a headerless file.
+
+Two subcommands, ``init`` and ``append``, and that is the whole surface. It also
+had ``path``, ``exists``, ``section`` and ``tail`` until Sep 2026. ``path`` and
+``exists`` were never invoked from any skill file; ``tail`` re-read a file the
+agent can read directly; and ``section`` let a caller impose structure on an
+append-only log, which is the one thing an append-only log is for not having.
+Phase changes are now an ordinary entry.
 
 Division of labour: ``state`` stores facts, ``log`` records events, and
 ``coordinate-experiment`` decides what counts as either.
@@ -38,10 +44,6 @@ class LogError(RuntimeError):
 
 def path(hutch: str, experiment: str):
     return log_file(hutch, experiment)
-
-
-def exists(hutch: str, experiment: str) -> bool:
-    return path(hutch, experiment).exists()
 
 
 def init(hutch: str, experiment: str, *, shift_date: str, shift_start: str | None = None,
@@ -106,49 +108,15 @@ def append(hutch: str, experiment: str, text: str, *, at: str | None = None,
             "reconstructed": reconstructed, "path": str(p)}
 
 
-def section(hutch: str, experiment: str, title: str, *, level: int = 2) -> dict:
-    """Start a new section. Owns the `---` separator so it cannot land mid-section.
-
-    Level 2 = operational phase, 3 = topic, 4 = specific activity. Only level 2
-    gets a horizontal rule before it, matching the document convention.
-    """
-    if level not in (2, 3, 4):
-        raise LogError(f"heading level must be 2, 3 or 4 (got {level})")
-    if not title.strip():
-        raise LogError("refusing to add an untitled section")
-    p = _require(hutch, experiment)
-
-    existing = p.read_text()
-    chunks = []
-    if not existing.endswith("\n"):
-        chunks.append("\n")
-    if level == 2:
-        # A rule separates phases -- but never two rules in a row.
-        if not existing.rstrip().endswith("---"):
-            chunks.append("\n---\n")
-    chunks.append(f"\n{'#' * level} {title.strip()}\n\n")
-    append_atomic(p, "".join(chunks))
-    return {"section": title.strip(), "level": level, "path": str(p)}
-
-
-def tail(hutch: str, experiment: str, n: int = 20) -> dict:
-    p = _require(hutch, experiment)
-    lines = p.read_text().splitlines()
-    return {"path": str(p), "total_lines": len(lines), "tail": lines[-n:]}
-
-
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
-_DOC = """hutch-log: path | init | append | section | tail."""
+_DOC = """hutch-log: init | append."""
 
 
 def build_parser() -> "argparse.ArgumentParser":
     """Construct this command's parser (separate from main() so it can be introspected)."""
     ap, sub = parser("hutch-log", _DOC)
-
-    for name in ("path", "exists"):
-        experiment_args(sub.add_parser(name))
 
     i = sub.add_parser("init", help="create the log with its header; idempotent")
     experiment_args(i)
@@ -164,27 +132,13 @@ def build_parser() -> "argparse.ArgumentParser":
     a.add_argument("--reconstructed", action="store_true",
                    help="mark as reconstructed after the fact (/sync-log)")
 
-    s = sub.add_parser("section", help="start a new section, separator handled")
-    experiment_args(s)
-    s.add_argument("title")
-    s.add_argument("--level", type=int, default=2, choices=[2, 3, 4])
-
-    t = sub.add_parser("tail")
-    experiment_args(t)
-    t.add_argument("-n", type=int, default=20)
-
     return ap
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    """hutch-log: path | init | append | section | tail."""
+    """hutch-log: init | append."""
     args = build_parser().parse_args(argv)
     try:
-        if args.cmd == "path":
-            p = path(args.hutch, args.experiment)
-            return out({"log": str(p), "exists": p.exists()})
-        if args.cmd == "exists":
-            return out({"exists": exists(args.hutch, args.experiment)})
         if args.cmd == "init":
             fields = dict(f.split("=", 1) for f in args.field if "=" in f)
             return out(init(args.hutch, args.experiment, shift_date=args.shift_date,
@@ -192,10 +146,6 @@ def main(argv: "list[str] | None" = None) -> int:
         if args.cmd == "append":
             return out(append(args.hutch, args.experiment, args.text,
                               at=args.at, reconstructed=args.reconstructed))
-        if args.cmd == "section":
-            return out(section(args.hutch, args.experiment, args.title, level=args.level))
-        if args.cmd == "tail":
-            return out(tail(args.hutch, args.experiment, args.n))
     except (LogError, OSError) as exc:
         return fail(exc, UNREACHABLE)
     return USAGE

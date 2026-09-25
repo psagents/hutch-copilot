@@ -37,7 +37,7 @@ Two files, two tools. **Never write either by hand.**
 
 ```bash
 bin/hutch-state path|dump|audit|set   # the state JSON: facts, with provenance and TTL
-bin/hutch-log   init|append|section|tail   # the beamtime log: events, for humans
+bin/hutch-log   init|append                # the beamtime log: events, for humans
 ```
 
 `hutch-state set` requires `--source` and a `--kind` of `resolved` / `operator` / `inferred`,
@@ -221,8 +221,7 @@ When the user explicitly states a condition change (*"we just changed samples to
 5. **Append** via the tool — one call per changed field, so each carries its own timestamp:
 
 ```bash
-bin/hutch-log section --hutch "$H" --experiment "$E" "Condition Change" --level 3
-bin/hutch-log append  --hutch "$H" --experiment "$E" \
+bin/hutch-log append --hutch "$H" --experiment "$E" \
     "{field}: {new_value} (changed from {old_value})"
 ```
 
@@ -287,8 +286,9 @@ ambient-extracted notes. Those go to the log file only.
 
 1. **Append, don't restructure.** `hutch-log append` can only add at the end of the file,
    so this is enforced rather than remembered.
-2. New phases are `hutch-log section "<title>"` (level 2); topics are `--level 3`. The tool
-   owns the `---` separator and will not emit two in a row.
+2. A phase change is an ordinary entry — say so in the text ("Data collection begins").
+   There is no `section` subcommand: headings are structure, and structure is the one thing
+   an append-only log exists not to have. A reader follows the timestamps.
 3. Keep entries **concise and factual** — do not rephrase the operator's words. This one is
    yours; no tool can check it.
 
@@ -337,10 +337,11 @@ that were missed by the ambient observation step.
 
 ```bash
 bin/hutch-state audit --hutch "$H" --experiment "$E"
-bin/hutch-log   tail  --hutch "$H" --experiment "$E" -n 40
 ```
 
-to see what has already been recorded.
+to see what has already been recorded. For the log itself, read the file directly — the path
+comes from `hutch-state path`, never typed out. There is no `hutch-log tail`: it only re-read
+a file you can read.
 
 ### Step 2 — Replay the conversation
 
@@ -424,8 +425,8 @@ Summary: {one-word tone, e.g. "productive", "mixed", "rough"}
 
 1. Present the draft to the user: *"Here is the shift handoff draft. Please review and
    let me know if anything needs adjusting."*
-2. After the operator confirms, append it as a new section
-   (`hutch-log section "Shift Handoff – …"`, then one `append` per paragraph):
+2. After the operator confirms, append it one `append` per paragraph, opening with an entry
+   that names it ("Shift handoff — <outgoing> to <incoming>"):
 
 ```markdown
 ---

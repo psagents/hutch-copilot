@@ -18,8 +18,8 @@ from __future__ import annotations
 import os
 import pathlib
 
-# Root of the LCLS data filesystem. Overridable for tests and for the
-# scenario harness, which runs against a fixture tree.
+# Root of the LCLS data filesystem. Overridable so the unit tests can run
+# against a fixture tree instead of /sdf/data/lcls/ds.
 DS_ROOT = pathlib.Path(os.environ.get("HUTCH_DS_ROOT", "/sdf/data/lcls/ds"))
 
 # Where hutch-copilot keeps its own artifacts inside an experiment directory.
@@ -51,7 +51,16 @@ def log_file(hutch: str, experiment: str) -> pathlib.Path:
 
 
 def xtc2_dir(hutch: str, experiment: str) -> pathlib.Path:
-    return experiment_dir(hutch, experiment) / "xtc2"
+    """Directory the DAQ writes ``.xtc2`` files into.
+
+    It is ``xtc``, not ``xtc2`` -- the ``2`` is the file extension, not part of
+    the directory name. This returned ``xtc2`` until Sep 2026, and all 175 mfx
+    experiment directories on disk use ``xtc/`` (none anywhere under
+    /sdf/data/lcls/ds uses ``xtc2/``), so `hutch-resolve xtc2` reported
+    ``present: false`` for data that had landed and the peds trap refused every
+    DARK run.
+    """
+    return experiment_dir(hutch, experiment) / "xtc"
 
 
 def xtc2_files(hutch: str, experiment: str, run: int) -> list[pathlib.Path]:
@@ -60,9 +69,15 @@ def xtc2_files(hutch: str, experiment: str, run: int) -> list[pathlib.Path]:
     Lives here rather than in either caller so there is one definition of what
     "the data has landed" means -- take-run used to check it with an inline
     `ls | grep`, which cannot be tested and reports nothing about size.
+
+    The suffix filter is load-bearing: ``xtc/`` also holds ``index/``, ``md5/``
+    and ``smalldata/`` subdirectories, and a bare ``*r0004*`` glob would count
+    anything of theirs that happened to carry the run number.
     """
     d = xtc2_dir(hutch, experiment)
-    return sorted(d.glob(f"*r{int(run):04d}*")) if d.is_dir() else []
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.glob(f"*r{int(run):04d}*") if p.suffix == ".xtc2")
 
 
 def results_dir(hutch: str, experiment: str, subdir: str | None = None) -> pathlib.Path:

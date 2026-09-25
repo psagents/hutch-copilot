@@ -31,7 +31,34 @@ def test_script_lookup_fails_loudly():
 
 def test_ds_root_is_overridable(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
-    assert paths.xtc2_dir("mfx", "e1") == tmp_path / "mfx/e1/xtc2"
+    assert paths.xtc2_dir("mfx", "e1") == tmp_path / "mfx/e1/xtc"
+
+
+def test_xtc2_lives_in_xtc_not_xtc2(tmp_path, monkeypatch):
+    """The directory is `xtc`; the `2` belongs to the file extension.
+
+    This assertion said `xtc2` until Sep 2026, which locked in a path no
+    experiment on disk has -- 175 mfx directories use `xtc/` and none use
+    `xtc2/`. So `hutch-resolve xtc2` answered `present: false` for data that
+    had landed, and the peds trap refused every DARK run on that evidence.
+    """
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    assert paths.xtc2_dir("mfx", "e1").name == "xtc"
+
+
+def test_only_xtc2_files_count_as_landed_data(tmp_path, monkeypatch):
+    """`xtc/` also holds index/, md5/ and smalldata/ entries carrying the run
+    number, so a bare `*r0004*` glob over-counts."""
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    d = tmp_path / "mfx" / "e1" / "xtc"
+    d.mkdir(parents=True)
+    (d / "e1-r0004-s001-c000.xtc2").write_bytes(b"x")
+    (d / "e1-r0004-s001-c000.xtc2.md5").write_bytes(b"x")   # sibling, not data
+    (d / "e1-r0005-s001-c000.xtc2").write_bytes(b"x")       # wrong run
+
+    found = paths.xtc2_files("mfx", "e1", 4)
+
+    assert [p.name for p in found] == ["e1-r0004-s001-c000.xtc2"]
 
 
 TAGGED = """

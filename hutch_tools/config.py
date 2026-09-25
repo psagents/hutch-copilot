@@ -29,7 +29,6 @@ of hutch_tools is stdlib-only.
 
 from __future__ import annotations
 
-import argparse
 import json
 import pathlib
 import re
@@ -399,51 +398,48 @@ def parse_set(pairs: list[str]) -> dict[str, Any]:
 
 # --------------------------------------------------------------------------
 # CLI
+#
+# The parser lives in lute.py (`hutch-lute render`), not here. This module is
+# the only one with third-party dependencies -- jinja2 and PyYAML -- so lute
+# imports it lazily, inside the one branch that needs it, and `hutch-lute
+# sbatch` stays stdlib-only. Keeping a parser here too would mean two places to
+# add a flag; `run` takes the namespace lute already parsed.
 # --------------------------------------------------------------------------
-#: Command help, shared by build_parser() and main().
-_DOC = """hutch-config: render a LUTE config with overrides, validated."""
+def add_arguments(p: "argparse.ArgumentParser") -> None:
+    """Declare `hutch-lute render`'s flags on an existing parser.
 
-
-def build_parser() -> "argparse.ArgumentParser":
-    """Construct this command's parser.
-
-    Separate from main() so the CLI surface can be introspected -- the
-    doc-drift test walks every invocation in the markdown and checks its
-    subcommand and flags against these parsers.
+    Callable without importing jinja2 or PyYAML: every default that would need
+    a constant from this module is left as None and resolved in ``run``, so
+    lute's parser construction stays free of the heavy imports.
     """
-
-    ap = argparse.ArgumentParser(prog="hutch-config", description=_DOC)
-    ap.add_argument("--template", default=DEFAULT_TEMPLATE,
-                    help=f"template name from this repo's templates/ (default: "
-                         f"{DEFAULT_TEMPLATE}) or a path to one")
-    ap.add_argument("--list-templates", action="store_true",
-                    help="print the templates shipped with this repo and exit")
-    ap.add_argument("--context", default=None, help="JSON file of template context")
+    p.add_argument("--template", default=None,
+                   help=f"template name from this repo's templates/ (default: "
+                        f"{DEFAULT_TEMPLATE}) or a path to one")
+    p.add_argument("--list-templates", action="store_true",
+                   help="print the templates shipped with this repo and exit")
+    p.add_argument("--context", default=None, help="JSON file of template context")
     # action="extend", not the default "store": with plain nargs="*" a second
     # --set silently REPLACED the first, so `--set a=1 --set b=2` applied only
     # b=2 and dropped a=1 with no diagnostic. That is the exact silent-drop
     # failure --whitelist-dir exists to catch, occurring inside the tool meant
     # to catch it. extend accumulates every occurrence instead.
-    ap.add_argument("--set-context", nargs="*", action="extend", default=[], metavar="K=V")
-    ap.add_argument("--set", nargs="*", action="extend", default=[], dest="sets",
-                    metavar="TASK.BLOCK.KEY=V",
-                    help=f"override; value {DELETE} removes the key")
-    ap.add_argument("--overrides", default=None,
-                    help="JSON file of overrides; a top-level 'overrides' key is unwrapped")
-    ap.add_argument("--whitelist-dir", default=None,
-                    help="{LUTE_PATH}/config/templates -- enables the silent-drop check")
-    ap.add_argument("--no-whitelist", action="store_true",
-                    help="skip the silent-drop check (an unknown key will be ignored)")
-    ap.add_argument("--delims", default="lute", choices=sorted(DELIMITERS),
-                    help="lute: ${{ }} for template vars so LUTE's own {{ }} survives")
-    ap.add_argument("--out", default=None, help="write here; omit to print the config")
-
-    return ap
+    p.add_argument("--set-context", nargs="*", action="extend", default=[], metavar="K=V")
+    p.add_argument("--set", nargs="*", action="extend", default=[], dest="sets",
+                   metavar="TASK.BLOCK.KEY=V",
+                   help=f"override; value {DELETE} removes the key")
+    p.add_argument("--overrides", default=None,
+                   help="JSON file of overrides; a top-level 'overrides' key is unwrapped")
+    p.add_argument("--whitelist-dir", default=None,
+                   help="{LUTE_PATH}/config/templates -- enables the silent-drop check")
+    p.add_argument("--no-whitelist", action="store_true",
+                   help="skip the silent-drop check (an unknown key will be ignored)")
+    p.add_argument("--delims", default="lute", choices=sorted(DELIMITERS),
+                   help="lute: ${{ }} for template vars so LUTE's own {{ }} survives")
+    p.add_argument("--out", default=None, help="write here; omit to print the config")
 
 
-def main(argv: "list[str] | None" = None) -> int:
-    """hutch-config: render a LUTE config with overrides, validated."""
-    args = build_parser().parse_args(argv)
+def run(args) -> int:
+    """Execute `hutch-lute render` from an already-parsed namespace."""
     try:
         if args.list_templates:
             return out({"template_dir": str(template_dir()),
@@ -464,7 +460,7 @@ def main(argv: "list[str] | None" = None) -> int:
             )
 
         report = build(
-            template=args.template, context=ctx, overrides=ovr,
+            template=args.template or DEFAULT_TEMPLATE, context=ctx, overrides=ovr,
             whitelist_dir=None if args.no_whitelist else args.whitelist_dir,
             delims=args.delims,
         )

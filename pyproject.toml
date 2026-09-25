@@ -11,7 +11,7 @@ license = { text = "SLAC" }
 dependencies = []                   # core is stdlib-only, by design
 
 # Rendering LUTE configs is the only part with third-party deps, and it is
-# isolated in hutch_tools/config.py so that hutch-state, hutch-bridge, hutch-resolve
+# isolated in hutch_tools/config.py so that hutch-state, hutch-daq, hutch-resolve
 # and hutch-lute stay stdlib-only. Both are already present in psconda.
 [project.optional-dependencies]
 config = ["jinja2>=3.0", "PyYAML>=5.4"]
@@ -33,12 +33,10 @@ dev = ["pytest>=7", "ruff>=0.1"]
 # `pip install -e .`, never the only route.
 [project.scripts]
 hutch-state = "hutch_tools.state:main"
-hutch-bridge = "hutch_tools.bridge:main"
+hutch-daq = "hutch_tools.daq:main"
 hutch-resolve = "hutch_tools.resolvers:main"
 hutch-lute = "hutch_tools.lute:main"
-hutch-config = "hutch_tools.config:main"
 hutch-log = "hutch_tools.log:main"
-hutch-install = "hutch_tools.install:main"
 
 [tool.setuptools]
 packages = ["hutch_tools"]

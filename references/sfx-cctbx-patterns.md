@@ -102,7 +102,7 @@ touching geometry** — that ordering is the campaign's most expensive lesson.
 |---|---|---|
 | **Indexing yield too low (CCTBX)** | `dispatch_hit_finder_minimum_number_of_reflections` — read the funnel first; a low rate is *not* reliably a geometry problem | `IndexCCTBXXFEL.phil_parameters` |
 | Wall clock exhausted before the run ends | `radial_average_enable`→false; `output_composite_output`→false so a kill keeps partial results | `IndexCCTBXXFEL.phil_parameters` |
-| An override appears to do nothing | the key is not referenced by the phil template, so it is silently dropped | `hutch-config --whitelist-dir …` |
+| An override appears to do nothing | the key is not referenced by the phil template, so it is silently dropped | `hutch-lute render --whitelist-dir …` |
 | Job reported COMPLETED but produced nothing | `run_task.py` exits 0 on Task failure | `hutch-lute status <job_id>` |
 | Wrong unit cell / space group | never hand-type it | `hutch-resolve cell <pdb>` |
 | High Rsplit with many patterns | wrong symmetry, too few patterns, or partiality mismatch — check multiplicity before blaming parameters | scale/merge logs |

@@ -69,14 +69,14 @@ def test_refuses_without_a_write_confirmation():
 
 def test_refuses_when_no_xtc2_has_landed(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
-    (tmp_path / "mfx/e1/xtc2").mkdir(parents=True)
+    paths.xtc2_dir("mfx", "e1").mkdir(parents=True)
     with pytest.raises(lute.LuteError, match="peds-before-xtc2"):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm="write")
 
 
 def test_unknown_detector_has_no_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
-    xtc2 = tmp_path / "mfx/e1/xtc2"
+    xtc2 = paths.xtc2_dir("mfx", "e1")
     xtc2.mkdir(parents=True)
     (xtc2 / "e1-r0043-s000.xtc2").touch()
     with pytest.raises(lute.LuteError, match="no fallback tools known"):
@@ -142,7 +142,10 @@ def test_xtc2_resolver_reports_absence_without_guessing(tmp_path, monkeypatch):
 def test_xtc2_resolver_counts_and_sizes(tmp_path, monkeypatch):
     from hutch_tools import resolvers
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
-    d = tmp_path / "mfx/e1/xtc2"
+    # Built through the resolver's own path function, not a literal, so a wrong
+    # directory name cannot be asserted true by both sides at once -- this test
+    # passed for months against `xtc2/`, which no experiment on disk has.
+    d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)
     for s in range(3):
         (d / f"e1-r0043-s{s:03d}.xtc2").write_bytes(b"x" * 1000)
@@ -157,7 +160,7 @@ def test_the_resolver_and_the_peds_guard_agree(tmp_path, monkeypatch):
     """Both read paths.xtc2_files, so 'the data has landed' has one definition."""
     from hutch_tools import resolvers
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
-    d = tmp_path / "mfx/e1/xtc2"
+    d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)
     (d / "e1-r0043-s000.xtc2").write_bytes(b"x")
     assert resolvers.xtc2("mfx", "e1", 43)["value"]["present"] is True

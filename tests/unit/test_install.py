@@ -108,8 +108,10 @@ def test_missing_ticket_is_not_blocking_for_the_local_steps(workspace):
 
 
 def test_all_refuses_before_mutating_when_preconditions_fail(workspace, monkeypatch):
-    rc = install.main(["all", "-e", "e1", "--hutch", "mfx", "-W", "absent_wf",
-                       "--confirm", "write"])
+    # Routed through hutch-lute since M1.b; there is no hutch-install binary.
+    from hutch_tools import lute
+    rc = lute.main(["all", "-e", "e1", "--hutch", "mfx", "-W", "absent_wf",
+                    "--confirm", "write"])
     assert rc != 0
     assert not (workspace.parent / "lute_envs").exists()   # nothing was destroyed
 

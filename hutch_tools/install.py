@@ -40,7 +40,7 @@ import shutil
 import subprocess
 from typing import Any
 
-from ._cli import OK, UNREACHABLE, USAGE, fail, out, parser
+from ._cli import OK, UNREACHABLE, USAGE, fail, out
 from .paths import results_dir
 
 #: Interpreters used for the two virtual environments LUTE needs.
@@ -349,8 +349,24 @@ def register(plan_: dict, *, confirm: str | None = None) -> dict:
 
 # --------------------------------------------------------------------------
 # CLI
+#
+# The subcommands live under `hutch-lute` (plan | workspace | dags | envs |
+# register | all); there is no `hutch-install` binary. LUTE workspace setup is
+# the same infrastructure as LUTE submission, so it is the same tool. This
+# module keeps the logic and declares its own flags; lute owns the parser.
 # --------------------------------------------------------------------------
-_DOC = """hutch-install: plan | envs | workspace | dags | register | all."""
+#: Subcommand -> help text. Lute registers each of these.
+SUBCOMMANDS = (
+    ("plan", "print every path, payload and precondition; touches nothing"),
+    ("envs", "recreate both virtual environments (destructive)"),
+    ("workspace", "create lute_output and lute.db (idempotent)"),
+    ("dags", "set account/partition in each DAG (idempotent)"),
+    ("register", "POST workflow definitions to the eLog"),
+    ("all", "workspace, dags, envs, register -- in that order, after checks"),
+)
+
+#: Of those, the ones that change something and so require --confirm write.
+NEEDS_CONFIRM = ("envs", "register", "all")
 
 
 def _common(p: argparse.ArgumentParser) -> None:
@@ -366,27 +382,17 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--debug", action="store_true")
 
 
-def build_parser() -> "argparse.ArgumentParser":
-    """Construct this command's parser (separate from main() so it can be introspected)."""
-    ap, sub = parser("hutch-install", _DOC)
-    for name, helptext in (
-        ("plan", "print every path, payload and precondition; touches nothing"),
-        ("envs", "recreate both virtual environments (destructive)"),
-        ("workspace", "create lute_output and lute.db (idempotent)"),
-        ("dags", "set account/partition in each DAG (idempotent)"),
-        ("register", "POST workflow definitions to the eLog"),
-        ("all", "workspace, dags, envs, register -- in that order, after checks"),
-    ):
+def add_subcommands(sub) -> None:
+    """Register plan/workspace/dags/envs/register/all on hutch-lute's subparsers."""
+    for name, helptext in SUBCOMMANDS:
         p = sub.add_parser(name, help=helptext)
         _common(p)
-        if name in ("envs", "register", "all"):
+        if name in NEEDS_CONFIRM:
             p.add_argument("--confirm", default=None, choices=["write"])
-    return ap
 
 
-def main(argv: "list[str] | None" = None) -> int:
-    """hutch-install: plan | envs | workspace | dags | register | all."""
-    args = build_parser().parse_args(argv)
+def run(args) -> int:
+    """Execute one of the install subcommands from an already-parsed namespace."""
     try:
         plan_ = plan(
             experiment=args.experiment, hutch=args.hutch, directory=args.directory,
@@ -412,7 +418,7 @@ def main(argv: "list[str] | None" = None) -> int:
             if plan_["blocking"]:
                 raise InstallError(
                     "preconditions not met: " + ", ".join(plan_["blocking"])
-                    + ". Run `hutch-install plan` for detail. Nothing was changed."
+                    + ". Run `hutch-lute plan` for detail. Nothing was changed."
                 )
             steps = {
                 "workspace": setup_workspace(plan_),

@@ -67,7 +67,7 @@ def test_importing_state_does_not_drag_in_config_or_its_deps():
     loaded = _imported_after("hutch_tools.state")
     assert "hutch_tools.config" not in loaded
     assert "hutch_tools.resolvers" not in loaded
-    assert "hutch_tools.bridge" not in loaded
+    assert "hutch_tools.daq" not in loaded
     # _fs is a stdlib-only leaf holding the lock that state and log share.
     assert loaded == {
         "hutch_tools._cli", "hutch_tools._fs",
@@ -86,6 +86,25 @@ def test_importing_log_stays_equally_narrow():
 def test_importing_lute_does_not_drag_in_config():
     loaded = _imported_after("hutch_tools.lute")
     assert "hutch_tools.config" not in loaded
+
+
+def test_hutch_lute_needs_neither_jinja2_nor_pyyaml():
+    """The invariant `render` was named for, stated in the form that matters.
+
+    config.py is the only module with third-party dependencies, and it became a
+    hutch-lute subcommand in M1.b. `hutch-lute sbatch` at 03:00 must not be able
+    to fail on a missing jinja2. Checking `hutch_tools.config not in sys.modules`
+    alone is too weak now: build_parser() has to reach config.add_arguments to
+    declare render's flags, so the module IS imported -- what must stay out is
+    the heavy deps, which config.py imports inside its render functions.
+    """
+    code = (
+        "import sys; sys.path.insert(0, '.');"
+        "import hutch_tools.lute as L; L.build_parser();"
+        "print(int('jinja2' in sys.modules), int('yaml' in sys.modules))"
+    )
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, check=True)
+    assert res.stdout.decode().split() == ["0", "0"]
 
 
 def test_no_module_object_relative_imports_remain():

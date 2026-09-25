@@ -72,12 +72,16 @@ If `run_type` is ambiguous, ask with the three options. Never infer it silently.
 ## 3. Confirm — this is a write
 
 Show what you will run, its safety class, and the parameters. Get the class from the
-classifier rather than asserting it yourself:
+classifier rather than asserting it yourself — run the command **without `--confirm`**, and it
+prints the classification and refuses (rc 5) without transmitting anything:
 
 ```bash
-bin/hutch-bridge --hutch "$H" classify \
+bin/hutch-daq --hutch "$H" exec \
   "autorun(sample='Lyso', run_length=60, record=True, run_type='DATA')"
 ```
+
+There is no separate `classify` subcommand: asking "what is this?" is the same call on the
+same text as sending it, so the answer cannot be about different code than you then run.
 
 ```
 Proposed run
@@ -94,9 +98,9 @@ Shall I start the run?
 Wait for explicit approval. Then execute with the class you were actually granted:
 
 ```bash
-bin/hutch-bridge --hutch "$H" --timeout 300 --confirm write exec \
+bin/hutch-daq --hutch "$H" --timeout 300 --confirm write exec \
   "autorun(sample='{sample}', tag='{sample}', run_length={n}, record=True, run_type='DATA', runs=1, picker='open')"
-bin/hutch-bridge --hutch "$H" exec 'get_run()'
+bin/hutch-daq --hutch "$H" exec 'get_run()'
 ```
 
 `GEOM`: `geomrun(run_length={n}, record=True, runs=1)` — it presets sample, tag and

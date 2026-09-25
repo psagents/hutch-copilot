@@ -21,13 +21,17 @@ import hutch_tools
 
 SKILL = pathlib.Path(hutch_tools.__file__).resolve().parent.parent
 
-#: binary suffix -> module that owns it
+#: binary suffix -> module that owns it.
+#: MUST list every bin/hutch-*; test_every_binary_is_covered enforces that.
+#: `log` and `install` were missing for their whole existence, so 13 documented
+#: invocations were skipped by the `suffix not in BINARIES` guard below -- a
+#: drift check with a silent hole is the bug class this repo exists to remove.
 BINARIES = {
     "state": "state",
-    "bridge": "bridge",
+    "daq": "daq",
     "resolve": "resolvers",
     "lute": "lute",
-    "config": "config",
+    "log": "log",
 }
 
 INVOCATION = re.compile(r"bin/hutch-([a-z]+)((?:[ \t]+[^\n`|#]*)?)")
@@ -78,6 +82,21 @@ def _documented():
 def test_markdown_contains_invocations_to_check():
     docs = _documented()
     assert len(docs) > 20, f"only found {len(docs)} -- is the regex still right?"
+
+
+def test_every_binary_is_covered():
+    """Every bin/hutch-* must be in BINARIES, or its docs go unchecked.
+
+    Without this, adding a binary silently opts its documentation out of the
+    drift check: `_documented` skips any suffix it does not know. That is how
+    `hutch-log` and `hutch-install` went unchecked from the day they landed.
+    """
+    shipped = {p.name.split("hutch-", 1)[1] for p in (SKILL / "bin").glob("hutch-*")}
+    missing = sorted(shipped - set(BINARIES))
+    assert not missing, (
+        f"bin/hutch-{{{','.join(missing)}}} ship but are not in BINARIES, so every "
+        f"documented invocation of them is silently skipped. Add them."
+    )
 
 
 @pytest.mark.parametrize("source,suffix,argv", _documented(),

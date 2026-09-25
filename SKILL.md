@@ -19,18 +19,18 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 ## Tool Layer (`hutch-tools`) — read this before any procedure below
 
 Mechanism lives in `hutch-tools`, not in prose. **Never interpolate a path, compose a PV
-name, or hand-write an SSH command** — call the tool. All seven print JSON, and each is
+name, or hand-write an SSH command** — call the tool. All five print JSON, and each is
 owned by one module so a fault in one cannot break the others.
 
 | Tool | Use for |
 |---|---|
 | `bin/hutch-state path\|get\|set\|unset\|audit\|dump` | the experiment state file — the ONLY way to read or write it |
-| `bin/hutch-bridge ping\|install\|exec\|run\|classify` | anything sent to a live hutch-python session |
-| `bin/hutch-resolve devices\|device\|pv\|caget\|beampath\|daq\|conf\|detectors\|preset\|cell\|cat` | discovering machine truth from its authoritative source |
-| `bin/hutch-lute sbatch\|submit\|status\|watch\|peds\|readiness\|traps\|kerberos` | LUTE submission, job status, pedestals, readiness, known-trap checking |
-| `bin/hutch-config` | render a LUTE config with overrides, validated |
-| `bin/hutch-install plan\|workspace\|dags\|envs\|register\|all` | LUTE workspace setup and eLog workflow registration |
-| `bin/hutch-log path\|init\|append\|section\|tail` | the beamtime log |
+| `bin/hutch-daq ping\|install\|exec\|status\|logs` | the DAQ machine: live hutch-python session, process states, log files |
+| `bin/hutch-resolve` (see below) | discovering machine truth from its authoritative source |
+| `bin/hutch-lute sbatch\|status\|watch\|peds\|readiness\|traps\|kerberos` | LUTE submission, job status, pedestals, readiness, known-trap checking |
+| `bin/hutch-lute render` | render a LUTE config with overrides, validated |
+| `bin/hutch-lute plan\|workspace\|dags\|envs\|register\|all` | LUTE workspace setup and eLog workflow registration |
+| `bin/hutch-log init\|append` | the beamtime log |
 
 They run from a bare checkout with no install step. `pip install -e .` is optional and only
 adds the same commands to PATH — never require it.
@@ -48,13 +48,24 @@ Three rules that the tools enforce and you must not work around:
 Resolve, don't recall: device lists, PV prefixes, detector aliases, DAQ hosts and unit
 cells all come from `hutch-resolve`. This skill deliberately ships no tables of them.
 
+### `hutch-resolve`, by the source it reads
+
+Grouped this way because the source is what determines what can go wrong: a `happi`
+subcommand fails when `psdev` is unreachable, an `epics` one when `{hutch}-control` is, and a
+`data` one needs neither. When a resolver fails, this table tells you which machine to blame.
+
+| Source | Reached via | Subcommands |
+|---|---|---|
+| **happi** — device database | `psdev` | `devices` `device` `pv` `preset` `beampath` |
+| **data** — DataSource / XTC2 / PDB | local S3DF filesystem | `detectors` `xtc2` `cell` |
+| **epics** — Channel Access | `{hutch}-control` | `caget` |
+| **control** — DAQ configuration | `psdev` | `daq` `conf` |
+| **files** — raw `/cds` read | `psdev` | `cat` |
+| **local** — this checkout | no network | `skills` |
+
 ---
 
 ## Initialization
-
-> **Exception — `/review-scenario`:** If the first user message is `/review-scenario <dir>`,
-> skip this entire Initialization section and go directly to Command Dispatch. Do NOT read
-> `coordinate-experiment/SKILL.md` or run any hutch-copilot startup logic.
 
 On the **first user interaction**, always read `coordinate-experiment/SKILL.md` and
 run its initialization flow. coordinate-experiment is active for the **entire session**
@@ -88,11 +99,11 @@ it could not verify (eLog registration needs a ticket).
 
 ## Bridge Detection
 
-> **Three transports, one tool.** `hutch-bridge` reaches a live hutch-python session on a
+> **Three transports, one tool.** `hutch-daq` reaches a live hutch-python session on a
 > DAQ machine; `hutch-resolve cat/conf/preset/device` reads `/cds` via `psdev`; and
 > `hutch-resolve caget` reads live PVs from `{hutch}-control` (CA is firewalled from both
 > S3DF and psdev). The network topology and its constraints are documented in
-> `hutch_tools/bridge.py`, next to the code that implements them.
+> `hutch_tools/daq.py`, next to the code that implements them.
 
 ### Setup (once per hutch-python session)
 
@@ -100,7 +111,7 @@ it could not verify (eLog registration needs a ticket).
 skill's own install directory, so this works for any user:
 
 ```bash
-bin/hutch-bridge --hutch mfx install
+bin/hutch-daq --hutch mfx install
 ```
 
 **Step 2 — Operator starts it** in the hutch-python session:
@@ -113,18 +124,18 @@ exec(open('/tmp/oc_bridge.py').read())
 **Step 3 — Verify:**
 
 ```bash
-bin/hutch-bridge --hutch mfx ping     # -> {"ok": true, "mode": "live", ...}
+bin/hutch-daq --hutch mfx ping     # -> {"ok": true, "mode": "live", ...}
 ```
 
 > **Why not `ssh -L 9999:localhost:9999`?** TCP forwarding is blocked by
-> `AllowTcpForwarding` on DAQ machines. `hutch-bridge` runs a client *on* the DAQ machine
+> `AllowTcpForwarding` on DAQ machines. `hutch-daq` runs a client *on* the DAQ machine
 > that connects to `localhost:9999` there. It passes that client to `ssh` as a single
 > shell-quoted argument, so there is no nested-quoting hazard — which is why the six
 > hand-written copies of this pattern that used to live in markdown were fragile.
 
 ### Connectivity check
 
-On the first command that requires live execution, run `hutch-bridge ping`:
+On the first command that requires live execution, run `hutch-daq ping`:
 
 - `"mode": "live"` — live execution available.
 - `"mode": "offline"` — planning mode only. Show the user the setup steps above, and when
@@ -134,22 +145,24 @@ On the first command that requires live execution, run `hutch-bridge ping`:
 
 ```bash
 # read-only: needs no confirmation
-bin/hutch-bridge --hutch mfx exec 'daq.state'
+bin/hutch-daq --hutch mfx exec 'daq.state'
 
-# check the safety class WITHOUT sending, to build the confirmation prompt
-bin/hutch-bridge --hutch mfx classify 'mfx_stopper_1.remove()'
+# omit --confirm to get the safety class WITHOUT sending: prints the
+# classification, exits 5, transmits nothing. Use it to build the prompt.
+bin/hutch-daq --hutch mfx exec 'mfx_stopper_1.remove()'
 
 # after the operator approves, declare the class you actually got approval for
-bin/hutch-bridge --hutch mfx exec 'daq.begin(duration=180)' --confirm write --timeout 300
+bin/hutch-daq --hutch mfx exec 'daq.begin(duration=180)' --confirm write --timeout 300
 
-# ship a script into the session and call into it
-bin/hutch-bridge --hutch mfx run are-we-ready/scripts/check_beam_ready_mfx.py \
-    --call 'check_beam_ready()'
+# DAQ process state and logs -- same ssh path, works after a crash
+bin/hutch-daq --hutch mfx status
+bin/hutch-daq --hutch mfx logs --process drp -n 50
 ```
 
 `--timeout` in seconds: `10` queries, `30` device operations, `300+` scans and DAQ runs.
+`--confirm` and `--timeout` are accepted either before or after the subcommand.
 
-**The gate is enforced, not advisory.** `hutch-bridge` classifies every snippet before
+**The gate is enforced, not advisory.** `hutch-daq` classifies every snippet before
 transmitting and refuses if the class you declared is weaker than what the code actually
 does. Understating a beam-critical move as `write` is a refusal, not a downgrade. See
 the Safety Protocol below for what to show the operator.
@@ -165,10 +178,9 @@ sub-skill.
 
 | Command / Intent | Action |
 |---|---|
-| `/review-scenario <dir>` | Read `tests/review_scenario.md` — act as **reviewer agent only**; do NOT run coordinate-experiment init or any hutch-copilot startup |
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beampath status" | Read `are-we-ready/SKILL.md` |
-| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so, offer `/are-we-ready`, and guide the operator through moves by hand via `hutch-bridge` with the safety gate. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
+| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so, offer `/are-we-ready`, and guide the operator through moves by hand via `hutch-daq` with the safety gate. (This used to dispatch to `commands/align-spectrometer.md`, which does not exist.) |
 | `/analyze-data` or "set up analysis", "configure lute", "sfx pipeline", "process data", "configure smalldata", "set up lute", "smd producer" | Read `analyze-data/SKILL.md` |
 | `/context` or "current conditions", "what is the sample", "experiment state" | **Tool only** — `hutch-state audit`, then format. Do not read `coordinate-experiment/SKILL.md`: the audit already returns every field with its age and provenance, which the prose summary cannot. |
 | "we changed to…", "new sample is…", "switching to…", any condition change | Read `coordinate-experiment/SKILL.md` → condition update flow |
@@ -189,9 +201,10 @@ When the user invokes `/analyze-data` or asks to configure analysis:
 
 ## Safety Protocol
 
-Classification is implemented in `hutch_tools/safety.py` and enforced by `hutch-bridge`
-before anything is transmitted. Run `hutch-bridge classify '<code>'` to get the class and
-the reasons, then use them to write the confirmation prompt.
+Classification is implemented in `hutch_tools/safety.py` and enforced by `hutch-daq`
+before anything is transmitted. Run `hutch-daq exec '<code>'` **without `--confirm`** to get
+the class and the reasons without sending anything, then use them to write the confirmation
+prompt.
 
 The lists below document what the classifier does; they are **not** the mechanism. If you
 believe the classifier is wrong, fix `safety.py` and add a test — do not route around it.
@@ -243,18 +256,18 @@ being installed.
 | Need | Where |
 |---|---|
 | experiment state (read, write, provenance, staleness) | `hutch-state` |
-| live hutch-python session; safety classification | `hutch-bridge` |
+| live hutch-python session; safety classification; DAQ process states and logs | `hutch-daq` |
 | device inventory, PV names, beampath, DAQ, detectors, presets, `/cds` files, live PVs | `hutch-resolve` |
 | LUTE submission, wall clock, job status, pedestals, readiness, traps, Kerberos scoping | `hutch-lute` |
-| LUTE config rendering with overrides and validation | `hutch-config` (templates in `templates/`) |
-| LUTE workspace, DAG patching, eLog workflow registration | `hutch-install` |
+| LUTE config rendering with overrides and validation | `hutch-lute render` (templates in `templates/`) |
+| LUTE workspace, DAG patching, eLog workflow registration | `hutch-lute plan\|workspace\|dags\|envs\|register\|all` |
 | the beamtime log | `hutch-log` |
 | DAQ runs (DARK/GEOM/DATA), XTC2 verify, LUTE trigger watch | `take-run/` |
 | beam and hutch readiness | `are-we-ready/` |
 | LUTE analysis setup and refinement | `analyze-data/` |
 | experiment context, condition tracking, beamtime log, handoff | `coordinate-experiment/` |
 | CCTBX DAG pattern, d_min hazard, coverage×yield, symptom→knob | `references/sfx-cctbx-patterns.md` |
-| network topology, why `ssh -L` fails, `/cds` vs `/sdf` | `hutch_tools/bridge.py` docstring |
+| network topology, why `ssh -L` fails, `/cds` vs `/sdf` | `hutch_tools/daq.py` docstring |
 | pedestal deployment, incl. the Jungfrau fallback | `hutch-lute peds` |
 
 ### Optional advisors

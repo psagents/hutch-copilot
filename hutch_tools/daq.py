@@ -1,4 +1,13 @@
-"""The one implementation of the hutch bridges.
+"""Everything that requires talking to the DAQ machine.
+
+One tool owns one class of infrastructure: the hutch-python bridge listener,
+DAQ process state, and the per-process log files. All three reach the DAQ
+machine by the same ssh path through ``psdev``, which is why they live together
+rather than in three tools that each have to get the transport right.
+
+Named ``bridge`` until Sep 2026. The bridge is still the transport; it is no
+longer the whole scope, so ``oc_bridge.py`` and ``BridgeError`` keep their
+names while the tool does not.
 
 Replaces six verbatim copies of the same SSH+socket+JSON blob that were
 embedded in markdown (``SKILL.md`` x3, ``are-we-ready/SKILL.md`` x2,
@@ -45,6 +54,7 @@ first.
 
 from __future__ import annotations
 
+import datetime
 import json
 import shlex
 import sys
@@ -52,10 +62,11 @@ import subprocess
 from typing import Any
 
 from ._cli import OK, REFUSED, UNREACHABLE, USAGE, fail, out, parser
-from .paths import script, skill_root
+from .paths import script
 from .safety import (
     BEAM_CRITICAL,
     READ_ONLY,
+    SEVERITY,
     WRITE,
     SafetyRefusal,
     classify,
@@ -71,7 +82,6 @@ BRIDGE_PORT = 9999
 #: Timeout classes, in seconds. Named rather than magic numbers at call sites.
 T_QUERY = 10
 T_DEVICE = 30
-T_SCAN = 300
 
 # Client that runs *on* the DAQ machine and talks to the local listener.
 # TCP forwarding (ssh -L) is disabled on DAQ machines, so the process must run
@@ -195,26 +205,6 @@ def exec_code(
     }
 
 
-def run_script(
-    path: str,
-    *,
-    hutch: str,
-    call: str | None = None,
-    confirm: str | None = None,
-    timeout: int = T_SCAN,
-) -> dict:
-    """Ship a local script into the live session and optionally call a function.
-
-    Replaces the ``SCRIPT=/sdf/home/f/fpoitevi/...`` incantation: the path is
-    resolved relative to this skill's own install directory.
-    """
-    src = skill_root() / path if not path.startswith("/") else None
-    text = (src or __import__("pathlib").Path(path)).read_text()
-    if call:
-        text = f"{text}\n{call}\n"
-    return exec_code(text, hutch=hutch, confirm=confirm, timeout=timeout)
-
-
 def install_listener(hutch: str, host: str | None = None) -> str:
     """Copy oc_bridge.py to /tmp on the DAQ machine. Operator still starts it."""
     host = host or daq_host(hutch)
@@ -238,6 +228,104 @@ def ping(hutch: str, host: str | None = None) -> dict:
         "detail": res["output"].strip() or res.get("error"),
         "mode": "live",
         "host": res["host"],
+    }
+
+
+# --------------------------------------------------------------------------
+# DAQ processes and their logs
+#
+# NOTE: neither `status` nor `logs` has a behavioural unit test, and that is
+# deliberate rather than an oversight. Both are pure remote-command wrappers
+# whose correctness is entirely in the shape of the output `daqmgr` and the
+# opr log directory actually produce, and there is no live DAQ machine to check
+# that against yet (PLAN.md M0.2/M0.6 are the gate). A mocked test would only
+# assert that our guess matches our guess. Their CLI surface is still covered
+# by tests/unit/test_doc_commands.py, and the parsing below is written to
+# degrade to raw text rather than raise when the format surprises it.
+# --------------------------------------------------------------------------
+def process_status(hutch: str, host: str | None = None, timeout: int = T_DEVICE) -> dict:
+    """``daqmgr status <hutch>.py`` on the DAQ machine: process name -> state.
+
+    Read-only, so it never needs confirmation. Equivalent to reading the
+    daqstat GUI, and it works when the GUI is not up.
+    """
+    hutch = hutch.strip().lower()
+    host = host or daq_host(hutch)
+    raw = _ssh(host, f"daqmgr status {shlex.quote(hutch + '.py')}", timeout=timeout)
+
+    processes: dict[str, str] = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        # daqmgr prints `<name> <state> ...`; anything else is a banner or a
+        # blank. Keep the raw text so an unparsed format is still readable.
+        if len(parts) >= 2 and not line.startswith(" "):
+            processes[parts[0]] = parts[1]
+    return {
+        "host": host,
+        "hutch": hutch,
+        "processes": processes,
+        "raw": raw,
+    }
+
+
+def _log_dir(hutch: str, when: "datetime.date | None" = None) -> str:
+    """Per-process DAQ log directory for a hutch, on the DAQ machine.
+
+    Under ``/cds``, which is NOT mounted on S3DF -- every command touching this
+    path has to run remotely.
+    """
+    d = when or datetime.date.today()
+    return f"/cds/home/opr/{hutch.strip().lower()}opr/{d.year:04d}/{d.month:02d}"
+
+
+def logs(
+    hutch: str,
+    *,
+    process: str | None = None,
+    lines: int = 0,
+    count: int = 20,
+    host: str | None = None,
+    when: "datetime.date | None" = None,
+    timeout: int = T_DEVICE,
+) -> dict:
+    """List the most recent DAQ log files, or tail one of them.
+
+    Files are named ``<timestamp>_<host>:<process>.log``. With ``lines`` > 0 the
+    newest match is tailed; otherwise the newest ``count`` names are listed.
+
+    TBD (PLAN.md TBD-1): which process names are worth exposing as filter
+    values, whether this layout is stable across DAQ versions, and how long
+    logs are retained. All three need a live experiment to answer, so this
+    ships with the smallest surface that cannot be wrong.
+    """
+    hutch = hutch.strip().lower()
+    host = host or daq_host(hutch)
+    d = _log_dir(hutch, when)
+    # A process filter matches the `:<process>.log` field, not the whole name,
+    # so it cannot accidentally match the host or the timestamp.
+    pattern = f"*:{process}.log" if process else "*.log"
+    listing = (
+        f"ls -1t {shlex.quote(d)}/{pattern} 2>/dev/null | head -n {int(count)}"
+    )
+
+    if lines > 0:
+        newest = f"$({listing} | head -n 1)"
+        raw = _ssh(
+            host,
+            f'f={newest}; [ -n "$f" ] && echo "==> $f" && tail -n {int(lines)} "$f"',
+            timeout=timeout,
+        )
+        return {"host": host, "directory": d, "process": process,
+                "tail_lines": lines, "content": raw}
+
+    raw = _ssh(host, listing, timeout=timeout)
+    files = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    return {
+        "host": host,
+        "directory": d,
+        "process": process,
+        "count": len(files),
+        "files": files,
     }
 
 
@@ -294,7 +382,28 @@ def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, st
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-bridge: ping | install | exec | run | classify."""
+_DOC = """hutch-daq: ping | install | exec | status | logs."""
+
+
+def _confirm_and_timeout(p, post: bool = False) -> None:
+    """Add --confirm/--timeout, either before or after the subcommand.
+
+    ``post=True`` stores into shadow dests so the subparser cannot clobber the
+    value given before the subcommand; ``_resolve`` picks the winner.
+    """
+    suffix = "_post" if post else ""
+    p.add_argument("--confirm", dest="confirm" + suffix,
+                   choices=[READ_ONLY, WRITE, BEAM_CRITICAL], default=None,
+                   help="action class a human has approved")
+    p.add_argument("--timeout", dest="timeout" + suffix, type=int,
+                   default=None if post else T_QUERY)
+
+
+def _resolve(args) -> tuple:
+    """(confirm, timeout), taking the post-subcommand spelling when both appear."""
+    confirm = getattr(args, "confirm_post", None) or args.confirm
+    timeout = getattr(args, "timeout_post", None) or args.timeout
+    return confirm, timeout
 
 
 def build_parser() -> "argparse.ArgumentParser":
@@ -303,38 +412,51 @@ def build_parser() -> "argparse.ArgumentParser":
     Separate from main() so the CLI surface can be introspected -- the
     doc-drift test walks every invocation in the markdown and checks its
     subcommand and flags against these parsers.
+
+    ``--confirm`` and ``--timeout`` are accepted on **both** sides of the
+    subcommand, and that is deliberate. They were subcommand-only until Sep
+    2026, which made the form take-run/SKILL.md documents -- ``--hutch H
+    --timeout 300 --confirm write exec '...'`` -- die with ``invalid choice:
+    '300'``. The doc-drift test could not see it, because it checks flags as an
+    unordered union of the subparser's and the parent's, so a flag in the wrong
+    position still matches. Moving them to the top level alone would have broken
+    the opposite form, ``exec '...' --confirm write``, which is what PLAN.md's
+    standing safety test uses -- and turning that test's expected refusal (rc 5)
+    into an argparse usage error (rc 2) is exactly the kind of silent weakening
+    the gate exists to catch. So: both, with the trailing one winning.
     """
 
-    ap, sub = parser("hutch-bridge", _DOC)
+    ap, sub = parser("hutch-daq", _DOC)
     ap.add_argument("--hutch", required=True)
     ap.add_argument("--host", default=None, help="override the DAQ host")
+    _confirm_and_timeout(ap)
 
     sub.add_parser("ping")
     sub.add_parser("install", help="copy oc_bridge.py to the DAQ machine")
 
-    classes = [READ_ONLY, WRITE, BEAM_CRITICAL]
-
     e = sub.add_parser("exec", help="run python in the live hutch-python session")
     e.add_argument("code", help="python source, or - to read stdin")
-    e.add_argument("--confirm", choices=classes,
-                   help="action class a human has approved")
-    e.add_argument("--timeout", type=int, default=T_QUERY)
+    # Post-subcommand spelling. A distinct dest is required: argparse resolves
+    # the subparser into the same namespace, so a same-dest option would reset
+    # the parent's value to its default whenever it is not passed again.
+    _confirm_and_timeout(e, post=True)
 
-    r = sub.add_parser("run", help="ship a script into the session and call into it")
-    r.add_argument("script")
-    r.add_argument("--call", default=None, help="e.g. 'check_beam_ready()'")
-    r.add_argument("--confirm", choices=classes)
-    r.add_argument("--timeout", type=int, default=T_SCAN)
+    sub.add_parser("status", help="daqmgr process states on the DAQ machine")
 
-    c = sub.add_parser("classify", help="show a snippet's safety class without sending it")
-    c.add_argument("code")
+    lg = sub.add_parser("logs", help="list or tail per-process DAQ log files")
+    lg.add_argument("--process", default=None,
+                    help="filter the :<process>.log field, e.g. drp, teb, control")
+    lg.add_argument("-n", "--lines", type=int, default=0,
+                    help="tail this many lines of the newest match; 0 lists instead")
+    lg.add_argument("--count", type=int, default=20, help="how many names to list")
 
     return ap
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    """hutch-bridge: ping | install | exec | run | classify."""
+    """hutch-daq: ping | install | exec | status | logs."""
     args = build_parser().parse_args(argv)
+    confirm, timeout = _resolve(args)
     try:
         if args.cmd == "ping":
             res = ping(args.hutch, host=args.host)
@@ -342,15 +464,29 @@ def main(argv: "list[str] | None" = None) -> int:
             return OK if res["ok"] else UNREACHABLE
         if args.cmd == "install":
             return out(install_listener(args.hutch, host=args.host), plain=True)
-        if args.cmd == "classify":
-            return out(classify(args.code))
+        if args.cmd == "status":
+            return out(process_status(args.hutch, host=args.host, timeout=timeout))
+        if args.cmd == "logs":
+            return out(logs(args.hutch, process=args.process, lines=args.lines,
+                            count=args.count, host=args.host, timeout=timeout))
         if args.cmd == "exec":
             code = sys.stdin.read() if args.code == "-" else args.code
-            return out(exec_code(code, hutch=args.hutch, confirm=args.confirm,
-                                      timeout=args.timeout, host=args.host))
-        if args.cmd == "run":
-            return out(run_script(args.script, hutch=args.hutch, call=args.call,
-                                       confirm=args.confirm, timeout=args.timeout))
+            # `classify` used to be a subcommand of its own. Folded in here so
+            # that asking "what is this?" and sending it are the same call on
+            # the same text -- two entry points let the answer drift from the
+            # code it was about.
+            verdict = classify(code)
+            if confirm is None and SEVERITY[verdict["class"]] > 0:
+                out(verdict)
+                # Nothing was transmitted: exec_code is not reached, and its
+                # require_confirmation would run before any ssh regardless.
+                return REFUSED
+            res = exec_code(code, hutch=args.hutch, confirm=confirm,
+                            timeout=timeout, host=args.host)
+            out(res)
+            # A remote traceback used to exit 0, so rc could not distinguish a
+            # failed call from a successful one.
+            return OK if res["ok"] else UNREACHABLE
     except SafetyRefusal as exc:
         return fail(exc, REFUSED)
     except BridgeError as exc:

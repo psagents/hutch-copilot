@@ -35,7 +35,7 @@ import subprocess
 from typing import Any
 
 from ._cli import UNREACHABLE, USAGE, fail, out, parser
-from .bridge import (
+from .daq import (
     T_DEVICE,
     T_QUERY,
     BridgeError,
@@ -303,9 +303,10 @@ def daq(hutch: str, *, timeout: int = T_QUERY) -> dict:
 def preset(hutch: str, device_name: str, *, timeout: int = T_QUERY) -> dict:
     """A motor's saved positions.
 
-    Nominal setpoints belong here, not as literals in a checker script.
-    ``check_beam_ready_mfx.py`` hardcodes ``mr1l4_homs.pitch ~= -562.035``;
-    that number should come from a preset or from last-known-good state.
+    Nominal setpoints belong here, not as literals in a checker script. The
+    retired ``check_beam_ready_mfx.py`` hardcoded ``mr1l4_homs.pitch ~=
+    -562.035`` and judged the beam destination against it; that number comes
+    from here or from last-known-good state, never from a literal.
     """
     path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/presets/{device_name}.yml"
     text = psdev_read(path, timeout=timeout)

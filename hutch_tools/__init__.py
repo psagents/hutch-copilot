@@ -12,10 +12,10 @@ Layering (nothing above depends on anything below it, and there are no cycles):
     state     -> paths
     log       -> paths
     install   -> paths
-    bridge    -> paths, safety
+    daq       -> paths, safety
     lute      -> traps
     config    -> traps
-    resolvers -> bridge, state
+    resolvers -> daq, state
 
 Public API, for consumers that want names rather than modules::
 
@@ -46,7 +46,7 @@ MODULES = (
     "safety",
     "traps",
     "state",
-    "bridge",
+    "daq",
     "lute",
     "config",
     "resolvers",
@@ -79,12 +79,11 @@ _EXPORTS = {
     "WRITE": "safety",
     "classify": "safety",
     "require_confirmation": "safety",
-    # bridge
-    "BridgeError": "bridge",
-    "BridgeUnavailable": "bridge",
-    "exec_code": "bridge",
-    "ping": "bridge",
-    "run_script": "bridge",
+    # daq
+    "BridgeError": "daq",
+    "BridgeUnavailable": "daq",
+    "exec_code": "daq",
+    "ping": "daq",
     # resolvers
     "ResolveError": "resolvers",
     # traps

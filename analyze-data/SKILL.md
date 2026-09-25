@@ -108,7 +108,7 @@ paths — a campaign lost time to a mask path documented without its `.mask` ext
 ## 4. Render the config
 
 ```bash
-bin/hutch-config \
+bin/hutch-lute render \
   --template  cctbx_pipeline \
   --context   context.json \
   --set       TASK.phil_parameters.KEY=VALUE ... \
@@ -140,7 +140,7 @@ Show the operator the rendered config **and** the report together, and get appro
 every precondition:
 
 ```bash
-bin/hutch-install plan -e "$E" [--hutch "$H"] [-D "$DIRECTORY"] \
+bin/hutch-lute plan -e "$E" [--hutch "$H"] [-D "$DIRECTORY"] \
     -W "$WF_NAME" --trigger "$TRIGGER" [--partition milano] [--account "lcls:$E"]
 ```
 
@@ -151,7 +151,7 @@ needed for the final step.
 Then, once approved:
 
 ```bash
-bin/hutch-install all -e "$E" -W "$WF_NAME" --trigger "$TRIGGER" --confirm write
+bin/hutch-lute all -e "$E" -W "$WF_NAME" --trigger "$TRIGGER" --confirm write
 ```
 
 `all` re-checks the preconditions and **changes nothing if any is unmet**. The steps run in a

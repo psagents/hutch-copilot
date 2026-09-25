@@ -35,7 +35,7 @@ no device lists, no PV names and no pass-condition constants: those are resolved
 
 ```bash
 bin/hutch-state get --hutch "$H" --experiment "$E" hutch --value-only   # confirm, don't re-ask
-bin/hutch-bridge --hutch "$H" ping
+bin/hutch-daq --hutch "$H" ping
 ```
 
 If `hutch` is unknown, ask once. If `ping` reports `"mode": "offline"`, you cannot check
@@ -66,21 +66,43 @@ Then the two CRITICAL machine values. Resolve the PV rather than typing one:
 
 ```bash
 bin/hutch-resolve pv --hutch "$H" <device> --suffix <field>   # -> composed PV + provenance
-bin/hutch-bridge --hutch "$H" exec 'beam_status.pulse_energy.get()'
+bin/hutch-daq --hutch "$H" exec 'beam_status.pulse_energy.get()'
 ```
 
-For MFX there is a tested script that bundles pointing, imagers, valves, energy, undulator
-pointing, slits and run number in one round-trip — prefer it, it is one bridge call
-instead of many:
+### Beam destination — where the mirror is pointing
 
 ```bash
-bin/hutch-bridge --hutch mfx run are-we-ready/scripts/check_beam_ready_mfx.py \
-    --call 'check_beam_ready()' --timeout 60
+bin/hutch-resolve beampath --hutch "$H"                 # lightpath's verdict (Step 2 above)
+bin/hutch-resolve preset  --hutch mfx mr1l4_homs        # the setpoint, from its own file
 ```
 
-> The nominal pointing setpoint inside that script is a hardcoded literal. It should come
-> from `hutch-resolve preset --hutch mfx <mirror>` or from last-known-good state. Until it
-> does, treat a pointing failure as "verify with the operator", not as ground truth.
+Read the setpoint; do not carry one in your head. The MFX script this replaced hardcoded
+`MFX_PITCH = -562.035`, and a hand-encoded setpoint that has drifted reports a correctly
+pointed beam as a failure — or worse, the reverse. If `preset` has no entry, say the setpoint
+is unverified and ask the operator; do not fall back to a literal.
+
+### Undulator pointing and stoppers — EPICS, one call
+
+```bash
+bin/hutch-resolve caget --hutch mfx \
+    BPMS:UNDH:4690:XOFF.D BPMS:UNDH:4690:YOFF.D \
+    MFX:PPS:MMS:ST1:STATE MFX:PPS:MMS:ST2:STATE
+```
+
+Routed via `mfx-control`, where CA actually reaches the IOCs — the script this replaced read
+these from the DAQ machine.
+
+### Imagers, valves, slits, pulse energy — one session round-trip each
+
+No resolver owns these yet, so batch them:
+
+```bash
+bin/hutch-daq --hutch mfx exec '[(d, mfx_dg1_valve_1.state.get()) for d in [1]]'   # pattern
+bin/hutch-daq --hutch mfx exec 'beam_status.get()'
+```
+
+Compose one snippet per group rather than one per device; each `exec` is a round-trip. Report
+an unreadable device as an ERROR, never as OUT — see Step 4.
 
 ---
 
@@ -88,14 +110,20 @@ bin/hutch-bridge --hutch mfx run are-we-ready/scripts/check_beam_ready_mfx.py \
 
 ```bash
 bin/hutch-resolve daq --hutch "$H"     # state, config_alias, experiment, recording, run
-bin/hutch-state path --hutch "$H" --experiment "$E"   # includes the xtc2 path to stat
+bin/hutch-daq --hutch "$H" status      # daqmgr process states (RUNNING / NOCONNECT / ...)
 ```
 
-For MFX, the equivalent bundled script:
+Has the last run's data landed?
 
 ```bash
-bin/hutch-bridge --hutch mfx run are-we-ready/scripts/check_hutch_ready_mfx.py \
-    --call 'check_hutch_ready()' --timeout 60
+bin/hutch-resolve xtc2 --hutch "$H" --experiment "$E" --run <r>   # present, count, size
+```
+
+If a DAQ process is down and you need to know why, the log is readable even after a crash:
+
+```bash
+bin/hutch-daq --hutch "$H" logs --process <name>      # newest files first
+bin/hutch-daq --hutch "$H" logs --process <name> -n 50
 ```
 
 Cross-check `daq.experiment` against the state `experiment`. A mismatch is a warning to the

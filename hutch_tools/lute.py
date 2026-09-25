@@ -365,7 +365,7 @@ def deploy_pedestals(
     confirmation -- same rule the bridge applies to a device move.
 
     ``takepeds()`` is NOT done here: it runs inside the hutch-python session and
-    goes through ``hutch-bridge``. This is only the analysis-side half.
+    goes through ``hutch-daq``. This is only the analysis-side half.
     """
     if confirm != "write":
         raise LuteError(
@@ -474,11 +474,22 @@ def readiness(hutch: str, experiment: str, directory: str | None = None) -> dict
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-lute: sbatch | submit | status | watch | peds | readiness | traps | kerberos.
+_DOC = """hutch-lute: sbatch | status | watch | peds | readiness | traps | kerberos
+    | render | plan | workspace | dags | envs | register | all.
 
-    Config rendering is a separate binary (``hutch-config``): it is a different
-    lifecycle phase, and it is the only part that needs jinja2 and PyYAML, so
-    keeping it out leaves this command stdlib-only.
+    Everything LUTE: submission, monitoring, pedestals, config rendering, and
+    workspace setup. ``hutch-config`` and ``hutch-install`` were separate
+    binaries until Sep 2026; they are the same infrastructure, so they are the
+    same tool.
+
+    ``render`` is the old ``hutch-config``. It is named ``render`` rather than
+    ``config`` because ``sbatch --config <path>`` already means "the config file
+    to submit", which is a different thing from producing one.
+
+    ``config`` and ``install`` are imported lazily, inside the branch that needs
+    them: ``config`` is the only module in the package with third-party
+    dependencies (jinja2, PyYAML), and ``hutch-lute sbatch`` must keep working
+    without them. test_package_api.py enforces this.
     """
 
 
@@ -540,17 +551,37 @@ def build_parser() -> "argparse.ArgumentParser":
     rd.add_argument("--experiment", required=True)
     rd.add_argument("--directory", default=None, help="optional subdir under results/")
 
+    # Absorbed from hutch-config. add_arguments() is deliberately importable
+    # without jinja2/PyYAML -- see the module note in config.py -- so building
+    # this parser does not pull them in.
+    from .config import add_arguments as _render_args
+    _render_args(sub.add_parser("render", help="render a LUTE config YAML, validated"))
+
+    # Absorbed from hutch-install.
+    from .install import add_subcommands as _install_cmds
+    _install_cmds(sub)
+
     return ap
 
 
 def main(argv: "list[str] | None" = None) -> int:
-    """hutch-lute: sbatch | submit | status | watch | traps | kerberos.
-
-    Config rendering is a separate binary (``hutch-config``): it is a different
-    lifecycle phase, and it is the only part that needs jinja2 and PyYAML, so
-    keeping it out leaves this command stdlib-only.
+    """hutch-lute: sbatch | status | watch | peds | readiness | traps | kerberos
+    | render | plan | workspace | dags | envs | register | all.
     """
     args = build_parser().parse_args(argv)
+
+    # Absorbed subcommands own their own error handling and exit codes, so they
+    # are dispatched before the LuteError handler below rather than inside it.
+    # Imported by name, not as a module object, per the rule test_package_api
+    # enforces: the import block is where a dependency should be visible.
+    if args.cmd == "render":
+        from .config import run as render
+        return render(args)
+    from .install import SUBCOMMANDS as install_cmds
+    if args.cmd in {name for name, _ in install_cmds}:
+        from .install import run as install
+        return install(args)
+
     try:
         if args.cmd == "sbatch":
             text = build_sbatch(
