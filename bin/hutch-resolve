@@ -2,5 +2,5 @@
 """hutch-resolve entry point. Works from a checkout with no install step."""
 import pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from hutch_tools.resolvers import main
+from hutch_tools.resolve import main
 raise SystemExit(main())

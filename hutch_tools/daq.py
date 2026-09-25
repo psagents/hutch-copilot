@@ -1,78 +1,194 @@
-"""Everything that requires talking to the DAQ machine.
+"""hutch-daq: the DAQ machine -- bridge listener, process states, log files.
 
-One tool owns one class of infrastructure: the hutch-python bridge listener,
-DAQ process state, and the per-process log files. All three reach the DAQ
-machine by the same ssh path through ``psdev``, which is why they live together
-rather than in three tools that each have to get the transport right.
+All three reach the DAQ machine over the same ssh path through ``psdev``.
+Transport constraints (what is mounted where, why ``ssh -L`` cannot be used,
+where EPICS CA reaches) are in README.md.
 
-Named ``bridge`` until Sep 2026. The bridge is still the transport; it is no
-longer the whole scope, so ``oc_bridge.py`` and ``BridgeError`` keep their
-names while the tool does not.
-
-Replaces six verbatim copies of the same SSH+socket+JSON blob that were
-embedded in markdown (``SKILL.md`` x3, ``are-we-ready/SKILL.md`` x2,
-``bridge-to-cds/SKILL.md`` x1) as Python inside nested-quoted bash inside a
-fenced code block. Two of those copies hardcoded
-``/sdf/home/f/fpoitevi/.claude/skills/...``, so the bridge setup and both
-readiness checks were broken for every user except the original author.
-
-Three transports, matching the three LCLS environments. This table is the
-load-bearing part of the retired ``bridge-to-cds`` sub-skill; it lives here,
-next to the code it explains, instead of in a 313-line markdown file whose
-recipes are now ``hutch-resolve`` subcommands.
-
-  environment          hosts                    filesystems    EPICS CA to IOCs
-  -------------------  -----------------------  -------------  ----------------
-  S3DF (batch)         s3dflogin, sdf-login     /sdf           no (firewalled)
-  CDS (controls-adj.)  psdev, psusr, pslogin    /cds           no (read gateway)
-  controls network     mfx-control, cxi-control /cds           yes
-
-  ipython  -> hutch-python session on a DAQ machine (oc_bridge.py on :9999)
-  psdev    -> read /cds files; Python 3.9 stdlib only, no conda, no CA
-  controls -> hutch control machine; full EPICS CA
-
-Key constraints, each of which has bitten:
-
-  * ``/sdf`` is NOT mounted on psdev and ``/cds`` is NOT mounted on S3DF. The
-    only bridge is ssh, so scripts must arrive on stdin and must not name /sdf
-    paths. ``psdev_read`` refuses a /sdf path rather than failing obscurely.
-  * ``/cds`` and ``/reg/neh`` are the same filesystem; ``/cds`` is canonical and
-    ``/reg`` is a deprecated alias. Never probe both.
-  * ``caget`` is on PATH on psdev but CA connections to IOCs (172.21.x.x) are
-    blocked there, so PV reads must run on ``{hutch}-control``.
-  * Beamline names in the happi DB are UPPERCASE; filesystem hutch names are
-    lowercase. ``paths`` and ``resolvers`` normalise in opposite directions.
-  * psdev is shared: keep remote scripts short and non-blocking.
-
-The remote client is passed to ssh as a single shell-quoted argv element, so
-there is no nested-quoting hazard at all -- the reason the markdown version was
-fragile.
-
-Everything sent to a live session goes through ``require_confirmation``
-first.
+Everything sent to a live session passes ``require_confirmation`` first.
 """
 
 from __future__ import annotations
 
 import datetime
 import json
+import re
 import shlex
-import sys
 import subprocess
+import sys
 from typing import Any
 
-from ._cli import OK, REFUSED, UNREACHABLE, USAGE, fail, out, parser
-from .paths import script
-from .safety import (
-    BEAM_CRITICAL,
-    READ_ONLY,
-    SEVERITY,
-    WRITE,
-    SafetyRefusal,
-    classify,
-    require_confirmation,
-)
+from .common import OK, REFUSED, UNREACHABLE, USAGE, fail, out, parser, script
 
+# --------------------------------------------------------------------------
+# Safety classification -- consulted before anything is transmitted
+# --------------------------------------------------------------------------
+READ_ONLY = "read-only"
+WRITE = "write"
+BEAM_CRITICAL = "beam-critical"
+
+#: Increasing severity. A snippet is classified at its highest match.
+SEVERITY = {READ_ONLY: 0, WRITE: 1, BEAM_CRITICAL: 2}
+
+# --------------------------------------------------------------------------
+# Patterns
+# --------------------------------------------------------------------------
+# Positive evidence that a snippet only reads. Everything must match one of
+# these for the snippet to be considered read-only.
+_READ_ONLY_PATTERNS = [
+    r"^\s*$",
+    r"^\s*#",
+    r"\.position\b",
+    r"\.inserted\b",
+    r"\.removed\b",
+    r"\.get\(\s*\)",
+    r"\.read\(\s*\)",
+    r"\.describe\(\s*\)",
+    r"\bdaq\.state\b",
+    r"\bdaq\.status\(\s*\)",
+    r"\bdaq\.config_info\(\s*\)",
+    r"\bget_run\(\s*\)",
+    r"\bcaget\b",
+    r"\bcamonitor\s+-n\s*1\b",
+    r"\bhappi\b",
+    r"\blightpath\b",
+    r"\bprint\(",
+    r"^\s*(import|from)\s",
+    r"^\s*(for|if|else|elif|try|except|finally|with|def|return|pass)\b",
+    r"^\s*[A-Za-z_][\w.]*\s*$",  # bare attribute read, e.g. `daq.state`
+    r"^\s*\w+\s*=\s*[^=]",  # local assignment (evaluated below on its RHS)
+    r"\bTrue\b|\bFalse\b|\bNone\b",
+]
+
+# Operations that change the machine.
+_WRITE_PATTERNS = {
+    r"\.mv\(": "device move (.mv)",
+    r"\.mvr\(": "relative device move (.mvr)",
+    r"\.move\(": "device move (.move)",
+    r"\.umv\(": "device move (.umv)",
+    r"\.set\(": "setpoint write (.set)",
+    r"\.put\(": "PV write (.put)",
+    r"\bcaput\b": "PV write (caput)",
+    r"\.insert\(": "device insert",
+    r"\.remove\(": "device remove",
+    r"\bdaq\.begin\(": "DAQ begin",
+    r"\bdaq\.configure\(": "DAQ configure",
+    r"\bdaq\.end_run\(": "DAQ end_run",
+    r"\bdaq\.connect\(": "DAQ connect",
+    r"\bdaq\.disconnect\(": "DAQ disconnect",
+    r"\bautorun\(": "DATA run (autorun)",
+    r"\bgeomrun\(": "GEOM run (geomrun)",
+    r"\btakepeds\(": "DARK run (takepeds)",
+    r"\bmakepeds\b": "pedestal deployment (makepeds)",
+    r"\bRE\(": "Bluesky plan execution",
+    r"\.stage\(": "device stage",
+    r"\bopen\([^)]*['\"][wa]": "file write",
+}
+
+# Devices whose motion changes delivered beam. Matched on the whole snippet,
+# so `mfx_att_1.set(...)` and `att1.mv(...)` both trip it.
+#
+# `\b` cannot be used: device names are underscore-joined and `_` is a word
+# character, so `\bstopper\b` never matches `mfx_stopper_1`.
+_TOK_START = r"(?<![A-Za-z0-9])"
+_TOK_END = r"(?![A-Za-z0-9])"
+
+
+def _tok(core: str) -> str:
+    return _TOK_START + core + _TOK_END
+
+
+_BEAM_CRITICAL_DEVICES = {
+    _tok(r"stopper\w*"): "stopper",
+    _tok(r"pps\w*"): "PPS stopper",
+    _tok(r"mps\w*"): "MPS device",
+    _tok(r"att(en\w*)?\d*"): "attenuator",
+    _tok(r"apert\w*"): "aperture",
+    _tok(r"shutter\w*"): "shutter",
+    _tok(r"gatt\d*"): "gas attenuator",
+    _tok(r"lodcm\w*"): "LODCM",
+    _tok(r"mr\d+[a-z]\d+\w*"): "mirror (lightpath component)",
+    _tok(r"picker\w*"): "pulse picker",
+}
+
+
+def _lines(code: str) -> list[str]:
+    return [ln for ln in code.splitlines() if ln.strip()]
+
+
+def classify(code: str) -> dict:
+    """Classify a snippet. Returns {class, reasons, unmatched_lines}.
+
+    Errs upward: any line that is not positively recognised as read-only makes
+    the snippet at least WRITE.
+    """
+    reasons: list[str] = []
+    verdict = READ_ONLY
+
+    for pattern, label in _WRITE_PATTERNS.items():
+        if re.search(pattern, code):
+            reasons.append(label)
+            verdict = WRITE
+
+    if verdict == WRITE:
+        for pattern, label in _BEAM_CRITICAL_DEVICES.items():
+            if re.search(pattern, code, re.IGNORECASE):
+                reasons.append(f"beam-critical target: {label}")
+                verdict = BEAM_CRITICAL
+
+    unmatched = [
+        ln
+        for ln in _lines(code)
+        if not any(re.search(p, ln) for p in _READ_ONLY_PATTERNS)
+    ]
+    if verdict == READ_ONLY and unmatched:
+        # Not provably read-only -> treat as a write and say which lines.
+        verdict = WRITE
+        reasons.append(
+            "not provably read-only: "
+            + "; ".join(ln.strip()[:60] for ln in unmatched[:3])
+        )
+
+    return {"class": verdict, "reasons": reasons, "unmatched_lines": unmatched}
+
+
+class SafetyRefusal(PermissionError):
+    """Raised when a snippet's class outranks the confirmation offered."""
+
+
+def require_confirmation(code: str, confirmed_as: str | None) -> dict:
+    """Gate a snippet. Raise unless ``confirmed_as`` matches its class or higher.
+
+    ``confirmed_as`` is the class a human has actually approved. Passing a
+    weaker class than the snippet requires is a refusal, not a downgrade --
+    that is the whole point.
+    """
+    result = classify(code)
+    needed = result["class"]
+    if SEVERITY[needed] == 0:
+        return result
+
+    if confirmed_as is None:
+        raise SafetyRefusal(
+            f"this is a {needed} operation and no confirmation was supplied.\n"
+            f"  why: {'; '.join(result['reasons'])}\n"
+            f"  show the command to the operator, then re-send with "
+            f"--confirm {needed}"
+        )
+    if confirmed_as not in SEVERITY:
+        raise SafetyRefusal(f"unknown confirmation class {confirmed_as!r}")
+    if SEVERITY[confirmed_as] < SEVERITY[needed]:
+        raise SafetyRefusal(
+            f"confirmed as {confirmed_as!r} but this is {needed!r}.\n"
+            f"  why: {'; '.join(result['reasons'])}\n"
+            f"  a {needed} operation needs an explicit {needed} confirmation, "
+            f"including a beam-risk warning to the operator."
+        )
+    return result
+
+
+# --------------------------------------------------------------------------
+# Transport
+# --------------------------------------------------------------------------
 #: SSH jump host for both /cds access and DAQ machines.
 JUMP_HOST = "psdev"
 
@@ -109,12 +225,7 @@ class BridgeError(RuntimeError):
 
 
 class BridgeUnavailable(BridgeError):
-    """The bridge could not be reached.
-
-    Callers must NOT fall back to a hardcoded default on this error. Report it
-    and either degrade to explicitly-labelled stale state or ask the operator.
-    Silent fallback to a literal is the bug class this refactor exists to kill.
-    """
+    """The bridge could not be reached. Never fall back to a hardcoded default."""
 
 
 def _ssh(
@@ -151,11 +262,7 @@ def _ssh(
 # IPython bridge (live hutch-python session)
 # --------------------------------------------------------------------------
 def daq_host(hutch: str) -> str:
-    """DAQ machine for a hutch, e.g. mfx -> mfx-daq.
-
-    Resolve from the hutch-python conf.yml when it matters -- see
-    ``resolvers.daq``. This convention is only the fallback spelling.
-    """
+    """DAQ machine for a hutch, e.g. mfx -> mfx-daq (the conventional spelling)."""
     return f"{hutch.strip().lower()}-daq"
 
 
@@ -169,9 +276,8 @@ def exec_code(
 ) -> dict:
     """Run Python in the live hutch-python session.
 
-    ``confirm`` is the action class a human has approved (see safety.py).
-    Read-only snippets need no confirmation; anything else is refused without
-    a matching class.
+    ``confirm`` is the action class a human has approved. Read-only snippets
+    need none; anything else is refused without a matching class.
     """
     verdict = require_confirmation(code, confirm)
 
@@ -233,22 +339,13 @@ def ping(hutch: str, host: str | None = None) -> dict:
 
 # --------------------------------------------------------------------------
 # DAQ processes and their logs
-#
-# NOTE: neither `status` nor `logs` has a behavioural unit test, and that is
-# deliberate rather than an oversight. Both are pure remote-command wrappers
-# whose correctness is entirely in the shape of the output `daqmgr` and the
-# opr log directory actually produce, and there is no live DAQ machine to check
-# that against yet (PLAN.md M0.2/M0.6 are the gate). A mocked test would only
-# assert that our guess matches our guess. Their CLI surface is still covered
-# by tests/unit/test_doc_commands.py, and the parsing below is written to
-# degrade to raw text rather than raise when the format surprises it.
+# 
+# Neither `status` nor `logs` has behavioural coverage: both are remote-command
+# wrappers whose correctness is in the output shape daqmgr actually produces,
+# and there is no live DAQ machine to check that against yet.
 # --------------------------------------------------------------------------
 def process_status(hutch: str, host: str | None = None, timeout: int = T_DEVICE) -> dict:
-    """``daqmgr status <hutch>.py`` on the DAQ machine: process name -> state.
-
-    Read-only, so it never needs confirmation. Equivalent to reading the
-    daqstat GUI, and it works when the GUI is not up.
-    """
+    """``daqmgr status <hutch>.py`` on the DAQ machine: process name -> state."""
     hutch = hutch.strip().lower()
     host = host or daq_host(hutch)
     raw = _ssh(host, f"daqmgr status {shlex.quote(hutch + '.py')}", timeout=timeout)
@@ -269,11 +366,7 @@ def process_status(hutch: str, host: str | None = None, timeout: int = T_DEVICE)
 
 
 def _log_dir(hutch: str, when: "datetime.date | None" = None) -> str:
-    """Per-process DAQ log directory for a hutch, on the DAQ machine.
-
-    Under ``/cds``, which is NOT mounted on S3DF -- every command touching this
-    path has to run remotely.
-    """
+    """Per-process DAQ log directory, under /cds -- so it must be read remotely."""
     d = when or datetime.date.today()
     return f"/cds/home/opr/{hutch.strip().lower()}opr/{d.year:04d}/{d.month:02d}"
 
@@ -288,15 +381,9 @@ def logs(
     when: "datetime.date | None" = None,
     timeout: int = T_DEVICE,
 ) -> dict:
-    """List the most recent DAQ log files, or tail one of them.
+    """List the most recent DAQ log files, or tail the newest when ``lines`` > 0.
 
-    Files are named ``<timestamp>_<host>:<process>.log``. With ``lines`` > 0 the
-    newest match is tailed; otherwise the newest ``count`` names are listed.
-
-    TBD (PLAN.md TBD-1): which process names are worth exposing as filter
-    values, whether this layout is stable across DAQ versions, and how long
-    logs are retained. All three need a live experiment to answer, so this
-    ships with the smallest surface that cannot be wrong.
+    Files are named ``<timestamp>_<host>:<process>.log``.
     """
     hutch = hutch.strip().lower()
     host = host or daq_host(hutch)
@@ -333,11 +420,9 @@ def logs(
 # psdev (read /cds from S3DF)
 # --------------------------------------------------------------------------
 def psdev_python(script: str, params: dict[str, Any] | None = None, timeout: int = T_QUERY) -> str:
-    """Run a stdlib-only Python script on psdev, with params injected as JSON.
+    """Run a stdlib-only Python script on psdev, params injected as a JSON literal.
 
-    ``/sdf`` is not mounted on psdev, so the script must arrive on stdin and
-    must not reference /sdf paths. Params are embedded as a JSON literal rather
-    than string-formatted, so values cannot break out of the script.
+    Arrives on stdin and must not name /sdf paths -- /sdf is not mounted there.
     """
     prologue = f"import json\nP = json.loads({json.dumps(json.dumps(params or {}))})\n"
     return _ssh("psdev", "python3 -", stdin=(prologue + script).encode(), timeout=timeout, jump=None)
@@ -357,11 +442,7 @@ CAGET = "/cds/group/pcds/epics/extensions/bin/linux-x86_64/caget"
 
 
 def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, str]:
-    """Read PVs from a hutch control machine.
-
-    CA is firewalled from both S3DF and psdev, so this must run on
-    ``{hutch}-control``.
-    """
+    """Read PVs from ``{hutch}-control`` -- the only host where CA reaches the IOCs."""
     if not pvs:
         return {}
     host = f"{hutch.strip().lower()}-control"
@@ -386,11 +467,8 @@ _DOC = """hutch-daq: ping | install | exec | status | logs."""
 
 
 def _confirm_and_timeout(p, post: bool = False) -> None:
-    """Add --confirm/--timeout, either before or after the subcommand.
-
-    ``post=True`` stores into shadow dests so the subparser cannot clobber the
-    value given before the subcommand; ``_resolve`` picks the winner.
-    """
+    """Add --confirm/--timeout. ``post=True`` uses shadow dests so the subparser
+    cannot clobber a value given before the subcommand; ``_resolve`` picks."""
     suffix = "_post" if post else ""
     p.add_argument("--confirm", dest="confirm" + suffix,
                    choices=[READ_ONLY, WRITE, BEAM_CRITICAL], default=None,
@@ -407,23 +485,10 @@ def _resolve(args) -> tuple:
 
 
 def build_parser() -> "argparse.ArgumentParser":
-    """Construct this command's parser.
+    """Construct this command's parser (kept separate so it can be introspected).
 
-    Separate from main() so the CLI surface can be introspected -- the
-    doc-drift test walks every invocation in the markdown and checks its
-    subcommand and flags against these parsers.
-
-    ``--confirm`` and ``--timeout`` are accepted on **both** sides of the
-    subcommand, and that is deliberate. They were subcommand-only until Sep
-    2026, which made the form take-run/SKILL.md documents -- ``--hutch H
-    --timeout 300 --confirm write exec '...'`` -- die with ``invalid choice:
-    '300'``. The doc-drift test could not see it, because it checks flags as an
-    unordered union of the subparser's and the parent's, so a flag in the wrong
-    position still matches. Moving them to the top level alone would have broken
-    the opposite form, ``exec '...' --confirm write``, which is what PLAN.md's
-    standing safety test uses -- and turning that test's expected refusal (rc 5)
-    into an argparse usage error (rc 2) is exactly the kind of silent weakening
-    the gate exists to catch. So: both, with the trailing one winning.
+    ``--confirm`` and ``--timeout`` are accepted on both sides of the
+    subcommand; the trailing one wins.
     """
 
     ap, sub = parser("hutch-daq", _DOC)
@@ -434,21 +499,20 @@ def build_parser() -> "argparse.ArgumentParser":
     sub.add_parser("ping")
     sub.add_parser("install", help="copy oc_bridge.py to the DAQ machine")
 
-    e = sub.add_parser("exec", help="run python in the live hutch-python session")
-    e.add_argument("code", help="python source, or - to read stdin")
-    # Post-subcommand spelling. A distinct dest is required: argparse resolves
-    # the subparser into the same namespace, so a same-dest option would reset
-    # the parent's value to its default whenever it is not passed again.
-    _confirm_and_timeout(e, post=True)
+    exec_parser = sub.add_parser("exec", help="run python in the live hutch-python session")
+    exec_parser.add_argument("code", help="python source, or - to read stdin")
+    # A distinct dest is required: argparse resolves the subparser into the same
+    # namespace, so a same-dest option would reset the parent's value.
+    _confirm_and_timeout(exec_parser, post=True)
 
     sub.add_parser("status", help="daqmgr process states on the DAQ machine")
 
-    lg = sub.add_parser("logs", help="list or tail per-process DAQ log files")
-    lg.add_argument("--process", default=None,
-                    help="filter the :<process>.log field, e.g. drp, teb, control")
-    lg.add_argument("-n", "--lines", type=int, default=0,
-                    help="tail this many lines of the newest match; 0 lists instead")
-    lg.add_argument("--count", type=int, default=20, help="how many names to list")
+    logs_parser = sub.add_parser("logs", help="list or tail per-process DAQ log files")
+    logs_parser.add_argument("--process", default=None,
+                             help="filter the :<process>.log field, e.g. drp, teb, control")
+    logs_parser.add_argument("-n", "--lines", type=int, default=0,
+                             help="tail this many lines of the newest match; 0 lists instead")
+    logs_parser.add_argument("--count", type=int, default=20, help="how many names to list")
 
     return ap
 
@@ -471,21 +535,14 @@ def main(argv: "list[str] | None" = None) -> int:
                             count=args.count, host=args.host, timeout=timeout))
         if args.cmd == "exec":
             code = sys.stdin.read() if args.code == "-" else args.code
-            # `classify` used to be a subcommand of its own. Folded in here so
-            # that asking "what is this?" and sending it are the same call on
-            # the same text -- two entry points let the answer drift from the
-            # code it was about.
             verdict = classify(code)
             if confirm is None and SEVERITY[verdict["class"]] > 0:
+                # Nothing is transmitted: exec_code is never reached.
                 out(verdict)
-                # Nothing was transmitted: exec_code is not reached, and its
-                # require_confirmation would run before any ssh regardless.
                 return REFUSED
             res = exec_code(code, hutch=args.hutch, confirm=confirm,
                             timeout=timeout, host=args.host)
             out(res)
-            # A remote traceback used to exit 0, so rc could not distinguish a
-            # failed call from a successful one.
             return OK if res["ok"] else UNREACHABLE
     except SafetyRefusal as exc:
         return fail(exc, REFUSED)

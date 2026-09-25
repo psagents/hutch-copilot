@@ -1,22 +1,4 @@
-"""Provenance-carrying experiment state store.
-
-The state file is a *cache with provenance*, not a config file. Every value
-carries where it came from and when, and reads past a per-field TTL fail
-loudly instead of returning something stale.
-
-Why provenance: the old schema had ``_timestamps`` but no source field, so a
-value a tired operator typed at 03:00 was indistinguishable from one read off
-the machine. That made the "use any non-null field, do not re-ask" rule unsafe
--- the skill could not tell a discovered value from an assumed one.
-
-Why TTL per field: a device list is good for hours, a detector alias for one
-run, a PV value for seconds, an operator-declared sample name until it
-changes. A single staleness rule (or a single static data file) cannot carry
-four different lifetimes.
-
-Writes are atomic and lock-serialised: during a shift several agents and the
-operator may write concurrently.
-"""
+"""Provenance-carrying experiment state store."""
 
 from __future__ import annotations
 
@@ -26,20 +8,21 @@ import json
 import os
 import pathlib
 import tempfile
-import time
-from typing import Any, Iterator
+from typing import Any
 
-from ._fs import lock as fs_lock
-from ._cli import (
+from .common import (
     STATE_ERROR,
     USAGE,
     experiment_args,
     fail,
     json_or_str,
+    log_file,
     out,
     parser,
+    state_file,
+    utcnow,
+    xtc2_dir,
 )
-from .paths import log_file, state_file, xtc2_dir
 
 # --------------------------------------------------------------------------
 # Provenance
@@ -77,8 +60,6 @@ DEFAULT_TTL: dict[str, float | None] = {
     "current_phase": None,
 }
 
-LOCK_TIMEOUT_S = 10.0
-
 
 class StateError(RuntimeError):
     pass
@@ -98,10 +79,6 @@ class StaleValue(StateError):
 
 class MissingValue(StateError):
     """Raised when a field has never been set. Ask, or resolve -- do not guess."""
-
-
-def utcnow() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
 def _age_seconds(iso: str) -> float:
@@ -167,15 +144,11 @@ class State:
         data.setdefault("_provenance", {})
         return data
 
-    def _lock(self):
-        """Serialise writers. Shared with log.py -- see _fs.lock."""
-        return fs_lock(self.path, LOCK_TIMEOUT_S)
-
     def _write_atomic(self, data: dict) -> None:
         """Write via a temp file in the same directory, then os.replace().
 
-        Never truncate the real file: a crash mid-write during a shift would
-        lose the whole shift's context.
+        Never truncates the real file, so a crash mid-write cannot lose the
+        shift's context.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".state-", suffix=".json")
@@ -251,38 +224,32 @@ class State:
             )
         ttl = ttl_for(field) if ttl_s == -1.0 else ttl_s
         stamp = utcnow()
-        with self._lock():
-            data = self.load()
-            _plant(data, field, value)
-            data.setdefault("_provenance", {})[field] = {
-                "source": source.strip(),
-                "kind": kind,
-                "retrieved_at": stamp,
-                "ttl_s": ttl,
-            }
-            # Mirror into _timestamps so pre-refactor readers keep working.
-            data.setdefault("_timestamps", {})[field] = stamp
-            self._write_atomic(data)
+        data = self.load()
+        _plant(data, field, value)
+        data.setdefault("_provenance", {})[field] = {
+            "source": source.strip(),
+            "kind": kind,
+            "retrieved_at": stamp,
+            "ttl_s": ttl,
+        }
+        # Mirror into _timestamps so pre-refactor readers keep working.
+        data.setdefault("_timestamps", {})[field] = stamp
+        self._write_atomic(data)
         return self.get_entry(field)
 
     def unset(self, field: str) -> None:
-        with self._lock():
-            data = self.load()
-            with contextlib.suppress(KeyError):
-                parent_path, _, leaf = field.rpartition(".")
-                parent = _dig(data, parent_path) if parent_path else data
-                parent.pop(leaf, None)
-            data.get("_provenance", {}).pop(field, None)
-            data.get("_timestamps", {}).pop(field, None)
-            self._write_atomic(data)
+        """Remove a field and its provenance."""
+        data = self.load()
+        with contextlib.suppress(KeyError):
+            parent_path, _, leaf = field.rpartition(".")
+            parent = _dig(data, parent_path) if parent_path else data
+            parent.pop(leaf, None)
+        data.get("_provenance", {}).pop(field, None)
+        data.get("_timestamps", {}).pop(field, None)
+        self._write_atomic(data)
 
     def audit(self) -> list[dict]:
-        """Every field that carries provenance, most stale first.
-
-        This is the report a skill should show instead of silently trusting
-        the file: it makes 'which of these numbers did we actually measure'
-        answerable.
-        """
+        """Every field that carries provenance, most stale first."""
         data = self.load()
         rows = []
         for field in sorted(data.get("_provenance", {})):
@@ -300,37 +267,32 @@ _DOC = """hutch-state: path | get | set | unset | audit | dump."""
 
 
 def build_parser() -> "argparse.ArgumentParser":
-    """Construct this command's parser.
-
-    Separate from main() so the CLI surface can be introspected -- the
-    doc-drift test walks every invocation in the markdown and checks its
-    subcommand and flags against these parsers.
-    """
+    """Construct this command's parser (kept separate so it can be introspected)."""
 
     ap, sub = parser("hutch-state", _DOC)
 
     for name in ("path", "audit", "dump"):
         experiment_args(sub.add_parser(name))
 
-    g = sub.add_parser("get", help="read one field with its provenance")
-    experiment_args(g)
-    g.add_argument("field")
-    g.add_argument("--stale-ok", action="store_true",
-                   help="return a value past its TTL, with its age reported")
-    g.add_argument("--value-only", action="store_true")
+    get_parser = sub.add_parser("get", help="read one field with its provenance")
+    experiment_args(get_parser)
+    get_parser.add_argument("field")
+    get_parser.add_argument("--stale-ok", action="store_true",
+                            help="return a value past its TTL, with its age reported")
+    get_parser.add_argument("--value-only", action="store_true")
 
-    s = sub.add_parser("set", help="write one field; --source is mandatory")
-    experiment_args(s)
-    s.add_argument("field")
-    s.add_argument("value", help="JSON if parseable, else a string")
-    s.add_argument("--source", required=True,
-                   help="specific enough to re-run, e.g. 'psana2 detinfo exp=.. run=36'")
-    s.add_argument("--kind", default=OPERATOR, choices=VALID_KINDS)
-    s.add_argument("--ttl", type=float, default=None)
+    set_parser = sub.add_parser("set", help="write one field; --source is mandatory")
+    experiment_args(set_parser)
+    set_parser.add_argument("field")
+    set_parser.add_argument("value", help="JSON if parseable, else a string")
+    set_parser.add_argument("--source", required=True,
+                            help="specific enough to re-run, e.g. 'psana2 detinfo exp=.. run=36'")
+    set_parser.add_argument("--kind", default=OPERATOR, choices=VALID_KINDS)
+    set_parser.add_argument("--ttl", type=float, default=None)
 
-    u = sub.add_parser("unset")
-    experiment_args(u)
-    u.add_argument("field")
+    unset_parser = sub.add_parser("unset")
+    experiment_args(unset_parser)
+    unset_parser.add_argument("field")
 
     return ap
 

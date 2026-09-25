@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import safety
+from hutch_tools import daq as safety
 
 
 @pytest.mark.parametrize("code", [

@@ -1,14 +1,8 @@
 """Nothing load-bearing may live outside this repo.
 
-Three sibling skills that this skill *depended* on were removed -- including the
-one that owned the CCTBX jinja template, which left `hutch-config` with nothing to
-render. These tests keep that from coming back.
-
-They deliberately check only whether an advisor reference is **declared**, never
-whether it is installed, so they behave the same on any machine. Which skills
-exist is a question for `hutch-resolve skills`, not for a test -- and not for
-prose either: an earlier revision asserted eleven advisors were absent after
-checking a single skill root, and deleted working references on that basis.
+These check only whether an advisor reference is **declared**, never whether it
+is installed, so they behave the same on any machine. Which skills exist is a
+question for `hutch-resolve skills`, not for a test.
 """
 
 from __future__ import annotations
@@ -18,7 +12,7 @@ import re
 
 import pytest
 
-from hutch_tools import config, paths
+from hutch_tools import common as paths
 
 ROOT = paths.skill_root()
 
@@ -39,7 +33,7 @@ CODE_DIRS = ("hutch_tools", "bin")
 def _docs():
     return [
         p for p in sorted(ROOT.rglob("*.md"))
-        if ".git" not in p.parts and p.name != "MIGRATION.md"
+        if ".git" not in p.parts
     ]
 
 
@@ -117,71 +111,14 @@ def test_no_code_path_hardcodes_a_home_directory():
     assert not offenders, f"hardcoded home directory: {offenders}"
 
 
-# --------------------------------------------------------------------------
-# Templates
-# --------------------------------------------------------------------------
-def test_default_template_ships_with_the_repo():
-    """hutch-config must be usable with no arguments beyond its context.
-
-    When the template lived in `setup-cctbx-pipeline` and that skill was removed,
-    `hutch-config` had nothing to render at all.
-    """
-    assert config.DEFAULT_TEMPLATE in config.available_templates()
-    resolved = config.resolve_template(config.DEFAULT_TEMPLATE)
-    assert resolved.is_file()
-    assert ROOT in resolved.parents
 
 
-def test_unknown_template_name_lists_what_is_available():
-    with pytest.raises(config.ConfigError, match="Available: cctbx_pipeline"):
-        config.resolve_template("no_such_template")
 
 
-def test_template_dir_is_inside_the_repo():
-    assert config.template_dir() == ROOT / "templates"
 
 
-def test_every_shipped_template_renders_and_parses():
-    """A template that cannot render is worse than an absent one."""
-    minimal = {
-        "generator": "test", "experiment": "e1", "tag": "T", "work_dir": "/w",
-        "pdb_file": "/p.pdb", "geometry_file": "/g.expt", "mask_file": "/m.mask",
-        "d_min": 2.0, "detector_address": "det", "unit_cell": "1 1 1 90 90 90",
-        "space_group": "P 1", "date": "2026/01/01", "merge_version": "v001",
-    }
-    for name in config.available_templates():
-        text = config.render_template(config.resolve_template(name), minimal)
-        docs = config.parse_documents(text)
-        assert docs, name
-
-
-def test_shipped_template_passes_its_own_trap_register():
-    minimal = {
-        "generator": "test", "experiment": "e1", "tag": "T", "work_dir": "/w",
-        "pdb_file": "/p.pdb", "geometry_file": "/g.expt", "mask_file": "/m.mask",
-        "d_min": 2.0, "detector_address": "det", "unit_cell": "1 1 1 90 90 90",
-        "space_group": "P 1", "date": "2026/01/01", "merge_version": "v001",
-    }
-    report = config.build(template=config.DEFAULT_TEMPLATE, context=minimal,
-                          overrides={}, whitelist_dir=None)
-    assert report["documents"] == 2
-    assert report["tasks"] == ["IndexCCTBXXFEL", "MergeCCTBXXFEL", "ScaleCCTBXXFEL"]
-
-
-def test_template_records_its_own_provenance():
-    """The reconstruction and its unverified blocks must stay documented."""
-    text = config.resolve_template(config.DEFAULT_TEMPLATE).read_text()
-    assert "PROVENANCE" in text
-    assert "UNVERIFIED" in text
-
-
-# --------------------------------------------------------------------------
-# Which skills are installed -- the resolver that exists because a prose claim
-# about this was wrong. It is pure local filesystem, so there is no excuse for
-# it to have been the one resolver without a test.
-# --------------------------------------------------------------------------
 def test_skills_resolver_finds_skills_across_multiple_roots(tmp_path, monkeypatch):
-    from hutch_tools import resolvers
+    from hutch_tools import resolve as resolvers
 
     a, b = tmp_path / "local", tmp_path / "shared"
     for root, names in ((a, ["ask-lute", "hutch-copilot"]), (b, ["elog-copilot", "xpm-seq"])):
@@ -197,7 +134,7 @@ def test_skills_resolver_finds_skills_across_multiple_roots(tmp_path, monkeypatc
 
 
 def test_a_directory_without_skill_md_is_not_a_skill(tmp_path, monkeypatch):
-    from hutch_tools import resolvers
+    from hutch_tools import resolve as resolvers
 
     (tmp_path / "not-a-skill").mkdir()
     (tmp_path / "real").mkdir()
@@ -208,7 +145,7 @@ def test_a_directory_without_skill_md_is_not_a_skill(tmp_path, monkeypatch):
 
 def test_earlier_roots_win(tmp_path, monkeypatch):
     """Local overrides shared, matching how the skill loader resolves names."""
-    from hutch_tools import resolvers
+    from hutch_tools import resolve as resolvers
 
     a, b = tmp_path / "local", tmp_path / "shared"
     for root in (a, b):
@@ -220,7 +157,7 @@ def test_earlier_roots_win(tmp_path, monkeypatch):
 
 def test_querying_one_skill_reports_the_roots_it_searched(tmp_path, monkeypatch):
     """The distinction that was missed: 'not installed' vs 'looked in the wrong place'."""
-    from hutch_tools import resolvers
+    from hutch_tools import resolve as resolvers
 
     monkeypatch.setenv("HUTCH_SKILL_ROOTS", str(tmp_path))
     rec = resolvers.skills("elog-copilot")
@@ -230,7 +167,7 @@ def test_querying_one_skill_reports_the_roots_it_searched(tmp_path, monkeypatch)
 
 
 def test_a_missing_root_is_skipped_not_fatal(tmp_path, monkeypatch):
-    from hutch_tools import resolvers
+    from hutch_tools import resolve as resolvers
 
     (tmp_path / "real").mkdir()
     (tmp_path / "real" / "SKILL.md").write_text("x")

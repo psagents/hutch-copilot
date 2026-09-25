@@ -1,27 +1,9 @@
-"""Resolvers: ask the authoritative source, return the answer with provenance.
+"""hutch-resolve: ask the authoritative source, return the answer with provenance.
 
-This replaces the hand-maintained knowledge files
-(``references/hutches/mfx.md``, ``references/beam-status-pvs.md``,
-``analyze-data/references/sfx-analysis-defaults.md``) rather than reformatting
-them. Those files were a cache of something authoritative, kept by hand, and
-they went stale silently -- ``references/hutches/`` had exactly one file, and
-``sfx-analysis-defaults.md`` opened by telling the reader not to trust it.
-
-Evidence for doing it this way, from the sfx-hutch-copilot-integration
-campaign: every value read from its source was right first time (detector
-address from ``psana2 detinfo``, unit cell from ``CRYST1``), and every value a
-human had pre-encoded into text was wrong (the mask path was missing its
-``.mask`` extension; the unit-cell filter target was 2.2% off the observed
-cell for the whole campaign).
-
-Contract for every resolver here:
-
-  1. Return ``{value, source, retrieved_at, ...}``. ``source`` is specific
-     enough to re-run.
-  2. Never fall back to a hardcoded literal. If the source is unreachable,
-     raise -- the caller decides between explicitly-stale state and asking a
-     human.
-  3. Report which path produced the answer when there is a fallback chain.
+Every resolver returns ``{value, source, retrieved_at, ...}`` with a ``source``
+specific enough to re-run, never falls back to a hardcoded literal (it raises,
+and the caller chooses between stale state and asking), and reports which path
+produced the answer when there is a fallback chain.
 """
 
 from __future__ import annotations
@@ -34,7 +16,7 @@ import shutil
 import subprocess
 from typing import Any
 
-from ._cli import UNREACHABLE, USAGE, fail, out, parser
+from .common import UNREACHABLE, USAGE, fail, out, parser, utcnow, xtc2_dir, xtc2_files
 from .daq import (
     T_DEVICE,
     T_QUERY,
@@ -44,8 +26,7 @@ from .daq import (
     psdev_python,
     psdev_read,
 )
-from .paths import xtc2_dir, xtc2_files
-from .state import RESOLVED, State, utcnow
+from .state import RESOLVED, State
 
 HAPPI_DB = "/cds/group/pcds/pyps/apps/hutch-python/device_config/db.json"
 HUTCH_PYTHON = "/cds/group/pcds/pyps/apps/hutch-python"
@@ -96,11 +77,7 @@ print(json.dumps(rows))
 
 
 def devices(hutch: str, *, timeout: int = T_QUERY) -> dict:
-    """Full device inventory for a beamline, ordered along the beam (z).
-
-    Source: the happi database, which *is* the device and PV registry. There is
-    no reason for a skill to carry a device list in prose.
-    """
+    """Full device inventory for a beamline, ordered along the beam (z)."""
     out = psdev_python(
         _DEVICES_SCRIPT, {"db": HAPPI_DB, "beamline": hutch}, timeout=timeout
     )
@@ -126,12 +103,10 @@ def device(hutch: str, name: str, **kw: Any) -> dict:
 
 
 def pv(hutch: str, name: str, suffix: str = "", **kw: Any) -> dict:
-    """PV name for a device, composed from its happi prefix.
+    """PV name for a device: the happi prefix plus a caller-supplied suffix.
 
-    Deliberately does NOT ship a device-class -> record-suffix table: that
-    would be the stale-knowledge-file problem again. The prefix comes from
-    happi; the suffix is supplied by the caller and echoed back so the composed
-    name is visible and auditable.
+    No device-class -> suffix table ships here; the suffix is echoed back so
+    the composed name stays auditable.
     """
     rec = device(hutch, name, **kw)
     prefix = rec["value"].get("prefix")
@@ -186,9 +161,8 @@ print(json.dumps(report))
 def beampath(hutch: str, *, timeout: int = T_DEVICE) -> dict:
     """Live beampath state, including which devices are blocking.
 
-    ``are-we-ready`` used to re-implement this determination in prose plus 75
-    lines of inline Python embedded in markdown. ``lightpath`` already computes
-    it; the fallback path is reported in ``method`` rather than taken silently.
+    ``lightpath`` computes it. Which path produced the answer is reported in
+    ``method`` rather than taken silently.
     """
     code = _BEAMPATH_SCRIPT.format(hutch=hutch.strip().lower())
     res = exec_code(code, hutch=hutch, timeout=timeout)
@@ -220,18 +194,10 @@ print("HUTCHLIB_JSON:" + json.dumps(keys))
 
 
 def detectors(experiment: str, run: int, *, timeout: int = 300) -> dict:
-    """Detector aliases for a run, from psana2 itself.
-
-    The campaign had to discover ``'jungfrau'`` this way because the contract
-    did not state it; the query was right first time. This is the canonical
-    answer -- never accept a detector alias from prose.
-    """
+    """Detector aliases for a run, from psana2. Never accept an alias from prose."""
     snippet = _DETNAMES_SNIPPET % {"exp": experiment, "run": int(run)}
-    # shlex.quote, not json.dumps: json.dumps emits a *double*-quoted string
-    # whose newlines are ``\n`` escapes, and bash does not expand those inside
-    # double quotes -- python then received a literal backslash-n and died with
-    # "SyntaxError: unexpected character after line continuation character".
-    # Single quotes carry the real newlines through untouched.
+    # shlex.quote, not json.dumps: the latter escapes newlines, which bash does
+    # not expand inside double quotes, so python would see a literal backslash-n.
     cmd = f"source {PSCONDA} >/dev/null 2>&1 && python -c {shlex.quote(snippet)}"
     if not shutil.which("bash"):  # pragma: no cover
         raise ResolveError("bash not available")
@@ -269,11 +235,7 @@ def hutch_conf(hutch: str, *, timeout: int = T_QUERY) -> dict:
 
 
 def daq(hutch: str, *, timeout: int = T_QUERY) -> dict:
-    """Live DAQ state and configuration.
-
-    One implementation for both ``take-run`` Phase 0/0b and ``are-we-ready``
-    Phase H -- they previously described the same reads in two different voices.
-    """
+    """Live DAQ state: state, config alias, experiment, recording flag, run number."""
     code = (
         "import json\n"
         "out = {}\n"
@@ -301,13 +263,7 @@ def daq(hutch: str, *, timeout: int = T_QUERY) -> dict:
 
 
 def preset(hutch: str, device_name: str, *, timeout: int = T_QUERY) -> dict:
-    """A motor's saved positions.
-
-    Nominal setpoints belong here, not as literals in a checker script. The
-    retired ``check_beam_ready_mfx.py`` hardcoded ``mr1l4_homs.pitch ~=
-    -562.035`` and judged the beam destination against it; that number comes
-    from here or from last-known-good state, never from a literal.
-    """
+    """A motor's saved positions. Nominal setpoints come from here, never a literal."""
     path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/presets/{device_name}.yml"
     text = psdev_read(path, timeout=timeout)
     return _record(text, f"resolved:{path}")
@@ -317,11 +273,7 @@ def preset(hutch: str, device_name: str, *, timeout: int = T_QUERY) -> dict:
 # Local files that are authoritative in themselves
 # --------------------------------------------------------------------------
 def cell(pdb_path: str) -> dict:
-    """Unit cell and space group from a PDB CRYST1 record.
-
-    Never accept a hand-typed unit cell. In the campaign the CRYST1 value was
-    correct and an independently-stated target was not.
-    """
+    """Unit cell and space group from a PDB CRYST1 record. Never hand-type a cell."""
     with open(pdb_path) as fh:
         for line in fh:
             if line.startswith("CRYST1"):
@@ -329,12 +281,8 @@ def cell(pdb_path: str) -> dict:
                 al, be, ga = line[33:40], line[40:47], line[47:54]
                 sg = line[55:66].strip()
                 nums = [float(x) for x in (a, b, c, al, be, ga)]
-                # Format exactly as setup-cctbx-pipeline's read_cryst1 does
-                # (plain str(float), so 90.0 not 90). That skill's validation
-                # assertion greps for this string verbatim in the rendered YAML,
-                # and this spelling is the one in production use. Note its own
-                # docstring advertises "90 90 90", which the code does not
-                # produce -- follow the code, not the docstring.
+                # Plain str(float), so "90.0" not "90" -- the spelling downstream
+                # phil validation greps for verbatim.
                 return _record(
                     {
                         "unit_cell": " ".join(str(v) for v in nums),
@@ -348,11 +296,7 @@ def cell(pdb_path: str) -> dict:
 
 
 def xtc2(hutch: str, experiment: str, run: int) -> dict:
-    """Has the data for this run landed, and how much of it?
-
-    Replaces `ls -lh $XTC2_DIR | grep r0043` in take-run: reports the count and
-    total size rather than a wall of text, and can be asserted on.
-    """
+    """Has this run's data landed, and how much of it? Count and total size."""
     files = xtc2_files(hutch, experiment, run)
     total = sum(f.stat().st_size for f in files)
     return _record(
@@ -369,11 +313,7 @@ def cds_file(path: str, *, timeout: int = T_QUERY) -> dict:
 
 
 def pv_values(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict:
-    """Live PV values from a hutch control machine.
-
-    EPICS CA is firewalled from both S3DF and psdev, so this is the only route.
-    Compose the PV name with ``pv()`` rather than typing one.
-    """
+    """Live PV values from ``{hutch}-control``. Compose the name with ``pv()``."""
     return _record(
         caget(pvs, hutch=hutch, timeout=timeout),
         f"resolved:caget on {hutch.lower()}-control",
@@ -389,12 +329,7 @@ _DOC = """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
 
 
 def build_parser() -> "argparse.ArgumentParser":
-    """Construct this command's parser.
-
-    Separate from main() so the CLI surface can be introspected -- the
-    doc-drift test walks every invocation in the markdown and checks its
-    subcommand and flags against these parsers.
-    """
+    """Construct this command's parser (kept separate so it can be introspected)."""
 
     ap, sub = parser("hutch-resolve", _DOC)
     ap.add_argument("--persist-to", nargs=2, metavar=("HUTCH", "EXPERIMENT"),
@@ -404,36 +339,36 @@ def build_parser() -> "argparse.ArgumentParser":
     for name in ("devices", "beampath", "daq", "conf"):
         sub.add_parser(name).add_argument("--hutch", required=True)
 
-    d = sub.add_parser("device")
-    d.add_argument("--hutch", required=True)
-    d.add_argument("name")
+    device_parser = sub.add_parser("device")
+    device_parser.add_argument("--hutch", required=True)
+    device_parser.add_argument("name")
 
-    p = sub.add_parser("pv", help="compose a PV name from the happi prefix")
-    p.add_argument("--hutch", required=True)
-    p.add_argument("name")
-    p.add_argument("--suffix", default="")
+    pv_parser = sub.add_parser("pv", help="compose a PV name from the happi prefix")
+    pv_parser.add_argument("--hutch", required=True)
+    pv_parser.add_argument("name")
+    pv_parser.add_argument("--suffix", default="")
 
-    cg = sub.add_parser("caget", help="read PVs from a hutch control machine")
-    cg.add_argument("--hutch", required=True)
-    cg.add_argument("pv", nargs="+")
+    caget_parser = sub.add_parser("caget", help="read PVs from a hutch control machine")
+    caget_parser.add_argument("--hutch", required=True)
+    caget_parser.add_argument("pv", nargs="+")
 
-    det = sub.add_parser("detectors")
-    det.add_argument("--experiment", required=True)
-    det.add_argument("--run", required=True, type=int)
+    detectors_parser = sub.add_parser("detectors")
+    detectors_parser.add_argument("--experiment", required=True)
+    detectors_parser.add_argument("--run", required=True, type=int)
 
-    pr = sub.add_parser("preset")
-    pr.add_argument("--hutch", required=True)
-    pr.add_argument("device")
+    preset_parser = sub.add_parser("preset")
+    preset_parser.add_argument("--hutch", required=True)
+    preset_parser.add_argument("device")
 
     sub.add_parser("cell").add_argument("pdb")
 
-    sk = sub.add_parser("skills", help="which skills are installed, and where")
-    sk.add_argument("name", nargs="?", default=None)
+    skills_parser = sub.add_parser("skills", help="which skills are installed, and where")
+    skills_parser.add_argument("name", nargs="?", default=None)
 
-    xt = sub.add_parser("xtc2", help="has this run's data landed on S3DF?")
-    xt.add_argument("--hutch", required=True)
-    xt.add_argument("--experiment", required=True)
-    xt.add_argument("--run", required=True, type=int)
+    xtc2_parser = sub.add_parser("xtc2", help="has this run's data landed on S3DF?")
+    xtc2_parser.add_argument("--hutch", required=True)
+    xtc2_parser.add_argument("--experiment", required=True)
+    xtc2_parser.add_argument("--run", required=True, type=int)
     sub.add_parser("cat", help="read a /cds file from S3DF via psdev").add_argument("path")
 
     return ap
@@ -486,14 +421,6 @@ def main(argv: "list[str] | None" = None) -> int:
 # --------------------------------------------------------------------------
 #: Roots that hold Claude Code skills at LCLS, in precedence order. Overridable
 #: with HUTCH_SKILL_ROOTS (colon-separated) for other sites and for tests.
-#:
-#: This resolver exists because of a mistake worth recording: the advisor list in
-#: SKILL.md was rewritten to say eleven skills were "not installed" after checking
-#: only ~/.claude/skills. All eleven were present in the OpenCode root, so working
-#: references were deleted -- including the eLog one, which left the skill telling
-#: operators to post by hand. Looking in one place and encoding the conclusion as
-#: prose is the exact failure mode this refactor exists to prevent, so where skills
-#: live is now resolved rather than recalled.
 DEFAULT_SKILL_ROOTS = (
     "~/.claude/skills",
     "/sdf/group/lcls/ds/dm/apps/dev/opencode/skills",
@@ -509,11 +436,11 @@ def skill_roots() -> list[pathlib.Path]:
 
 
 def skills(name: str | None = None) -> dict:
-    """Enumerate installed skills across every known root.
+    """Installed skills across every known root.
 
-    A skill is a directory containing SKILL.md. Returns the roots searched even
-    when nothing is found, so "not installed" is distinguishable from
-    "looked in the wrong place" -- which is the distinction that was missed.
+    A skill is a directory containing SKILL.md. The roots searched are returned
+    even when nothing is found, so "not installed" and "looked in the wrong
+    place" stay distinguishable.
     """
     roots = skill_roots()
     found: dict[str, str] = {}

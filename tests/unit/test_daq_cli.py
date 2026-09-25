@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import _cli, daq
+from hutch_tools import common as _cli, daq
 
 
 @pytest.fixture

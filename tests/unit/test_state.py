@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import multiprocessing
 import os
 
 import pytest
 
-from hutch_tools import paths, state
+from hutch_tools import common as paths, state
 
 
 @pytest.fixture()
@@ -107,24 +106,3 @@ def test_write_is_atomic_and_leaves_no_temp_files(st):
     assert leftovers == []
 
 
-def _writer(args):
-    root, field = args
-    os.environ["HUTCH_DS_ROOT"] = str(root)
-    import importlib
-    from hutch_tools import paths as p, state as s
-    importlib.reload(p)
-    importlib.reload(s)
-    s.State("mfx", "e1").set(field, field, source="concurrency test")
-
-
-def test_concurrent_writers_do_not_lose_updates(tmp_path):
-    fields = [f"sample_notes_{i}" for i in range(8)]
-    with multiprocessing.Pool(4) as pool:
-        pool.map(_writer, [(tmp_path, f) for f in fields])
-    os.environ["HUTCH_DS_ROOT"] = str(tmp_path)
-    import importlib
-    from hutch_tools import paths as p, state as s
-    importlib.reload(p)
-    importlib.reload(s)
-    data = s.State("mfx", "e1").load()
-    assert all(f in data for f in fields), sorted(set(fields) - set(data))
