@@ -9,6 +9,7 @@ workflow, so this only observes it.
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import time
 
@@ -222,7 +223,7 @@ def deploy_pedestals(
 _DOC = """hutch-lute: watch | status | peds."""
 
 
-def build_parser() -> "argparse.ArgumentParser":
+def build_parser() -> argparse.ArgumentParser:
     """Construct this command's parser (kept separate so it can be introspected)."""
     ap, sub = parser("hutch-lute", _DOC)
 
@@ -252,7 +253,7 @@ def build_parser() -> "argparse.ArgumentParser":
     return ap
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """hutch-lute: watch | status | peds."""
     args = build_parser().parse_args(argv)
     try:

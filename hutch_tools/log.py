@@ -94,7 +94,7 @@ def append(hutch: str, experiment: str, text: str, *, at: str | None = None,
 _DOC = """hutch-log: init | append."""
 
 
-def build_parser() -> "argparse.ArgumentParser":
+def build_parser() -> argparse.ArgumentParser:
     """Construct this command's parser (kept separate so it can be introspected)."""
     ap, sub = parser("hutch-log", _DOC)
 
@@ -116,7 +116,7 @@ def build_parser() -> "argparse.ArgumentParser":
     return ap
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """hutch-log: init | append."""
     args = build_parser().parse_args(argv)
     try:

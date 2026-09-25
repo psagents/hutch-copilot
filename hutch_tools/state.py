@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import datetime as _dt
 import json
 import os
-import pathlib
 import tempfile
 from typing import Any
 
@@ -266,7 +266,7 @@ class State:
 _DOC = """hutch-state: path | get | set | unset | audit | dump."""
 
 
-def build_parser() -> "argparse.ArgumentParser":
+def build_parser() -> argparse.ArgumentParser:
     """Construct this command's parser (kept separate so it can be introspected)."""
 
     ap, sub = parser("hutch-state", _DOC)
@@ -297,7 +297,7 @@ def build_parser() -> "argparse.ArgumentParser":
     return ap
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """hutch-state: path | get | set | unset | audit | dump."""
     args = build_parser().parse_args(argv)
     st = State(args.hutch, args.experiment)

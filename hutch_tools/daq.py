@@ -9,6 +9,7 @@ Everything sent to a live session passes ``require_confirmation`` first.
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import re
@@ -484,7 +485,7 @@ def _resolve(args) -> tuple:
     return confirm, timeout
 
 
-def build_parser() -> "argparse.ArgumentParser":
+def build_parser() -> argparse.ArgumentParser:
     """Construct this command's parser (kept separate so it can be introspected).
 
     ``--confirm`` and ``--timeout`` are accepted on both sides of the
@@ -517,7 +518,7 @@ def build_parser() -> "argparse.ArgumentParser":
     return ap
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """hutch-daq: ping | install | exec | status | logs."""
     args = build_parser().parse_args(argv)
     confirm, timeout = _resolve(args)

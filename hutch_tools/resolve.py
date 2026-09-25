@@ -8,6 +8,7 @@ produced the answer when there is a fallback chain.
 
 from __future__ import annotations
 
+import argparse
 import json
 import pathlib
 import re
@@ -328,7 +329,7 @@ _DOC = """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
     detectors | preset | cell | cat | skills | xtc2."""
 
 
-def build_parser() -> "argparse.ArgumentParser":
+def build_parser() -> argparse.ArgumentParser:
     """Construct this command's parser (kept separate so it can be introspected)."""
 
     ap, sub = parser("hutch-resolve", _DOC)
@@ -374,7 +375,7 @@ def build_parser() -> "argparse.ArgumentParser":
     return ap
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
     detectors | preset | cell | cat | skills | xtc2."""
     args = build_parser().parse_args(argv)
