@@ -226,7 +226,20 @@ class BridgeError(RuntimeError):
 
 
 class BridgeUnavailable(BridgeError):
-    """The bridge could not be reached. Never fall back to a hardcoded default."""
+    """The bridge could not be reached. Never fall back to a hardcoded default.
+
+    Carries ``returncode``, ``stdout`` and ``stderr`` when the failure was a
+    remote command exiting non-zero, so a caller reporting per-step results does
+    not have to re-run it to find out what it printed. Both are ``""`` and the
+    code ``None`` when the failure was the connection itself.
+    """
+
+    def __init__(self, message: str, *, returncode: int | None = None,
+                 stdout: str = "", stderr: str = "") -> None:
+        super().__init__(message)
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def _ssh(
@@ -235,8 +248,17 @@ def _ssh(
     *,
     stdin: bytes | None = None,
     timeout: int = T_QUERY,
+    run_timeout: int | None = None,
     jump: str | None = JUMP_HOST,
 ) -> str:
+    """Run one command over ssh and return its stdout.
+
+    ``timeout`` bounds the connection; ``run_timeout`` bounds the whole call and
+    defaults to ``timeout + 30``. They are separate because a long-running remote
+    command (``makepeds`` takes minutes) still has to fail fast on an unreachable
+    host -- a single value would make a dead host hang for the command's budget.
+    """
+    run_timeout = timeout + 30 if run_timeout is None else run_timeout
     argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}"]
     if jump and host != jump:
         argv += ["-J", jump]
@@ -246,16 +268,21 @@ def _ssh(
             argv,
             input=stdin,
             capture_output=True,
-            timeout=timeout + 30,
+            timeout=run_timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise BridgeUnavailable(f"ssh to {host} timed out after {timeout + 30}s") from exc
+        raise BridgeUnavailable(f"ssh to {host} timed out after {run_timeout}s") from exc
     except FileNotFoundError as exc:  # pragma: no cover - ssh always present at LCLS
         raise BridgeUnavailable("ssh not found on PATH") from exc
 
     if proc.returncode != 0:
         err = proc.stderr.decode("utf-8", "replace").strip()
-        raise BridgeUnavailable(f"ssh to {host} failed (rc={proc.returncode}): {err}")
+        raise BridgeUnavailable(
+            f"ssh to {host} failed (rc={proc.returncode}): {err}",
+            returncode=proc.returncode,
+            stdout=proc.stdout.decode("utf-8", "replace"),
+            stderr=err,
+        )
     return proc.stdout.decode("utf-8", "replace")
 
 

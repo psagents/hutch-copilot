@@ -27,7 +27,7 @@ owns one tool.
 | `bin/hutch-state path\|get\|set\|unset\|audit\|dump` | the experiment state file — the ONLY way to read or write it |
 | `bin/hutch-daq ping\|install\|exec\|status\|logs` | the DAQ machine: live hutch-python session, process states, log files |
 | `bin/hutch-resolve` (see below) | discovering machine truth from its authoritative source |
-| `bin/hutch-lute watch\|status\|peds` | finding the LUTE job, its state and output paths, pedestal deployment |
+| `bin/hutch-lute` (see below) | LUTE: submission, monitoring, pedestals, config rendering, workspace setup |
 | `bin/hutch-log init\|append` | the beamtime log |
 
 They run from a bare checkout with no install step. `pip install -e .` is optional and only
@@ -61,6 +61,20 @@ subcommand fails when `psdev` is unreachable, an `epics` one when `{hutch}-contr
 | **files** — raw `/cds` read | `psdev` | `cat` |
 | **local** — this checkout | no network | `skills` |
 
+### `hutch-lute`, by what it touches
+
+| What | Subcommands | During a shift? |
+|---|---|---|
+| **observe** — Slurm | `watch` `status` | yes — this is the demo path |
+| **calibration** — `makepeds` on `psdev` | `peds` | yes, after a DARK run |
+| **report** — read-only checks | `readiness` `kerberos` `plan` | yes, safe anywhere |
+| **submit** — Slurm, directly | `sbatch` | only if the eLog ARP did not fire |
+| **configure** — before a shift | `render` `workspace` `dags` `envs` `register` `all` | no |
+
+`envs`, `register` and `all` require `--confirm write`; `envs` deletes and recreates both
+virtual environments. `plan` prints every path, payload and precondition and changes
+nothing — show it to the operator before any configure step.
+
 ---
 
 ## Initialization
@@ -77,11 +91,13 @@ and silently observes every conversation turn after that.
 - After every command completes, silently pass the interaction to coordinate-experiment
   for ambient logging (sample changes, run metadata, beam events, operator remarks).
 
-> **LUTE setup is out of scope for these tools.** Workspace creation, DAG patching and
-> eLog workflow registration are done once, outside this skill, before a shift. The
-> tools observe LUTE (`hutch-lute watch`, `status`); they do not configure it. If no
-> workflow fires after a run, say so and point at the eLog ARP registration rather
-> than trying to fix it.
+> **LUTE setup is done once, before a shift — not during one.** `hutch-lute` can
+> configure LUTE (`render`, `plan`, `workspace`, `dags`, `envs`, `register`, `all`), but
+> mid-shift the tools only *observe* it (`watch`, `status`). If no workflow fires after a
+> run, say so and point at the eLog ARP registration — do not run `register` during a
+> shift to fix it. Start from `hutch-lute readiness`, which reports configuration state
+> and installs nothing, and from `plan`, which prints every path and precondition and
+> touches nothing.
 
 ---
 
@@ -197,6 +213,16 @@ The lists below document what the classifier does; they are **not** the mechanis
 believe the classifier is wrong, fix `daq.py` and add a test — do not route around it.
 Unrecognised code is classified as `write`, never as read-only.
 
+**Multi-line scripts go on stdin:** `hutch-daq --hutch H exec - < script.py`. There is no
+`run` subcommand shipping a file to the DAQ machine — `-` reads the whole script and
+classifies it as **one unit**, so a write buried in an otherwise read-only script still
+gates the entire thing.
+
+`hutch-lute peds` is gated by the same classifier, on the `makepeds` command text. It is a
+separate subcommand rather than an `exec` because it runs a shell command on `psdev`, not
+Python in the session; `takepeds()`, which does run in the session, is just
+`hutch-daq exec 'takepeds()'`.
+
 ### Read-Only (execute without confirmation)
 
 - Position queries: `.position`, `.get()`, `.read()`, `.inserted`, `.removed`
@@ -246,6 +272,10 @@ being installed.
 | live hutch-python session; safety classification; DAQ process states and logs | `hutch-daq` |
 | device inventory, PV names, beampath, DAQ, detectors, presets, `/cds` files, live PVs | `hutch-resolve` |
 | finding the LUTE job, its state, elapsed time and output paths | `hutch-lute watch\|status` |
+| submitting a LUTE task directly, with a mandatory `--time` | `hutch-lute sbatch` |
+| rendering a LUTE config, with the unknown-phil-key check | `hutch-lute render` |
+| LUTE workspace, DAGs, venvs, eLog registration | `hutch-lute plan\|workspace\|dags\|envs\|register\|all` |
+| is LUTE configured for this experiment? does it need a ticket? | `hutch-lute readiness\|kerberos` |
 | the beamtime log | `hutch-log` |
 | DAQ runs (DARK/GEOM/DATA), XTC2 verify, LUTE trigger watch | `take-run/` |
 | beam and hutch readiness | `are-we-ready/` |

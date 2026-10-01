@@ -130,13 +130,15 @@ After every user message + hutch-copilot response, classify the content and act.
 | Machine state trigger (see below) | Bridge query → update `machine_state` → write JSON |
 | Operator explicitly declares alignment success or decides to move on | Append outcome note to log |
 | Explicit operational decision: "we decided to…", "changing to…", "skipping X because…" | Append to log |
-| `analyze-data /setup` Phase 5 completes successfully | Update `lute_config` → write JSON → append to log (see below) |
+| `hutch-lute register` or `all` completes successfully | Update `lute_config` → write JSON → append to log (see below) |
 | New PV or detector parameter added to LUTE YAML that is not in the hutch reference | Backfill hutch reference (see below) |
 | Purely conversational, factual question, or status read | No action |
 
 ### LUTE config tracking
 
-When `install_lute.py` completes successfully, update `lute_config` in state:
+When `hutch-lute register` or `hutch-lute all` reports a workflow registered, update
+`lute_config` in state. This happens **before a shift**, not during one — see the LUTE note
+in `../SKILL.md`. Mid-shift you only observe it.
 ```json
 "lute_config": {
   "yaml_path": "/sdf/data/lcls/ds/{hutch}/{experiment}/results/lute_output/{hutch}_lute.yaml",
@@ -154,17 +156,21 @@ context summary so the operator knows analysis workflows are already registered.
 
 ### Hutch reference knowledge backfill
 
-When a user adds PVs or detector parameters to the LUTE YAML that are **not already
-present** in the hutch reference (`ask-lute/references/hutches/{hutch}.md`):
+`@ask-lute` keeps a per-hutch reference of known PVs and detector parameters. When a user
+adds ones it does not have, offer to append them — `ask-lute` is an **optional advisor**, so
+this is the one write outside this repo and it is never silent.
 
 1. **Detect:** user edits the YAML directly, or explicitly states new PVs/aliases
    (e.g. "I added the Von Hamos PVs", "we also save `MFX:SPEC:…` shot-to-shot").
-2. **Check** the hutch reference file for the PV or parameter — read the file first.
-3. **If missing:** append the new entry to the appropriate section of the hutch
-   reference. Use the same table format already present. Add a note:
-   `# added from {experiment} {YYYY-MM-DD}`.
-4. **Log** silently: `- **{HH:MM}** Hutch reference updated: added {N} PV(s) to {hutch}.md`
-5. **Never remove** existing entries from the hutch reference — only append.
+2. **Check it is installed** — `hutch-resolve skills ask-lute`. Not installed, or no
+   `references/hutches/{hutch}.md` under the root it reports: say so and stop. Do not create
+   the file, and do not guess the path from a remembered layout.
+3. **Read** that file and look for the PV or parameter.
+4. **If missing:** show the operator the lines you would append, in the table format already
+   present, with `# added from {experiment} {YYYY-MM-DD}`. Append only after they agree —
+   it is another skill's file, and this is the only place you write to one.
+5. **Log** it: `- **{HH:MM}** Hutch reference updated: added {N} PV(s) to {hutch}.md`
+6. **Never remove** existing entries — only append.
 
 ### What counts as experiment-relevant
 
@@ -200,7 +206,7 @@ Refresh machine state **only** after these triggers, and at most two bridge call
 | `/are-we-ready` runs | that skill writes `machine_state.*` itself — do not duplicate it |
 
 Config files on `/cds` are read the same way — `hutch-resolve conf --hutch H` for the
-hutch-python `conf.yml`, `hutch-resolve cat --path /cds/...` for anything else. `/cds` is not
+hutch-python `conf.yml`, `hutch-resolve cat /cds/...` for anything else. `/cds` is not
 mounted on S3DF; the tool bridges it.
 
 Do not invent PV names and do not read them from a documentation table — resolve them:
@@ -352,7 +358,7 @@ For each exchange, apply the ambient observation classification rules:
 |---|---|
 | Sample / energy / delivery / transmission set or changed | Condition change entry |
 | Run completed (any source — bridge, manual, inferred) | Run entry with number, tag, duration, XTC2 status |
-| LUTE configured (`install_lute.py` completed) | LUTE config entry + update `lute_config` in state |
+| LUTE configured (`hutch-lute register` / `all` completed) | LUTE config entry + update `lute_config` in state |
 | AWR check with beam fault | Beam fault entry |
 | Operational decision stated | Decision entry |
 | Bridge connectivity issues, SSH failures | Infrastructure note |

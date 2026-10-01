@@ -16,7 +16,7 @@ such fact comes from a tool call that either answers or fails loudly.
 | `hutch-state` | `path get set unset audit dump` | the experiment state file |
 | `hutch-daq` | `ping install exec status logs` | the DAQ machine |
 | `hutch-resolve` | 13, grouped by source (below) | machine truth |
-| `hutch-lute` | `watch status peds` | Slurm jobs and pedestals |
+| `hutch-lute` | 13, grouped by what it touches (below) | LUTE: jobs, pedestals, config, workspace |
 | `hutch-log` | `init append` | the beamtime log |
 
 `hutch-resolve` reads from four sources, and which one a subcommand uses determines what
@@ -30,10 +30,26 @@ can go wrong with it:
 | control — DAQ configuration | `psdev` | `daq` `conf` |
 | local — this checkout | no network | `skills` |
 
-They run from a bare checkout with no install step. The package is stdlib-only and
-Python 3.9-compatible, because psconda ships 3.9 and the bridge listener runs inside
-a live hutch-python session. `pip install -e .` is a convenience for CI, never a
+`hutch-lute` groups by what it touches, and by whether it is safe to run mid-shift:
+
+| what | subcommands | during a shift? |
+|---|---|---|
+| observe — Slurm | `watch` `status` | yes |
+| calibration — `makepeds` on `psdev` | `peds` | yes, after a DARK run |
+| report — read-only | `readiness` `kerberos` `plan` | yes |
+| submit — Slurm, directly | `sbatch` | only if the eLog ARP did not fire |
+| configure — before a shift | `render` `workspace` `dags` `envs` `register` `all` | no |
+
+They run from a bare checkout with no install step. The package is stdlib-only at module
+scope and Python 3.9-compatible, because psconda ships 3.9 and the bridge listener runs
+inside a live hutch-python session. `pip install -e .` is a convenience for CI, never a
 requirement — a tool that needs setting up is a tool that is broken at 03:00.
+
+Four third-party packages are used, all imported *inside* the function that needs them:
+jinja2 and PyYAML by `hutch-lute render`, requests and krtc by `hutch-lute register`. That
+is why `hutch-lute watch` keeps working on a machine without them, and why
+`test_package_api.py` checks module-scope imports separately from deferred ones — moving an
+import inside a function must not become a way to add a dependency quietly.
 
 Every command prints JSON on stdout, a structured error on stderr, and exits with a
 code a caller can branch on:

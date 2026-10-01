@@ -96,6 +96,48 @@ def test_a_remote_exception_does_not_exit_zero(monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# `exec -` reads stdin -- the multi-line path, in place of a `run` subcommand
+# --------------------------------------------------------------------------
+def test_exec_dash_reads_the_script_from_stdin(monkeypatch, capsys):
+    """This is why `run` is not needed: a whole script arrives on stdin.
+
+    Undocumented and untested until now, which is how a `hutch-daq run` taking a
+    file path kept looking necessary.
+    """
+    import io
+    import json
+
+    sent = {}
+
+    def fake_ssh(host, remote_cmd, *, stdin=None, **kw):
+        sent.update(json.loads(stdin.decode()))
+        return '{"status": "ok", "output": "3"}'
+
+    monkeypatch.setattr(daq, "_ssh", fake_ssh)
+    monkeypatch.setattr("sys.stdin", io.StringIO("a = 1\nb = 2\nprint(a + b)\n"))
+    assert daq.main(["--hutch", "mfx", "exec", "-"]) == _cli.OK
+    assert sent["code"] == "a = 1\nb = 2\nprint(a + b)\n"
+
+
+def test_a_script_on_stdin_is_classified_as_one_unit(monkeypatch, capsys):
+    """Every line is classified together, so a write buried in the middle of an
+    otherwise read-only script still gates the whole thing."""
+    import io
+
+    monkeypatch.setattr(daq, "_ssh", _refuse_ssh)
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO("print(daq.state)\nmfx_stopper_1.remove()\nprint('done')\n"),
+    )
+    assert daq.main(["--hutch", "mfx", "exec", "-"]) == _cli.REFUSED
+    assert "beam-critical" in capsys.readouterr().out
+
+
+def _refuse_ssh(*a, **kw):
+    raise AssertionError("ssh was attempted; nothing should have been transmitted")
+
+
+# --------------------------------------------------------------------------
 # The surface itself
 # --------------------------------------------------------------------------
 def test_run_and_classify_are_gone():

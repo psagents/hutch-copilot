@@ -18,26 +18,47 @@ def test_missing_xtc2_blocks_deployment(tmp_path, monkeypatch):
 
 
 def test_present_xtc2_gets_past_the_guard(tmp_path, monkeypatch):
-    """With data on disk the guard passes, so the failure has to come from ssh."""
+    """With data on disk the guard passes and the command reaches the transport."""
     monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
     d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)
     (d / "e1-r0043-s000.xtc2").write_bytes(b"x")
     calls = []
 
-    def fake_run(argv, **kw):
-        calls.append(argv)
-        class R:
-            returncode = 0
-            stdout = b"deployed"
-            stderr = b""
-        return R()
+    def fake_ssh(host, cmd, **kw):
+        calls.append((host, cmd))
+        return "deployed"
 
-    monkeypatch.setattr(lute.subprocess, "run", fake_run)
+    monkeypatch.setattr(lute, "ssh", fake_ssh)
     rec = lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm="write")
     assert rec["ok"] is True
     assert rec["xtc2_files"] == 1
-    assert "makepeds -e e1 -r 43" in " ".join(calls[0])
+    assert calls[0][0] == "psdev"
+    assert "makepeds -e e1 -r 43" in calls[0][1]
+
+
+def test_a_failed_step_is_reported_not_raised(tmp_path, monkeypatch):
+    """A non-zero remote command becomes ok=False with its output, not a traceback.
+
+    daq._ssh raises on non-zero rather than returning a returncode, so this is
+    the case that would regress into an unhandled BridgeUnavailable.
+    """
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    d = paths.xtc2_dir("mfx", "e1")
+    d.mkdir(parents=True)
+    (d / "e1-r0043-s000.xtc2").write_bytes(b"x")
+
+    def fake_ssh(host, cmd, **kw):
+        raise lute.BridgeUnavailable("boom", returncode=7, stdout="partial", stderr="no such run")
+
+    monkeypatch.setattr(lute, "ssh", fake_ssh)
+    rec = lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx",
+                                detector="jungfrau", confirm="write")
+    assert rec["ok"] is False
+    assert rec["steps"][0]["returncode"] == 7
+    assert rec["steps"][0]["stderr"] == "no such run"
+    # makepeds failing on a known family must name the fallback route
+    assert "--fallback" in rec["known_issue"]
 
 
 # --------------------------------------------------------------------------
@@ -66,9 +87,53 @@ def test_every_fallback_family_has_a_process_and_a_deploy_step():
 # --------------------------------------------------------------------------
 # Deployment is a write
 # --------------------------------------------------------------------------
-def test_refuses_without_a_write_confirmation():
-    with pytest.raises(lute.LuteError, match="re-run with --confirm write"):
+def test_refuses_without_a_write_confirmation(monkeypatch):
+    """The gate is daq.require_confirmation, and it fires before any transport."""
+    def no_ssh(*a, **kw):
+        raise AssertionError("a refused command reached the network")
+
+    monkeypatch.setattr(lute, "ssh", no_ssh)
+    with pytest.raises(lute.SafetyRefusal, match="makepeds"):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm=None)
+
+
+def test_the_refusal_does_not_depend_on_what_is_on_disk(tmp_path, monkeypatch):
+    """Gate first, XTC2 guard second.
+
+    Deciding "this is a write" must not be contingent on the data having landed:
+    with the order reversed, an unconfirmed command on an experiment whose XTC2
+    is absent reports the wrong reason and, worse, an unconfirmed command on one
+    whose data HAS landed is the only case the gate is exercised on.
+    """
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    paths.xtc2_dir("mfx", "e1").mkdir(parents=True)     # no files: guard would trip
+    with pytest.raises(lute.SafetyRefusal):
+        lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm=None)
+
+
+def test_the_cli_maps_a_refusal_to_rc_5(monkeypatch, capsys):
+    """rc 5, not a traceback: require_confirmation raises PermissionError, which
+    the LuteError/OSError handler does not catch."""
+    def no_ssh(*a, **kw):
+        raise AssertionError("a refused command reached the network")
+
+    monkeypatch.setattr(lute, "ssh", no_ssh)
+    rc = lute.main(["peds", "--hutch", "mfx", "--experiment", "e1", "--run", "43"])
+    assert rc == 5
+    assert "SafetyRefusal" in capsys.readouterr().err
+
+
+def test_fallback_commands_are_also_gated(tmp_path, monkeypatch):
+    """The per-detector tools match no read-only pattern, so they err upward."""
+    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+
+    def no_ssh(*a, **kw):
+        raise AssertionError("a refused command reached the network")
+
+    monkeypatch.setattr(lute, "ssh", no_ssh)
+    with pytest.raises(lute.SafetyRefusal):
+        lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx",
+                              detector="jungfrau", fallback=True, confirm=None)
 
 
 

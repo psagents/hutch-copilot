@@ -14,7 +14,7 @@ M2  MFX live demo                                   █████████�
 | M | What | Window | Exit criterion |
 |---|---|---|---|
 | **M0** | Unblock access: Kerberos, psdev, both hutch groups, a live experiment, shift request | Sep 9 → **Sep 30** | `ssh psdev` works **and** shift dates exist. Slips here move everything |
-| **M1** | Desk work: tool consolidation, SKILL.md updates, no beamline needed | Sep 15 → Oct 6 | **DONE Sep 23.** 5 tools, 311 tests green, no `hutch-bridge`/`hutch-config`/`hutch-install` reference left in skill files |
+| **M1** | Desk work: tool consolidation, SKILL.md updates, no beamline needed | Sep 15 → Oct 6 | **DONE Sep 23**, amended Sep 25. 5 tools, 301 tests green, no `hutch-bridge`/`hutch-config`/`hutch-install` reference left in skill files |
 | **M2** | MFX live demo: are-we-ready + full collect→analyze→assess loop | October | Agent says "done" (or "one more run") based on real metrics from a real run |
 
 ---
@@ -131,8 +131,12 @@ All items are requests to other people. Nothing downstream can be scheduled unti
 
 All testable from S3DF with no beamline. Ordered by dependency.
 
-**Outcome:** 7 binaries → 5. 311 unit tests green (was 294). Three bugs fixed that the plan
-did not know about:
+**Outcome:** 7 binaries → 5. **301 unit tests green** — the "311" recorded here on Sep 23 was
+never verified against a run; the suite was 199 when the config/install trim landed, and is
+301 now that those subcommands and their tests are back. Do not write a count into this file
+without running `pytest` first.
+
+Three bugs fixed that the plan did not know about:
 
 - **B2** — `paths.xtc2_dir()` pointed at a directory no experiment has. Detail under M0.
 - **B3** — `take-run/SKILL.md` documented a `hutch-daq` invocation argparse rejected
@@ -185,16 +189,26 @@ binaries become thin shims or are deprecated. No logic changes — only the CLI 
 > **RESOLVED (TBD-2):** `hutch-config` is now **`hutch-lute render`** -- not `config`, because
 > `hutch-lute sbatch --config <path>` already means "the config file to submit", which is a
 > different thing from producing one. The six `hutch-install` subcommands map 1:1. Both old
-> binaries are deleted, not shimmed. `config` and `install` are imported lazily inside their
-> dispatch branches so `hutch-lute sbatch` stays stdlib-only -- `config` is the only module
-> needing jinja2/PyYAML, and test_package_api.py pins that jinja2 and yaml stay out of
-> `sys.modules` even after `build_parser()`.
+> binaries are deleted, not shimmed.
+>
+> **Amended Sep 25:** they are absorbed as *code inside `lute.py`*, not as `config.py` and
+> `install.py` modules. One module per binary is the rule, and `test_package_api.py`
+> enforces it. The cost is a 1400-line `lute.py`, the largest module in the package by a
+> factor of two; if that becomes unreadable, the lever is to split `render` back out, since
+> it is the part carrying the dependencies.
+>
+> jinja2/PyYAML (for `render`) and requests/krtc (for `register`) are imported inside the
+> functions that use them, so `hutch-lute watch` still runs on a machine without them.
+> `test_package_api.py` checks module-scope imports separately from deferred ones -- moving
+> an import inside a function must not become a way to add a dependency quietly -- and pins
+> that `build_parser()` leaves jinja2 and yaml out of `sys.modules`.
 
 | # | Run | Expect |
 |---|---|---|
 | 1.b.1 | `grep -rn "bin/hutch-config\|bin/hutch-install" SKILL.md are-we-ready/ take-run/ analyze-data/ coordinate-experiment/` | no output |
-| 1.b.2 | `bin/hutch-lute --help` | shows config and install subcommand groups |
-| 1.b.3 | `$PY -m pytest tests/unit -q` | green |
+| 1.b.2 | `bin/hutch-lute --help` | 13 subcommands: the 5 LUTE/Slurm ones plus `render` and the 6 install ones |
+| 1.b.3 | `ls hutch_tools/*.py` | 7 files — no `config.py`, no `install.py`, no `traps.py` |
+| 1.b.4 | `$PY -m pytest tests/unit -q` | green |
 
 ### M1.c — Redocument `hutch-resolve` by authoritative source *(½ day)*
 
@@ -288,7 +302,8 @@ and real LUTE output.
 | 2.G | `/handoff` at end of shift | Appends a summary to the log via `hutch-log append`; state written with provenance |
 
 **Exit:** all three acts run by a human at a real beamline at least once. Every failure
-logged as a trap in `traps.py` with its evidence.
+logged as a regression test with its evidence — `traps.py` was cut on Sep 25, so a trap
+now lives as a test that fails if the incident recurs, not as a registry entry.
 
 ---
 
@@ -297,13 +312,20 @@ logged as a trap in `traps.py` with its evidence.
 ```bash
 # M1 -- desk, no beamline. Bare `python` has no pytest; see tests/README.md.
 PY=/sdf/group/lcls/ds/ana/sw/conda2/inst/envs/ps_20260504/bin/python
-$PY -m pytest tests/unit -q                                           # 311 passed
+$PY -m pytest tests/unit -q                                           # 301 passed
 grep -rn "hutch-bridge" bin/ hutch_tools/ */SKILL.md SKILL.md        # → nothing
 grep -rn "hutch-config\|hutch-install" */SKILL.md SKILL.md           # → nothing
+grep -rn "traps" hutch_tools/ bin/                                   # → nothing
+ls hutch_tools/*.py              # 7: __init__ common daq log lute resolve state
 ls bin/                          # 5: daq, log, lute, resolve, state
 bin/hutch-daq  --help            # ping install exec status logs
 bin/hutch-log  --help            # init append
-bin/hutch-lute --help            # + render plan workspace dags envs register all
+bin/hutch-lute --help            # sbatch status watch peds readiness kerberos render
+                                 # plan workspace dags envs register all   (13)
+
+# jinja2/PyYAML are render-only, so building the parser must not import them
+$PY -c "import hutch_tools.lute as l; l.build_parser(); import sys; \
+        assert 'jinja2' not in sys.modules and 'yaml' not in sys.modules"
 
 # the gate, in both flag positions -- all four MUST be rc=5
 bin/hutch-daq --hutch mfx exec 'mfx_stopper_1.remove()' --confirm write
@@ -361,6 +383,7 @@ listener process on that machine; `status` and `logs` use the same SSH path.
 | `ping` | Check whether the hutch-python bridge listener is alive. Returns `{ok, mode, host}`. Read-only, never needs confirmation. |
 | `install` | Copy the bridge listener script to `/tmp` on the DAQ machine. Prints the operator instruction (`exec(open('/tmp/oc_bridge.py').read())`). |
 | `exec '<code>'` | Execute a Python snippet in the live hutch-python session. **Without `--confirm`**: classifies the snippet; if confirmation is required, returns the classification JSON and exits non-zero — nothing is transmitted. **With `--confirm <class>`**: transmits after verifying the declared class is not weaker than the actual class. Beam-critical understated as write is a refusal (rc=5), not a downgrade. |
+| `exec -` | Same, reading the code from stdin: `exec - < script.py`. This is why `run` was dropped rather than replaced — a whole script arrives without shipping a file to the DAQ machine, and is classified as **one unit**, so a write buried in an otherwise read-only script gates the entire thing. |
 | `status` | Run `daqmgr status <hutch>.py` on the DAQ machine via SSH. Returns process-name → state mapping (RUNNING / NOCONNECT / etc.). |
 | `logs` | List and tail per-process log files from `/cds/home/opr/<hutch>opr/<YYYY>/<MM>/`. Works even after a crash (equivalent to "View Logfile" in the daqstat GUI). |
 
@@ -374,20 +397,49 @@ listener process on that machine; `status` and `logs` use the same SSH path.
 ## hutch-lute
 
 *Everything LUTE: job submission, monitoring, pedestals, readiness, configuration, and
-workspace setup. Absorbs `hutch-config` and `hutch-install`.*
+workspace setup. Absorbs `hutch-config` and `hutch-install` — as code inside `lute.py`, not
+as separate modules.*
 
 The tool returns raw data — log paths, job states, parsed config reports. It does not
 interpret results or say whether an analysis succeeded scientifically.
+
+> **Audited against LUTE v0.3.0/dev (`/sdf/group/lcls/ds/tools/lute`) on Sep 25.** Several
+> things this tool was built to work around are fixed upstream. What is left:
+>
+> | Ours | Upstream equivalent | Verdict |
+> |---|---|---|
+> | `sbatch` | `launch_scripts/submit_slurm.py` | **keep, narrowly.** It still sets no `#SBATCH --time` — only `--output`/`--error`, everything else passed through. `task_timeout` is application-level, not a wall clock. Also still no `prte_tmpdir_base`: LUTE sets `PRTE_MCA_*` + a hostfile, which fixes resource *discovery*, not two jobs colliding in the shared session dir. |
+> | *(exit-status grep)* | `executor.py` exits −1 on FAILED/TIMEDOUT/CANCELLED/UNRESPONSIVE | **CUT Sep 25.** The generated script greps the log for "Task failed with return code" to recover a status LUTE now propagates. Removed; `exit $RC` is enough. This was trap 5 of five, so the module docstring is down to three. |
+> | `status` `watch` | `launch_slurm_v1.py:141-176` (sacct/scontrol), plus a push-based status `HTTPServer` | overlap, but ours adds `hit_wall_clock` and a poll count so "no job found" ≠ "did not look". Cheap to keep. |
+> | `render` | `tasks/task.py:435-469` renders **phil** templates | complementary — LUTE does not render the config YAML. The unknown-phil-key check is a **real** gap: `extra="allow"` at four sites, non-strict Jinja `Undefined`, no `find_undeclared_variables` anywhere. Unfixed upstream. |
+> | `plan` `workspace` `dags` `envs` `register` `all` | `utilities/setup/setup_lute.py` (642 lines, same author) | **keep — see below.** |
+> | `peds` `readiness` `kerberos` | none | no upstream equivalent. `makepeds`/`takepeds` appear nowhere in the LUTE tree. |
+>
+> **Why the install six survive the overlap.** `setup_lute` can only register a DAG it
+> already has: it resolves `<name>.dag` against `{lute_output}` then `workflows/common/`
+> — a catalogue of five (`bayfai sfx smd test xpp_compression`) — and on a miss logs
+> *"Workflow definition not found … Skipping workflow"* and continues. Its trigger is
+> hardcoded by substring: `START_OF_RUN` if `"smd"` is in the name, else `MANUAL`. The
+> demo needs a DAG `analyze-data` composes for the experiment at hand, registered with
+> `END_OF_RUN` — neither of which `setup_lute` can express. `parse_trigger` accepts all
+> four, including `RUN_PARAM_IS_VALUE:<name>:<value>`.
+>
+> **Where ours is behind, and should not be pretended otherwise.** Upstream
+> `update_dag_params` also applies per-task `nodes`/`ntasks_per_node` from a
+> `DEFAULT_CONFIG` table (`SmallDataProducer`, `BayFAIOptimizer`, …); `patch_slurm_params`
+> does not. Upstream never deletes a venv (`"already exists … Reusing"`), so the
+> preconditions-before-destruction ordering `plan()` exists to guarantee is moot there —
+> `envs` here still `rmtree`s, which is why it alone needs `--confirm write`. Both bugs the
+> port claimed credit for fixing are fixed upstream too.
 
 | Subcommand | What it does |
 |---|---|
 | `sbatch` | Submit a LUTE task to Slurm directly. Requires a `--time` wall-clock limit — refuses to emit a script without one. |
 | *(`submit` is not a subcommand)* | Submission is `sbatch --submit`. The docstring advertised a bare `submit` that the parser never had; removed. |
-| `status <job_id>` | Return job state, elapsed time, and **output file paths**. `COMPLETED` ≠ scientific success — checks the Task-level exit status separately. |
+| `status <job_id>` | Return job state, elapsed time, and **output file paths** — `stdout`/`stderr` from sacct, which is how `analyze-data` finds the merge log without a parser. `COMPLETED` ≠ scientific success — checks the Task-level exit status separately. |
 | `watch` | Poll Slurm for jobs matching a user/workflow since a given timestamp. Reports poll count so "no job found" cannot be confused with "did not look". |
-| `peds` | Run `makepeds` for a DARK run. Refuses if XTC2 has not landed. Names the per-detector fallback (Jungfrau at MFX) when `makepeds` fails. |
+| `peds` | Run `makepeds` for a DARK run, on `psdev`. Gated by the same classifier `hutch-daq exec` uses, on the command text — `--confirm write` or rc 5, decided before the XTC2 check so a refusal does not depend on disk state. Refuses if XTC2 has not landed. Names the per-detector fallback (Jungfrau at MFX) when `makepeds` fails. A subcommand rather than an `exec` because it is a shell command on `psdev`, not Python in the session; `takepeds()` *is* `hutch-daq exec 'takepeds()'`. |
 | `readiness` | Read-only: report configured workflows, unregistered items, and Kerberos requirement. Never installs as a side effect. |
-| `traps` | Scan a LUTE config YAML for known configuration traps (parallel_a2a, modify in merge step, missing merge suffixes, phil key silently dropped, etc.). |
 | `kerberos` | Report whether a Kerberos ticket is needed for a given config. Only eLog-touching operations need one; a pipeline with explicit input paths does not. |
 | *(absorbed from `hutch-config`)* | |
 | `render` | Render a LUTE config YAML from a Jinja2 template + context JSON + `--set` overrides. Validates overrides against the template whitelist — unknown phil keys are errors, not silent drops. | 
@@ -400,6 +452,18 @@ interpret results or say whether an analysis succeeded scientifically.
 | `all` | Run workspace → dags → envs → register in order. Re-checks preconditions before each step. |
 
 > **RESOLVED (TBD-2):** `hutch-lute render`, and the six install subcommands 1:1. See M1.b.
+>
+> **CUT — the `traps` subcommand and `traps.py` (Sep 25).** The incident register was a
+> decorator, a module-level registry and 14 scoped checks. Of its four call sites, three
+> were not load-bearing: the `sbatch` checks re-verified the template `build_sbatch` itself
+> generates (the fixes are *in* that template), and the `peds` check is inlined in
+> `deploy_pedestals` with better coverage than the registry entry it replaced. Only the
+> `phil-overrides` check was real, and it survives as two plain functions in `lute.py` --
+> `template_whitelist` plus an unknown-key comparison -- so `render` still errors on a phil
+> key the template would silently drop. **Deliberately lost:** the eight CCTBX `lute-yaml`
+> checks (parallel_a2a, modify-in-merge, merge suffixes, merge version, d_min mismatch,
+> phil race, run_type case, composite ordered endrun). Nothing in the repo records those
+> incidents now.
 
 ---
 
@@ -441,6 +505,18 @@ documented here grouped by the source they read, to make the required connectivi
 | `daq --hutch H` | DAQ state, config alias, experiment name, recording flag, current run number. |
 | `conf --hutch H` | Parsed `conf.yml` for the hutch. Cross-check the DAQ host here against the `daq` result. |
 
+### files — raw `/cds` read (reads via `psdev`)
+
+| Subcommand | What it does |
+|---|---|
+| `cat <path>` | Read any `/cds` file. The escape hatch for what `conf`/`preset`/`device` do not cover — `/cds` is not mounted on S3DF. Path is positional, not `--path`. |
+
+### local — this checkout (no network)
+
+| Subcommand | What it does |
+|---|---|
+| `skills [<name>]` | Which skills are installed and where, across every known root. Replaces the hand-written advisor tables that went stale; `analyze-data` and `coordinate-experiment` check an advisor exists before recommending it. |
+
 ---
 
 ## hutch-state
@@ -479,6 +555,6 @@ Three rules enforced by the tool and never worked around:
 | # | Item | Blocked on |
 |---|---|---|
 | **TBD-1** | `hutch-daq logs` filter interface: process names, date range, retention period | M0.6 — needs a live MFX experiment |
-| ~~TBD-2~~ | ~~`hutch-lute` subcommand naming~~ | **Resolved:** `render`, install 1:1, old binaries deleted |
+| ~~TBD-2~~ | ~~`hutch-lute` subcommand naming~~ | **Resolved:** `render`, install 1:1, old binaries deleted, `traps` cut |
 | **TBD-3** | Publication-quality metric thresholds for `analyze-data` convergence verdict (CC½, completeness floor, multiplicity floor, Rsplit ceiling) | Input from a crystallographer |
 | **TBD-4** | CCTBX merge log fields: whether completeness and multiplicity are in the same log section as CC½/Rsplit, or need a different file | Test against a real merge output |
