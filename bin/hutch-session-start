@@ -18,7 +18,7 @@ esac
 
 repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)" || exit 0
 
-cat <<EOF
+context="$(cat <<EOF
 HUTCH CONTEXT: $host (hutch=$hutch)
 
 The hutch-copilot skill and its tools are installed at:
@@ -26,12 +26,19 @@ The hutch-copilot skill and its tools are installed at:
 Put the tools on PATH with: source $repo/bin/hutch-env
 Use the hutch-copilot skill for any experiment operation at this hutch.
 EOF
+)"
 
 case "$host" in
     *-control)
-        echo "NOTE: $host has no Slurm controller, so DAQ state is not visible here." \
-             "The tools are designed for ${hutch}-daq."
+        context="$context
+NOTE: $host has no Slurm controller, so DAQ state is not visible here. The tools are designed for ${hutch}-daq."
         ;;
 esac
+
+# systemMessage is the only channel the operator actually sees; additionalContext
+# is for the model. jq builds the JSON so hostnames and paths cannot break it.
+jq -n --arg ctx "$context" --arg msg "hutch-copilot is ready to help you at ${hutch^^} ($host)." \
+    '{systemMessage: $msg, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' \
+    || printf '%s\n' "$context"
 
 exit 0

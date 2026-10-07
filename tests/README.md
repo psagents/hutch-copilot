@@ -18,7 +18,8 @@ install step and there is no `conftest.py`. `pip install -e .` stays optional, b
 - **The suite is in-process.** No test shells out to `bin/hutch-*`. CLI *shape* is checked by
   introspecting `build_parser()` (`test_doc_commands.py`), behaviour by calling module functions
   directly. That is why every module keeps `build_parser()` separate from `main()`.
-- **Filesystem fixtures go through `monkeypatch.setattr(paths, "DS_ROOT", tmp_path)`**, and
+- **Filesystem fixtures go through `monkeypatch.setattr(paths, "DS_ROOT", tmp_path)`** —
+  `paths` is the tests' alias for `hutch_tools.common`, which owns the path helpers — and
   paths under it are built with the `paths.*` helpers rather than written as literals. A literal
   is how the `xtc2/` vs `xtc/` bug survived: the test asserted the same wrong directory the code
   produced, so both agreed and neither matched the filesystem.

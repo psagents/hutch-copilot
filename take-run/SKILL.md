@@ -12,23 +12,20 @@ description: >
 
 # /take-run — Start a DAQ Run
 
-All mechanism is in `hutch-tools` (see the Tool Layer section of `../SKILL.md`). This file
-owns the gate, the confirmation, and the triage.
+This file owns the gate, the confirmation, and the verdict on what came back.
 
 ---
 
-## 1. Context
+## 1. Context and the gate
 
 ```bash
 bin/hutch-state audit --hutch "$H" --experiment "$E"    # everything known, with age
-bin/hutch-resolve daq --hutch "$H"                      # state, config_alias, experiment, recording, run
+bin/hutch-resolve check-daq --hutch "$H"
 ```
 
-`MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report the
-age. A detector name recorded last shift will tell you it is old rather than looking current.
-
-Fields consumed: `sample_name`, `concentration`, `sample_delivery`, `photon_energy_eV`,
-`rep_rate_Hz`, `transmission`, `lute_config`, `machine_state.detector_name`.
+`MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
+the age. A detector name recorded last shift will tell you it is old rather than looking
+current.
 
 **Hard gate on DAQ state — do not proceed past this:**
 
@@ -46,20 +43,20 @@ may not be configured.
 
 ---
 
-## 2. Resolve run parameters
+## 2. Run parameters
 
-`run_type` first, and it is **uppercase**: LUTE's `!run_type` DAG keys are `DARK`/`GEOM`/`DATA`
-and a lowercase value matches no branch.
+`run_type` first, and it is **uppercase**: LUTE's `!run_type` DAG keys are
+`DARK`/`GEOM`/`DATA` and a lowercase value matches no branch.
 
-| Operator says | `run_type` | Command |
+| Operator says | `run_type` | Session call |
 |---|---|---|
-| dark, pedestal, background, no-beam | `DARK` | `takepeds()` then `makepeds` |
-| geometry, geom, calibration | `GEOM` | `geomrun()` |
+| dark, pedestal, background, no-beam | `DARK` | `takepeds()`, then `hutch-lute peds` |
+| geometry, geom, calibration | `GEOM` | `geomrun()` — presets sample, tag and run_type itself |
 | data, collect, science, sample | `DATA` | `autorun()` |
 
 Duration: `run_length` in seconds, or `n_events / rep_rate_Hz` from state — report the
-estimate and which input you used. For `DARK`, `takepeds()` sets its own duration by
-stepping gain modes (~300 events/step); ask for an event count only to override.
+estimate and which input you used. `takepeds()` is self-timed by its gain-mode scan; do not
+pass it a duration.
 
 If `run_type` is ambiguous, ask with the three options. Never infer it silently.
 
@@ -67,55 +64,26 @@ If `run_type` is ambiguous, ask with the three options. Never infer it silently.
 
 ## 3. Confirm — this is a write
 
-Show what you will run, its safety class, and the parameters. Get the class from the
-classifier rather than asserting it yourself — run the command **without `--confirm`**, and it
-prints the classification and refuses (rc 5) without transmitting anything:
+Run the command **without `--confirm`** first: it prints the classification and refuses
+(rc 5) without transmitting anything. Show the operator the command, the class and its
+reasons, the duration and the sample, and wait for explicit approval. Then re-send with
+the class you were actually granted:
 
 ```bash
-bin/hutch-daq --hutch "$H" exec \
-  "autorun(sample='Lyso', run_length=60, record=True, run_type='DATA')"
-```
-
-There is no separate `classify` subcommand: asking "what is this?" is the same call on the
-same text as sending it, so the answer cannot be about different code than you then run.
-
-```
-Proposed run
-  Type      : DATA   (LUTE routes on run_type)
-  Duration  : {run_length}s  (~{n_events} events at {rep_rate_Hz} Hz)
-  Sample    : {sample_name}, {concentration}, {sample_delivery}
-  Hutch/Exp : {HUTCH} / {experiment}
-  Config    : {config_alias}   Detector: {detector_name}
-  Class     : write ({classifier reasons})
-
-Shall I start the run?
-```
-
-Wait for explicit approval. Then execute with the class you were actually granted:
-
-```bash
-bin/hutch-daq --hutch "$H" --timeout 300 --confirm write exec \
-  "autorun(sample='{sample}', tag='{sample}', run_length={n}, record=True, run_type='DATA', runs=1, picker='open')"
+bin/hutch-daq --hutch "$H" --timeout 300 --confirm write exec "<run command>"
 bin/hutch-daq --hutch "$H" exec 'get_run()'
 ```
 
-`GEOM`: `geomrun(run_length={n}, record=True, runs=1)` — it presets sample, tag and
-`run_type` itself.
-
-**`DARK` is two steps, and the second is a separate write.** `takepeds()` records the data
-through the bridge (self-timed by the gain-mode scan — do not pass a duration). Only **after
-XTC2 is confirmed** does the analysis side run:
+**`DARK` is two writes, and the second is gated.** `takepeds()` records through the
+bridge; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
+operator separately from the run itself:
 
 ```bash
 bin/hutch-lute peds --experiment "$E" --run {run} --hutch "$H" \
     --detector "{detector}" --confirm write
 ```
 
-The tool refuses if no XTC2 has landed, and if `makepeds` fails it names the per-detector
-fallback and how to run it — `makepeds` has documented failures for Jungfrau at MFX. Confirm
-this step with the operator separately from the run itself.
-
-Record the time the run command returned — `watch` needs it in step 4.
+Record the time the run command returned — `watch` needs it next.
 
 ---
 
@@ -127,20 +95,18 @@ bin/hutch-lute watch --user "${H}opr" --since "$RUN_END_ISO" --timeout 90
 bin/hutch-lute status "$JOB_ID"
 ```
 
-`watch` reports how long it waited and how many times it polled, so "no job found" cannot be
-confused with "did not look". You do **not** submit anything here — LUTE triggers from the
-eLog ARP; you only confirm it fired.
+Two judgments, neither of which is in the JSON:
 
-Triage:
+- **You do not submit anything.** LUTE triggers from the eLog ARP; you only confirm it
+  fired. If no job appears, say so and hand it to `/analyze-data`, which owns the
+  workflow registration and can check it. **Do not
+  re-submit** — a duplicate job on the same run is worse than a missing one.
+- **`COMPLETED` is a Slurm verdict, not a scientific one.** A Task can fail inside a job
+  Slurm considers successful.
 
-| Symptom | Response |
-|---|---|
-| `xtc2` reports `present: false` after 30 s | Retry once at 60 s, then warn: the run may not have recorded. Check `daq.state`. |
-| No LUTE job after 90 s | Point at the eLog run table. **Do not re-submit.** |
-| Job `COMPLETED` but no output | `run_task.py` exits 0 even when the Task failed — check the Executor log. `hutch-lute status` also flags `hit_wall_clock`. |
-| `takepeds()` raises | Report it; ask the operator to check detector config and DAQ state. If it fails on an import, it may have sourced an analysis conda env — have them run `epixquad_pedestal_scan --record 1 --hutch {hutch}` from the DAQ terminal. |
-| `makepeds` fails | Expected for Jungfrau at MFX. Re-run `hutch-lute peds --fallback --detector {detector} --confirm write`; the tool reports the reason and the commands. |
-| Bridge offline | Give the operator the commands to run by hand, then infer the run number from `last_run_number + 1` and confirm it against the XTC2 directory. |
+If XTC2 did not land, or a run call raised, investigate with `hutch-daq logs`,
+`hutch-daq config` and `hutch-lute status`, and report what you found. Never report a run
+as recorded on the strength of the command having returned.
 
 ---
 
@@ -156,9 +122,5 @@ bin/hutch-state set --hutch "$H" --experiment "$E" last_run_tag "{run_type}" \
 Note the two `--kind` values: the run number was measured, the run type was asserted by a
 human. A later reader can tell them apart.
 
-Then pass to coordinate-experiment for ambient logging. Minimum log entry:
-
-```markdown
-- **{HH:MM}** Run {run} ({run_type}) — {run_length}s. XTC2: {size} ({n} files).
-  Sample: {sample}. LUTE: job {job_id} — {state}.
-```
+Then tell the operator what landed: run number and type, duration, XTC2 size and file
+count, sample, and the LUTE job with its state.

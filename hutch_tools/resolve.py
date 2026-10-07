@@ -19,10 +19,10 @@ from typing import Any
 
 from .common import UNREACHABLE, USAGE, fail, out, parser, utcnow, xtc2_dir, xtc2_files
 from .daq import (
-    T_DEVICE,
     T_QUERY,
     BridgeError,
     caget,
+    daq_config,
     exec_code,
 )
 from .state import RESOLVED, State
@@ -30,6 +30,7 @@ from .state import RESOLVED, State
 HAPPI_DB = "/cds/group/pcds/pyps/apps/hutch-python/device_config/db.json"
 HUTCH_PYTHON = "/cds/group/pcds/pyps/apps/hutch-python"
 PSCONDA = "/sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh"
+PCDS_PYTHON = "/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/bin/python3.12"
 
 
 class ResolveError(RuntimeError):
@@ -93,24 +94,105 @@ def _happi_rows(db_path: str, beamline: str) -> list[dict]:
     return rows
 
 
-def devices(hutch: str) -> dict:
-    """Full device inventory for a beamline, ordered along the beam (z)."""
+def _lightpath_names(db_path: str, beamline: str) -> set[str]:
+    """Names on this beamline that lightpath tracks, so check_hutch can defer."""
+    try:
+        with open(db_path) as fh:
+            db = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ResolveError(f"cannot read happi db {db_path}: {exc}") from exc
+    want = beamline.strip().upper()
+    return {
+        entry.get("name")
+        for entry in db.values()
+        if (entry.get("beamline") or "").upper() == want and entry.get("lightpath")
+    }
+
+
+#: happi device_class suffixes whose prefix addresses an EPICS motor record, so
+#: `prefix + ".RBV"` is a real PV. Anything else is a composite device.
+_MOTOR_CLASSES = ("IMS", "EpicsMotor", "Newport", "DelayNewport", "BeckhoffAxis", "PCDSMotorBase")
+
+
+def _has_motor_record(row: dict) -> bool:
+    return (row.get("device_class") or "").rsplit(".", 1)[-1] in _MOTOR_CLASSES
+
+
+def _inventory(hutch: str) -> list[dict]:
+    """The hutch's happi rows, or a ResolveError naming the likely mistake."""
     rows = _happi_rows(HAPPI_DB, hutch)
     if not rows:
         raise ResolveError(
             f"happi has no devices with beamline={hutch.upper()!r}. "
             f"Beamline names in db.json are UPPERCASE; check the hutch name."
         )
-    return _record(rows, f"resolved:happi {HAPPI_DB} beamline={hutch.upper()}", count=len(rows))
+    return rows
+
+
+def check_hutch(hutch: str, *, inventory_only: bool = False,
+                timeout: int = T_QUERY) -> dict:
+    """The hutch's own devices and where they are. Beam-path devices defer to check_beam.
+
+    Returns one row per device carrying exactly one of ``value`` (a live
+    readback), ``on_lightpath`` (ask ``check_beam``, which is authoritative for
+    it) or ``needs_session`` (a composite device whose component suffixes live
+    in its class, not its prefix).
+    """
+    rows = _inventory(hutch)
+    source = f"resolved:happi {HAPPI_DB} beamline={hutch.upper()}"
+    if inventory_only:
+        return _record(rows, source, count=len(rows))
+
+    lightpath_names = _lightpath_names(HAPPI_DB, hutch)
+    readable = {r["name"]: r["prefix"] + ".RBV"
+                for r in rows
+                if r["name"] not in lightpath_names and _has_motor_record(r)}
+    # One caget for the whole hutch. Individually, because caget exits non-zero
+    # and prints nothing on stdout when ANY name in the batch is missing -- so a
+    # single absent record would blank every other reading.
+    values: dict[str, str] = {}
+    unreadable: dict[str, str] = {}
+    for name, pvname in readable.items():
+        try:
+            values[name] = caget([pvname], timeout=timeout)[pvname]
+        except BridgeError as exc:
+            unreadable[name] = str(exc)
+
+    out_rows = []
+    for row in rows:
+        entry = dict(row)
+        if row["name"] in lightpath_names:
+            entry["on_lightpath"] = True
+        elif row["name"] in values:
+            entry["value"] = values[row["name"]]
+            entry["read_from"] = readable[row["name"]]
+        elif row["name"] in unreadable:
+            entry["unreadable"] = unreadable[row["name"]]
+        else:
+            # Composite ophyd device: the readable records are components named
+            # by the device class, which happi does not record. Guessing a
+            # suffix here would invent a PV, so stop and say so.
+            entry["needs_session"] = True
+        out_rows.append(entry)
+
+    return _record(
+        out_rows,
+        source + f" + caget on {len(readable)} motor record(s)",
+        count=len(out_rows),
+        on_lightpath=len(lightpath_names & {r["name"] for r in rows}),
+    )
 
 
 def device(hutch: str, name: str, **kw: Any) -> dict:
     """One happi entry by name."""
-    rec = devices(hutch, **kw)
-    match = next((d for d in rec["value"] if d["name"] == name), None)
+    rows = _inventory(hutch)
+    match = next((d for d in rows if d["name"] == name), None)
     if match is None:
         raise ResolveError(f"no happi device named {name!r} on {hutch.upper()}")
-    return _record(match, rec["source"] + f" name={name}")
+    return _record(
+        match,
+        f"resolved:happi {HAPPI_DB} beamline={hutch.upper()} name={name}",
+    )
 
 
 def pv(hutch: str, name: str, suffix: str = "", **kw: Any) -> dict:
@@ -134,61 +216,98 @@ def pv(hutch: str, name: str, suffix: str = "", **kw: Any) -> dict:
 # --------------------------------------------------------------------------
 # lightpath: what is actually blocking the beam
 # --------------------------------------------------------------------------
-_BEAMPATH_SCRIPT = """
-import json
-report = {"path": None, "blocking": [], "devices": [], "method": None}
-try:
-    from lightpath import LightController
-    lc = LightController({hutch!r})
-    try:
-        # Preferred: lightpath computes blocking devices itself.
-        bp = lc.beamlines[{hutch!r}.upper()]
-        report["blocking"] = [d.name for d in bp.blocking_devices]
-        report["method"] = "lightpath.BeamPath.blocking_devices"
-    except Exception as exc:
-        report["method"] = "lightpath.devices + inserted/removed (fallback: %s)" % exc
-    for dev in lc.devices:
-        row = {{"name": getattr(dev, "name", "?"), "state": "UNKNOWN"}}
-        try:
-            if dev.inserted:
-                row["state"] = "IN-BEAM"
-            elif dev.removed:
-                row["state"] = "OUT"
-        except Exception as exc:
-            row["state"] = "ERROR: %s" % exc
-        try:
-            row["transmission"] = float(dev.transmission)
-        except Exception:
-            pass
-        report["devices"].append(row)
-    if not report["blocking"]:
-        report["blocking"] = [d["name"] for d in report["devices"] if d["state"] == "IN-BEAM"]
-except Exception as exc:
-    report["error"] = "lightpath unavailable: %s" % exc
-print(json.dumps(report))
-"""
+#: Runs under PCDS_PYTHON, not the tools' interpreter. %(…)s-formatted rather
+#: than str.format: the body is full of dict literals.
+_CHECK_BEAM_SNIPPET = '''
+import collections, json, time
+import happi
+from lightpath import LightController
+from lightpath.path import find_device_state
+
+lc = LightController(happi.Client(path=%(db)r), endstations=[%(end)r])
+# active_path, not beamlines[end]: the latter is a list of node names, so it has
+# no .blocking_devices and len() on it is meaningless.
+bp = lc.active_path(%(end)r)
 
 
-def beampath(hutch: str, *, timeout: int = T_DEVICE) -> dict:
-    """Live beampath state, including which devices are blocking.
+def histogram():
+    return collections.Counter(find_device_state(d)[0].name for d in bp.path)
 
-    ``lightpath`` computes it. Which path produced the answer is reported in
-    ``method`` rather than taken silently.
+
+# Channel Access connects asynchronously, and lightpath counts Disconnected as
+# blocking -- correctly, it will not call an unreadable device clear. Reading
+# immediately therefore reports every device as blocking, which looks like a
+# facility-wide fault rather than an unfinished connection.
+#
+# Measured on mfx-daq, the MFX path goes from ~55/59 disconnected to 2/59 in
+# under 6 s, twice, converging on the same end state. So wait a flat interval
+# rather than trying to detect convergence: watching for a stable count reads
+# as settled during the first seconds, when nothing has connected yet and the
+# count is stable at its worst value.
+time.sleep(%(settle)r)
+states = histogram()
+settled = states["Disconnected"] <= len(bp.path) // 2
+
+blocking = [d.name for d in bp.blocking_devices]
+imped = getattr(bp.impediment, "name", None)
+rows = []
+for dev in sorted(bp.path, key=lambda d: d.md.z):
+    rows.append({
+        "name": dev.name,
+        "z": dev.md.z,
+        "state": find_device_state(dev)[0].name,
+        "blocking": dev.name in blocking,
+    })
+print("HUTCHLIB_JSON:" + json.dumps({
+    "settled": settled,
+    "states": dict(states),
+    "devices": rows,
+    "blocking": blocking,
+    "impediment": imped,
+    "unreadable": [r["name"] for r in rows
+                   if r["state"] in ("Disconnected", "Unknown", "Error")],
+    "minimum_transmission": bp.minimum_transmission,
+    "method": "lightpath.BeamPath.blocking_devices (local)",
+}))
+'''
+
+
+def check_beam(hutch: str, *, settle_s: float = 10.0, timeout: int = 180) -> dict:
+    """Devices between the source and this endstation, which block beam, and the first impediment.
+
+    Needs no hutch-python session: lightpath builds the path from the happi db
+    and reads device state over Channel Access directly.
     """
-    code = _BEAMPATH_SCRIPT.format(hutch=hutch.strip().lower())
-    res = exec_code(code, timeout=timeout)
-    if not res["ok"]:
-        raise ResolveError(f"beampath query failed: {res.get('error') or res['output'][:200]}")
+    snippet = _CHECK_BEAM_SNIPPET % {
+        "db": HAPPI_DB, "end": hutch.strip().upper(), "settle": float(settle_s),
+    }
     try:
-        report = json.loads(res["output"].strip().splitlines()[-1])
-    except (json.JSONDecodeError, IndexError) as exc:
-        raise ResolveError(f"beampath returned non-JSON: {res['output'][:200]!r}") from exc
-    if "error" in report:
-        raise ResolveError(report["error"])
+        proc = subprocess.run([PCDS_PYTHON, "-c", snippet],
+                              capture_output=True, timeout=timeout)
+    except OSError as exc:
+        raise ResolveError(f"cannot run {PCDS_PYTHON}: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ResolveError(f"lightpath did not answer within {timeout}s") from exc
+
+    text = proc.stdout.decode("utf-8", "replace")
+    marker = "HUTCHLIB_JSON:"
+    if marker not in text:
+        # No fallback: the obvious one (lc.devices) is every lightpath-active
+        # device in the facility rather than this path, and quietly reporting
+        # another beamline's devices is worse than failing.
+        err = proc.stderr.decode("utf-8", "replace").strip()
+        raise ResolveError(
+            f"lightpath could not compute the path to {hutch.upper()} "
+            f"(rc={proc.returncode}): {err[-400:] or text[-400:]}"
+        )
+    # Split on the marker: lightpath logs to stdout, so the payload is not
+    # necessarily the last line.
+    report = json.loads(text.split(marker, 1)[1].splitlines()[0])
     return _record(
         report,
-        f"resolved:lightpath via the hutch-python session ({report.get('method')})",
-        blocking=report.get("blocking", []),
+        f"resolved:lightpath via {PCDS_PYTHON} ({report['method']})",
+        blocking=report["blocking"],
+        settled=report["settled"],
     )
 
 
@@ -245,39 +364,150 @@ def hutch_conf(hutch: str) -> dict:
     return _record(parsed, f"resolved:{path}", raw=text)
 
 
-def daq(hutch: str, *, timeout: int = T_QUERY) -> dict:
-    """Live DAQ state: state, config alias, experiment, recording flag, run number."""
-    code = (
-        "import json\n"
-        "out = {}\n"
-        "for key, expr in ("
-        "  ('state', 'daq.state'),"
-        "  ('config_alias', 'daq.config_alias_sig.get()'),"
-        "  ('experiment', 'daq.experiment_name_sig.get()'),"
-        "  ('recording', 'daq.recording_sig.get()'),"
-        "  ('run_number', 'get_run()'),"
-        "):\n"
-        "    try:\n"
-        "        out[key] = str(eval(expr))\n"
-        "    except Exception as exc:\n"
-        "        out[key] = 'ERROR: %s' % exc\n"
-        "print(json.dumps(out))\n"
-    )
-    res = exec_code(code, timeout=timeout)
+#: Every DAQ state, from psdaq ControlDef.states. Anything outside this set is
+#: not a state we failed to reach readiness in -- it is a string we could not
+#: interpret (an 'ERROR: ...', a renamed state), which must read as unknown
+#: rather than as a confident no.
+_DAQ_STATES = ("reset", "unallocated", "allocated", "connected",
+               "configured", "starting", "paused", "running")
+#: Of those, the ones a run can be taken from. 'configured' is ready-to-begin;
+#: starting/paused/running mean a run is already underway, also not "blocked".
+_DAQ_READY_STATES = ("configured", "starting", "paused", "running")
+
+#: Detector DRP processes, by the `-D <type>` their command carries. The ids
+#: themselves are hutch-chosen names, so match on the driver instead.
+_DRP_DETECTORS = ("jungfrau", "epix100", "epix10k", "ts", "wave8", "opal", "archon")
+
+
+def _config_summary(hutch: str) -> dict:
+    """Readiness-relevant fields from the DAQ config, not its 200 lines."""
+    rec = daq_config(hutch)
+    text = rec["content"]
+    # Commented-out alternatives are everywhere in these files -- MFX carries
+    # three dead feespecImg_0 variants and two qadc_0. Counting them would
+    # overstate what is meant to be running.
+    live = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+
+    def scalar(name: str) -> str | None:
+        m = re.search(rf'^{name}\s*=\s*["\']([^"\']+)', text, re.M)
+        return m.group(1) if m else None
+
+    summary: dict[str, Any] = {
+        "path": rec["path"],
+        "lines": rec["lines"],
+        "collect_host": scalar("collect_host"),
+        "data_dir": scalar("data_dir"),
+        "station": None,
+        "user": None,
+    }
+    m = re.search(r'^hutch,\s*station,\s*user\s*=\s*\(([^)]*)\)', text, re.M)
+    if m:
+        parts = [p.strip().strip('"\'') for p in m.group(1).split(",")]
+        if len(parts) == 3:
+            summary["station"], summary["user"] = parts[1], parts[2]
+
+    # f-string templates (ami-node_{N}_{instance}) are reported verbatim:
+    # expanding them means reimplementing the config's own loops, and a wrong
+    # expansion is worse than an obviously-templated name.
+    ids: list[str] = []
+    dets: list[str] = []
+    for line in live:
+        m = re.search(r'id:\s*f?"([^"]+)"', line)
+        if not m:
+            continue
+        ids.append(m.group(1))
+        driver = re.search(r'-D\s*(\w+)', line)
+        if driver and driver.group(1) in _DRP_DETECTORS:
+            dets.append(m.group(1))
+    summary["processes"] = len(ids)
+    summary["process_ids"] = ids
+    summary["detectors"] = dets
+
+    # Files the config reads at startup. An unreadable epicsArch.txt is a real
+    # readiness problem that no DAQ state field reports.
+    summary["also_reads"] = {}
+    for ref in dict.fromkeys(
+            re.findall(r'["\'](/cds/[^"\']+\.(?:txt|json|ya?ml))["\']', text)):
+        p = pathlib.Path(ref)
+        try:
+            summary["also_reads"][ref] = {
+                "readable": True, "lines": p.read_text(errors="replace").count("\n") + 1}
+        except OSError as exc:
+            summary["also_reads"][ref] = {"readable": False, "error": str(exc)}
+    return summary
+
+
+#: A dict literal on ONE line, not a loop over eval(). The classifier checks
+#: line by line and `out[key] = str(eval(expr))` is not provably read-only, so
+#: the old snippet refused itself; spread over several lines, the closing `}))`
+#: is not a recognised read either. Keeping it to one line means one line to
+#: recognise -- and the gate stays strict for everything else.
+_CHECK_DAQ_CODE = (
+    "import json\n"
+    "print(json.dumps({"
+    "'state': str(daq.state), "
+    "'config_alias': str(daq.config_alias_sig.get()), "
+    "'experiment': str(daq.experiment_name_sig.get()), "
+    "'recording': str(daq.recording_sig.get()), "
+    "'run_number': str(get_run())"
+    "}))\n"
+)
+
+
+def check_daq(hutch: str, *, experiment: str | None = None,
+              timeout: int = T_QUERY) -> dict:
+    """Is the DAQ able to record? State, config alias, experiment, recording flag, config.
+
+    ``can_record`` is None when the DAQ state cannot be read: an unreachable
+    DAQ is unknown, never a confident no. ``run_number`` and ``config`` are
+    context, not part of the verdict -- whether data has already landed is not
+    a readiness question, and a config we could not parse does not make the
+    DAQ unready.
+    """
+    res = exec_code(_CHECK_DAQ_CODE, timeout=timeout)
     if not res["ok"]:
         raise ResolveError(f"DAQ query failed: {res.get('error') or res['output'][:200]}")
     try:
         payload = json.loads(res["output"].strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError) as exc:
         raise ResolveError(f"DAQ query returned non-JSON: {res['output'][:200]!r}") from exc
+
+    state = (payload.get("state") or "").strip().lower()
+    payload["can_record"] = (
+        state in _DAQ_READY_STATES if state in _DAQ_STATES else None
+    )
+    if experiment and payload.get("experiment") not in (None, "", experiment):
+        payload["experiment_mismatch"] = {
+            "daq": payload["experiment"], "expected": experiment,
+        }
+    # Informational, and deliberately after can_record: an unparseable config
+    # is worth reporting but is not a readiness failure, so it must not be able
+    # to change the verdict.
+    try:
+        payload["config"] = _config_summary(hutch)
+    except (BridgeError, OSError, re.error) as exc:
+        payload["config"] = {"error": str(exc)}
     return _record(payload, "resolved:daq signals via the hutch-python session")
 
 
-def preset(hutch: str, device_name: str) -> dict:
-    """A motor's saved positions. Nominal setpoints come from here, never a literal."""
-    path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/presets/{device_name}.yml"
-    text = _read_local(path)
-    return _record(text, f"resolved:{path}")
+def preset(hutch: str, device_name: str, experiment: str | None = None) -> dict:
+    """A motor's saved positions. Nominal setpoints come from here, never a literal.
+
+    Presets live in ``presets/beamline/`` for the standing beamline ones and in
+    ``presets/<experiment>/`` for per-experiment ones -- not directly under
+    ``presets/``, which is where this used to look and never found anything.
+    """
+    root = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/presets"
+    subdirs = ["beamline"] + ([experiment] if experiment else [])
+    tried = [f"{root}/{sub}/{device_name}.yml" for sub in subdirs]
+    for path in tried:
+        if pathlib.Path(path).is_file():
+            return _record(_read_local(path), f"resolved:{path}")
+    raise ResolveError(
+        f"no preset for {device_name!r}: looked in {', '.join(tried)}. "
+        f"Many devices have none -- ask the operator for the setpoint rather "
+        f"than using a literal."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -335,8 +565,8 @@ def pv_values(pvs: list[str], *, timeout: int = T_QUERY) -> dict:
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
-    detectors | preset | cell | cat | skills | xtc2."""
+_DOC = """hutch-resolve: check-beam | check-hutch | check-daq | device | pv |
+    caget | conf | detectors | preset | cell | cat | skills | xtc2."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -347,8 +577,22 @@ def build_parser() -> argparse.ArgumentParser:
                     help="also write the result into that experiment's state")
     ap.add_argument("--field", default=None, help="state field to persist under")
 
-    for name in ("devices", "beampath", "daq", "conf"):
-        sub.add_parser(name).add_argument("--hutch", required=True)
+    sub.add_parser("conf").add_argument("--hutch", required=True)
+
+    beam_parser = sub.add_parser("check-beam", help="is beam reaching the hutch?")
+    beam_parser.add_argument("--hutch", required=True)
+    beam_parser.add_argument("--settle-s", type=float, default=10.0,
+                             help="seconds to wait for Channel Access to settle")
+
+    hutch_parser = sub.add_parser("check-hutch", help="are the hutch's devices placed?")
+    hutch_parser.add_argument("--hutch", required=True)
+    hutch_parser.add_argument("--inventory-only", action="store_true",
+                              help="happi listing only, no live readback")
+
+    daq_parser = sub.add_parser("check-daq", help="is the DAQ able to record?")
+    daq_parser.add_argument("--hutch", required=True)
+    daq_parser.add_argument("--experiment", default=None,
+                            help="cross-check against the DAQ's own experiment")
 
     device_parser = sub.add_parser("device")
     device_parser.add_argument("--hutch", required=True)
@@ -371,6 +615,8 @@ def build_parser() -> argparse.ArgumentParser:
     preset_parser = sub.add_parser("preset")
     preset_parser.add_argument("--hutch", required=True)
     preset_parser.add_argument("device")
+    preset_parser.add_argument("--experiment", default=None,
+                               help="also look in that experiment's preset dir")
 
     sub.add_parser("cell").add_argument("pdb")
 
@@ -387,28 +633,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """hutch-resolve: devices | device | pv | caget | beampath | daq | conf |
-    detectors | preset | cell | cat | skills | xtc2."""
+    """hutch-resolve: check-beam | check-hutch | check-daq | device | pv |
+    caget | conf | detectors | preset | cell | cat | skills | xtc2."""
     args = build_parser().parse_args(argv)
     try:
-        if args.cmd == "devices":
-            rec = devices(args.hutch)
+        if args.cmd == "check-hutch":
+            rec = check_hutch(args.hutch, inventory_only=args.inventory_only)
         elif args.cmd == "device":
             rec = device(args.hutch, args.name)
         elif args.cmd == "pv":
             rec = pv(args.hutch, args.name, args.suffix)
         elif args.cmd == "caget":
             rec = pv_values(args.pv)
-        elif args.cmd == "beampath":
-            rec = beampath(args.hutch)
-        elif args.cmd == "daq":
-            rec = daq(args.hutch)
+        elif args.cmd == "check-beam":
+            rec = check_beam(args.hutch, settle_s=args.settle_s)
+        elif args.cmd == "check-daq":
+            rec = check_daq(args.hutch, experiment=args.experiment)
         elif args.cmd == "conf":
             rec = hutch_conf(args.hutch)
         elif args.cmd == "detectors":
             rec = detectors(args.experiment, args.run)
         elif args.cmd == "preset":
-            rec = preset(args.hutch, args.device)
+            rec = preset(args.hutch, args.device, args.experiment)
         elif args.cmd == "cell":
             rec = cell(args.pdb)
         elif args.cmd == "cat":

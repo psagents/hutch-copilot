@@ -1,8 +1,8 @@
 """The hutch-daq CLI: exit codes, and that a refusal transmits nothing.
 
 test_safety.py covers `require_confirmation` as a function. Nothing covered the
-wiring from a refusal to the process exit code, which is what PLAN.md's standing
-safety gate actually runs -- so the gate could have been weakened to an argparse
+wiring from a refusal to the process exit code, which is what the standing safety
+gate actually runs -- so the gate could have been weakened to an argparse
 usage error without a single test going red. It nearly was: hoisting --confirm to
 the top-level parser to fix a broken documented invocation turned
 `exec '...' --confirm write` into `error: unrecognized arguments`, i.e. rc 2
@@ -40,7 +40,7 @@ def no_bridge(monkeypatch):
 # Refusals -- rc 5, and nothing leaves the machine
 # --------------------------------------------------------------------------
 def test_beam_critical_understated_as_write_is_refused(no_bridge, capsys):
-    """PLAN.md M1.a.5 / M2.2. Runs every shift; never de-scoped."""
+    """Standing acceptance test: runs every shift, never de-scoped."""
     rc = daq.main(["--hutch", "mfx", "exec", "mfx_stopper_1.remove()",
                    "--confirm", "write"])
     assert rc == _cli.REFUSED
@@ -58,8 +58,8 @@ def test_confirm_is_accepted_before_the_subcommand_too(no_bridge):
 
 
 def test_unrecognised_code_confirmed_read_only_is_refused(no_bridge):
-    """PLAN.md M2.3 -- unrecognised code errs upward to write, so a read-only
-    confirmation is understating it."""
+    """Unrecognised code errs upward to write, so a read-only confirmation is
+    understating it. Standing acceptance test."""
     rc = daq.main(["--hutch", "mfx", "exec", "frobnicate_the_thing()",
                    "--confirm", "read-only"])
     assert rc == _cli.REFUSED
