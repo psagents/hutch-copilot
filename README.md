@@ -9,6 +9,47 @@ judgment — what to ask the operator, when to confirm, how to sequence a shift.
 never hand-write a path, compose a PV name, or improvise an `ssh` command: every
 such fact comes from a tool call that either answers or fails loudly.
 
+## Where this runs, and where to put it
+
+**Run it on a `{hutch}-daq` machine** — `mfx-daq`, `rix-daq`, and so on. That is
+the design target, not a preference. Everything the tools need is native there:
+`/cds`, `/sdf/data/lcls`, the `{hutch}opr` DAQ log tree, the pcds Python
+environments, working EPICS Channel Access, and a reachable Slurm controller
+(`lcls-drp`).
+
+`{hutch}-control` works for most things, but it has no Slurm controller, so DAQ
+state is not visible from there.
+
+**An S3DF login node is not supported.** It has no `/cds` and no Channel Access,
+and the `psdev` hop that used to bridge that gap is gone (it is also no longer
+reachable). A checkout on S3DF will fail on most `hutch-resolve` subcommands —
+that is expected, not a bug. The one exception runs the other way: LUTE
+submission still needs an S3DF hop, because the Slurm controller at the hutch is
+the DAQ cluster, not the analysis cluster.
+
+**Where the checkout must live.** Claude Code only finds a skill inside a
+directory it scans, so the checkout has to be one of:
+
+| launched as | put it at |
+|---|---|
+| `claude` | `~/.claude/skills/hutch-copilot` |
+| `claude-lcls` (sets `CLAUDE_CONFIG_DIR`) | `~/.claude-lcls/skills/hutch-copilot` |
+
+A checkout anywhere else is invisible to the `Skill` tool no matter how correct
+the code is — the symptom is `Unknown skill: hutch-copilot`, with `SKILL.md`
+readable by hand. To serve both from one checkout, symlink the second:
+
+```bash
+ln -s ~/.claude/skills/hutch-copilot ~/.claude-lcls/skills/hutch-copilot
+```
+
+Then put the tools on PATH. No install step, and `PYTHONPATH` is not needed —
+each `bin/hutch-*` finds the package itself:
+
+```bash
+source bin/hutch-env     # sets PATH and $HUTCH, finds caget
+```
+
 ## The five tools
 
 | tool | subcommands | owns |
@@ -24,18 +65,24 @@ can go wrong with it:
 
 | source | reached via | subcommands |
 |---|---|---|
-| happi — device database | `psdev` | `devices` `device` `pv` `preset` `beampath` |
-| data — DataSource / XTC2 / PDB | local S3DF filesystem | `detectors` `xtc2` `cell` |
-| epics — Channel Access | `{hutch}-control` | `caget` |
-| control — DAQ configuration | `psdev` | `daq` `conf` |
+| happi — device database | `db.json` on `/cds`, read locally | `devices` `device` `pv` `preset` |
+| data — DataSource / XTC2 / PDB | local filesystem | `detectors` `xtc2` `cell` |
+| epics — Channel Access | `caget`, locally | `caget` |
+| control — DAQ configuration | `conf.yml` on `/cds`, read locally | `conf` |
+| session — live hutch-python | loopback socket, port 9999 | `beampath` `daq` |
 | local — this checkout | no network | `skills` |
+
+Only the last-but-one needs anything running: `beampath` and `daq` read live
+objects out of the hutch-python session, so they need the operator to have
+started it and the bridge inside it. Everything else is a file read or a CA
+read and works whether or not a session exists.
 
 `hutch-lute` groups by what it touches, and by whether it is safe to run mid-shift:
 
 | what | subcommands | during a shift? |
 |---|---|---|
 | observe — Slurm | `watch` `status` | yes |
-| calibration — `makepeds` on `psdev` | `peds` | yes, after a DARK run |
+| calibration — `makepeds` | `peds` | yes, after a DARK run (still needs psdev; see Status) |
 | report — read-only | `readiness` `kerberos` `plan` | yes |
 | submit — Slurm, directly | `sbatch` | only if the eLog ARP did not fire |
 | configure — before a shift | `render` `workspace` `dags` `envs` `register` `all` | no |
@@ -59,7 +106,7 @@ code a caller can branch on:
 | 0 | ok |
 | 2 | called wrong (argparse usage) |
 | 3 | state error — missing field, or stale past its TTL |
-| 4 | unreachable — psdev down, no bridge listener, no Slurm record |
+| 4 | unreachable — no bridge listener, missing file, no Slurm record |
 | 5 | **refused** — the safety gate did not transmit |
 
 `5` is the one that matters. It is how a refusal becomes machine-checkable instead of
@@ -84,32 +131,40 @@ The state file is a **cache with provenance**, not a config file.
 `hutch-state audit` returns every field with its age, TTL and provenance, stale
 first. That is what makes "which of these numbers did we actually measure" answerable.
 
-## Network topology — why the tools reach out the way they do
+## Network topology — why there is almost nothing to reach out to
 
-This table is load-bearing. The tools are unusable without it.
+Running on `{hutch}-daq` is what makes the tools simple: the things they read are
+all local there, so there is no transport to get wrong.
 
-| environment | hosts | filesystem | EPICS CA to IOCs |
-|---|---|---|---|
-| S3DF (batch) | `s3dflogin`, `sdf-login` | `/sdf` | no (firewalled) |
-| CDS (controls-adjacent) | `psdev`, `psusr`, `pslogin` | `/cds` | no (read gateway) |
-| controls network | `mfx-control`, `cxi-control` | `/cds` | yes |
+| environment | hosts | filesystem | EPICS CA to IOCs | Slurm |
+|---|---|---|---|---|
+| hutch DAQ | `mfx-daq`, `rix-daq` | `/cds` + `/sdf/data/lcls` | yes | `lcls-drp` (DAQ) |
+| hutch control | `mfx-control` | `/cds` + `/sdf/data/lcls` | yes | none |
+| S3DF (batch) | `s3dflogin`, `psana` | `/sdf` | no (firewalled) | analysis |
 
 Consequences, each of which has bitten:
 
-- **`/sdf` is not mounted on psdev, and `/cds` is not mounted on S3DF.** The only
-  bridge is ssh, so remote scripts must arrive on stdin and must not name `/sdf`
-  paths. `psdev_read` refuses a `/sdf` path rather than failing obscurely.
+- **`/reg/g/pcds` is missing on the DAQ machines**, while `/cds/group/pcds` is the
+  same tree. Always write the `/cds` form. This is also why the stock DAQ scripts
+  (`daq_utils.py`, `wheredaq`) break there — they hardcode `/reg`.
+- **`caget` is on PATH on the control machines but not on the DAQ machines**, where
+  only the absolute rhel9 build exists. `hutch-env` prepends it; `caget_binary()`
+  resolves PATH first, then that build.
+- **Do not set `EPICS_CA_ADDR_LIST`.** It is unset on the DAQ machines and CA works
+  by broadcast. Pinning it is a guess that can break a host that was working.
+- **The session bridge is a loopback socket, not an ssh hop.** `oc_bridge.py`
+  `exec()`s in the hutch-python session's own `globals()`, which is the only way to
+  see its loaded device objects. Running on the same machine does not substitute for
+  it, and no ssh is involved any more.
+- **The bridge has no access control.** Any local user can connect to port 9999 and
+  exec in the operator's namespace. The safety classifier is client-side — a
+  discipline on our own calls, not an enforcement boundary.
 - **`/cds` and `/reg/neh` are the same filesystem.** `/cds` is canonical; `/reg` is a
   deprecated alias. Never probe both.
-- **`caget` is on PATH on psdev, but CA to the IOCs (172.21.x.x) is blocked there.**
-  PV reads must run on `{hutch}-control`.
-- **TCP forwarding is disabled on DAQ machines**, so `ssh -L 9999:localhost:9999` does
-  not work. `hutch-daq` instead runs a client *on* the DAQ machine that connects to
-  `localhost:9999` there, passed to `ssh` as a single shell-quoted argument — no
-  nested-quoting hazard.
 - **Beamline names are UPPERCASE in happi, lowercase on the filesystem.** `common` and
   `resolve` normalise in opposite directions.
-- **psdev is shared.** Keep remote scripts short and non-blocking.
+- **Slurm at the hutch is the DAQ cluster (`drpq`), not the analysis cluster.** LUTE
+  submission still needs a hop to `psana` or `s3dflogin`.
 
 ## The safety gate
 
@@ -132,12 +187,26 @@ impossible by accident.
 ## Tests
 
 ```bash
-/sdf/group/lcls/ds/ana/sw/conda2/inst/envs/ps_20260504/bin/python -m pytest tests/unit -q
+/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/bin/python -m pytest tests/unit -q
 ```
 
-See `tests/README.md` for why that interpreter and not bare `python`.
+Any interpreter with pytest will do — the package is stdlib-only — but the bare
+`python3` at the hutch does not have it. See `tests/README.md`.
 
 ## Status
 
-See `PLAN.md`. M1 (desk work) is done; M2 is a live MFX demo, currently blocked on
-batch-mode ssh access to psdev.
+See `PLAN.md`. M1 (desk work) is done. The tools now run directly on
+`{hutch}-daq`, so the psdev hop that blocked M2 is gone.
+
+Still outstanding:
+
+- **`hutch-lute sbatch|watch|status`** call Slurm locally, which at the hutch is
+  the DAQ cluster. They need a hop to `psana`/`s3dflogin` to reach the analysis
+  cluster.
+- **`hutch-lute peds`** is the last `psdev` caller and will fail until it either
+  runs `makepeds` locally or hops to a host that can.
+- **A terminal API instead of the session bridge.** `hutch-python` takes a script
+  argument (`hutch-python --cfg <conf.yml> script.py`), which may remove the need
+  for a live interactive session and the socket entirely. Worth measuring before
+  investing further in `oc_bridge.py`: does a script run get the same loaded
+  namespace, and what does it cost per invocation.

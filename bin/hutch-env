@@ -1,0 +1,50 @@
+# shellcheck shell=bash
+# Source me: `source bin/hutch-env`. Sets up a shell to run the hutch tools.
+#
+# Not executable and has no shebang on purpose -- a subshell that exported
+# these would exit and take them with it.
+#
+# PYTHONPATH is deliberately NOT set: every bin/hutch-* inserts the repo root
+# on sys.path itself, so the tools already work from a bare checkout and an
+# export here would only be a second way to get it wrong.
+#
+# EPICS_CA_ADDR_LIST is deliberately NOT set either. It is unset on the DAQ
+# machines and Channel Access works by broadcast; pinning it would be a guess
+# that can break a working path.
+
+_hutch_env_repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+
+# The hutch comes from the hostname -- this skill serves MEC, MFX, RIX, TMO and
+# XPP, so a hardcoded `mfx` would be wrong four times out of five.
+hutch_from_hostname() {
+    case "${1:-$(hostname -s)}" in
+        *-daq|*-control|*-console|*-monitor)
+            printf '%s\n' "${1:-$(hostname -s)}" | sed -E 's/-(daq|control|console|monitor)$//' ;;
+        *) return 1 ;;
+    esac
+}
+
+# caget is on PATH on the control machines but not on the DAQ machines, where
+# only the absolute rhel9 build exists. Prepend it when it is missing rather
+# than unconditionally, so a host that ships its own keeps it.
+_hutch_env_epics="/cds/group/pcds/epics/base/R7.0.2-2.0/bin/rhel9-x86_64"
+
+if ! command -v caget >/dev/null 2>&1 && [ -x "$_hutch_env_epics/caget" ]; then
+    PATH="$_hutch_env_epics:$PATH"
+fi
+
+case ":$PATH:" in
+    *":$_hutch_env_repo/bin:"*) ;;
+    *) PATH="$_hutch_env_repo/bin:$PATH" ;;
+esac
+export PATH
+
+if HUTCH="$(hutch_from_hostname)"; then
+    export HUTCH
+    echo "hutch-env: HUTCH=$HUTCH, tools on PATH from $_hutch_env_repo/bin"
+else
+    echo "hutch-env: $(hostname -s) is not a hutch machine -- tools are on PATH," \
+         "but anything reading /cds, CA or the DAQ logs will fail here." >&2
+fi
+
+unset _hutch_env_repo _hutch_env_epics

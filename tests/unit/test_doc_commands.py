@@ -84,6 +84,12 @@ def test_markdown_contains_invocations_to_check():
     assert len(docs) > 20, f"only found {len(docs)} -- is the regex still right?"
 
 
+#: Not argparse CLIs, so there is no parser to check a documented invocation
+#: against. `env` is sourced into a shell rather than run and `session-start` is a
+#: hook the harness calls with no arguments; test_env.py covers both.
+NOT_CLIS = {"env", "session-start"}
+
+
 def test_every_binary_is_covered():
     """Every bin/hutch-* must be in BINARIES, or its docs go unchecked.
 
@@ -92,7 +98,7 @@ def test_every_binary_is_covered():
     `hutch-log` went unchecked from the day it landed.
     """
     shipped = {p.name.split("hutch-", 1)[1] for p in (SKILL / "bin").glob("hutch-*")}
-    missing = sorted(shipped - set(BINARIES))
+    missing = sorted(shipped - set(BINARIES) - NOT_CLIS)
     assert not missing, (
         f"bin/hutch-{{{','.join(missing)}}} ship but are not in BINARIES, so every "
         f"documented invocation of them is silently skipped. Add them."

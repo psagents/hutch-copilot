@@ -48,25 +48,27 @@ cells all come from `hutch-resolve`. This skill deliberately ships no tables of 
 
 ### `hutch-resolve`, by the source it reads
 
-Grouped this way because the source is what determines what can go wrong: a `happi`
-subcommand fails when `psdev` is unreachable, an `epics` one when `{hutch}-control` is, and a
-`data` one needs neither. When a resolver fails, this table tells you which machine to blame.
+Grouped this way because the source is what determines what can go wrong. Everything
+is a local read on a `{hutch}-daq` machine **except** the two that need a live
+hutch-python session — so when a resolver fails, this table says whether to check a
+file or to check whether the operator has started a session.
 
 | Source | Reached via | Subcommands |
 |---|---|---|
-| **happi** — device database | `psdev` | `devices` `device` `pv` `preset` `beampath` |
-| **data** — DataSource / XTC2 / PDB | local S3DF filesystem | `detectors` `xtc2` `cell` |
-| **epics** — Channel Access | `{hutch}-control` | `caget` |
-| **control** — DAQ configuration | `psdev` | `daq` `conf` |
-| **files** — raw `/cds` read | `psdev` | `cat` |
+| **happi** — device database | `db.json`, read locally | `devices` `device` `pv` `preset` |
+| **data** — DataSource / XTC2 / PDB | local filesystem | `detectors` `xtc2` `cell` |
+| **epics** — Channel Access | `caget`, locally | `caget` |
+| **control** — DAQ configuration | `conf.yml`, read locally | `conf` |
+| **files** — raw `/cds` read | local filesystem | `cat` |
+| **session** — live hutch-python | loopback socket :9999 | `beampath` `daq` |
 | **local** — this checkout | no network | `skills` |
 
 ### `hutch-lute`, by what it touches
 
 | What | Subcommands | During a shift? |
 |---|---|---|
-| **observe** — Slurm | `watch` `status` | yes — this is the demo path |
-| **calibration** — `makepeds` on `psdev` | `peds` | yes, after a DARK run |
+| **observe** — Slurm | `watch` `status` | needs an S3DF hop; see `README.md` Status |
+| **calibration** — `makepeds` | `peds` | yes, after a DARK run |
 | **report** — read-only checks | `readiness` `kerberos` `plan` | yes, safe anywhere |
 | **submit** — Slurm, directly | `sbatch` | only if the eLog ARP did not fire |
 | **configure** — before a shift | `render` `workspace` `dags` `envs` `register` `all` | no |
@@ -103,25 +105,32 @@ and silently observes every conversation turn after that.
 
 ## Bridge Detection
 
-> **Three transports, one tool.** `hutch-daq` reaches a live hutch-python session on a
-> DAQ machine; `hutch-resolve cat/conf/preset/device` reads `/cds` via `psdev`; and
-> `hutch-resolve caget` reads live PVs from `{hutch}-control` (CA is firewalled from both
-> S3DF and psdev). The network topology and its constraints are documented in
-> `README.md`.
+> **One transport, and only for the session.** Running on `{hutch}-daq` makes every
+> file read and every PV read local — `cat`, `conf`, `preset`, `devices` and `caget`
+> need nothing running. The single exception is the live hutch-python session, which
+> `hutch-daq exec` reaches over a loopback socket on port 9999. `README.md` has the
+> topology.
 
 ### Setup (once per hutch-python session)
 
-**Step 1 — Install the listener** (from S3DF). The script path is resolved from this
-skill's own install directory, so this works for any user:
+The session must be started by the **operator account** (`{hutch}opr`) — the DAQ
+scripts require it, and a session under another account is not the real one. The
+bridge then runs inside it, and any local user can drive it (see the access-control
+note in `README.md`).
+
+**Step 1 — Ask for the path:**
 
 ```bash
 bin/hutch-daq --hutch mfx install
 ```
 
+Nothing is copied: the script is already local, so this just prints the `exec(...)`
+line to hand to the operator.
+
 **Step 2 — Operator starts it** in the hutch-python session:
 
 ```python
-exec(open('/tmp/oc_bridge.py').read())
+exec(open('<path printed by step 1>').read())
 # Expected output: "OpenCode bridge listening on port 9999"
 ```
 
@@ -131,11 +140,11 @@ exec(open('/tmp/oc_bridge.py').read())
 bin/hutch-daq --hutch mfx ping     # -> {"ok": true, "mode": "live", ...}
 ```
 
-> **Why not `ssh -L 9999:localhost:9999`?** TCP forwarding is blocked by
-> `AllowTcpForwarding` on DAQ machines. `hutch-daq` runs a client *on* the DAQ machine
-> that connects to `localhost:9999` there. It passes that client to `ssh` as a single
-> shell-quoted argument, so there is no nested-quoting hazard — which is why the six
-> hand-written copies of this pattern that used to live in markdown were fragile.
+> **The socket is not an optimisation, it is the only way in.** `oc_bridge.py` runs
+> `exec(code, globals())` inside the session, so the loaded device objects are in
+> scope. Being on the same machine does not substitute for it — nothing else reaches
+> another process's namespace. What *is* gone is the ssh hop around it, which only
+> existed because `localhost:9999` was unreachable from S3DF.
 
 ### Connectivity check
 
@@ -219,7 +228,7 @@ classifies it as **one unit**, so a write buried in an otherwise read-only scrip
 gates the entire thing.
 
 `hutch-lute peds` is gated by the same classifier, on the `makepeds` command text. It is a
-separate subcommand rather than an `exec` because it runs a shell command on `psdev`, not
+separate subcommand rather than an `exec` because it runs a shell command rather than
 Python in the session; `takepeds()`, which does run in the session, is just
 `hutch-daq exec 'takepeds()'`.
 
@@ -282,7 +291,7 @@ being installed.
 | reading LUTE output and judging the dataset | `analyze-data/` |
 | experiment context, condition tracking, beamtime log, handoff | `coordinate-experiment/` |
 | CCTBX DAG pattern, d_min hazard, coverage×yield, symptom→knob | `references/sfx-cctbx-patterns.md` |
-| network topology, why `ssh -L` fails, `/cds` vs `/sdf`, exit codes | `README.md` |
+| which host to run on, network topology, `/cds` vs `/reg`, exit codes | `README.md` |
 | pedestal deployment, incl. the Jungfrau fallback | `hutch-lute peds` |
 
 ### Optional advisors

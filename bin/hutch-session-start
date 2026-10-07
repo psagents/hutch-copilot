@@ -1,0 +1,37 @@
+#!/bin/bash
+# SessionStart hook: announce the hutch context, but only at a hutch.
+#
+# Silence off-hutch is the whole point. On S3DF or a laptop the tools cannot
+# reach /cds, Channel Access or the DAQ logs, so injecting hutch context there
+# would be misleading rather than merely noisy.
+#
+# Never exits non-zero and never blocks: a hook that fails degrades every
+# session start, including on the hosts it has no business firing on.
+set -u
+
+host="$(hostname -s 2>/dev/null)" || exit 0
+
+case "$host" in
+    *-daq|*-control) hutch="${host%-*}" ;;
+    *) exit 0 ;;
+esac
+
+repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)" || exit 0
+
+cat <<EOF
+HUTCH CONTEXT: $host (hutch=$hutch)
+
+The hutch-copilot skill and its tools are installed at:
+  $repo
+Put the tools on PATH with: source $repo/bin/hutch-env
+Use the hutch-copilot skill for any experiment operation at this hutch.
+EOF
+
+case "$host" in
+    *-control)
+        echo "NOTE: $host has no Slurm controller, so DAQ state is not visible here." \
+             "The tools are designed for ${hutch}-daq."
+        ;;
+esac
+
+exit 0
