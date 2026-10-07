@@ -79,13 +79,12 @@ type them. Resolve the PV, then read it from a machine that can:
 
 ```bash
 bin/hutch-resolve pv    --hutch "$H" <beam-energy-device> --suffix <field>
-bin/hutch-resolve caget --hutch "$H" <PV> <PV>
+bin/hutch-resolve caget <PV> <PV>
 ```
 
-> **This used to read `ssh psdev caget BLD:SYS0:500:ENERGYHXBR ...`, which cannot work.**
-> EPICS CA to IOCs is firewalled from psdev — the skill's own topology notes said so while
-> this section instructed otherwise. PV reads must run on `{hutch}-control`, which is what
-> `hutch-resolve caget` does. The hardcoded PV names are gone with it: LCLS-I HXR, LCLS-II
+> **Do not hardcode the PV.** `hutch-resolve caget` reads CA locally; the tools run on
+> `{hutch}-daq`, where Channel Access reaches the IOCs directly. The hardcoded PV names
+> are gone: LCLS-I HXR, LCLS-II
 > SXR and per-hutch rate PVs all differ, and a list of them in prose is a list that goes
 > stale.
 

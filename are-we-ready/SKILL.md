@@ -84,12 +84,12 @@ is unverified and ask the operator; do not fall back to a literal.
 ### Undulator pointing and stoppers — EPICS, one call
 
 ```bash
-bin/hutch-resolve caget --hutch mfx \
+bin/hutch-resolve caget \
     BPMS:UNDH:4690:XOFF.D BPMS:UNDH:4690:YOFF.D \
     MFX:PPS:MMS:ST1:STATE MFX:PPS:MMS:ST2:STATE
 ```
 
-Routed via `mfx-control`, where CA actually reaches the IOCs — the script this replaced read
+Read locally: CA reaches the IOCs from the hutch machines — the script this replaced read
 these from the DAQ machine.
 
 ### Imagers, valves, slits, pulse energy — one session round-trip each
@@ -110,7 +110,7 @@ an unreadable device as an ERROR, never as OUT — see Step 4.
 
 ```bash
 bin/hutch-resolve daq --hutch "$H"     # state, config_alias, experiment, recording, run
-bin/hutch-daq --hutch "$H" status      # daqmgr process states (RUNNING / NOCONNECT / ...)
+bin/hutch-daq --hutch "$H" config      # the DAQ config file, verbatim
 ```
 
 Has the last run's data landed?

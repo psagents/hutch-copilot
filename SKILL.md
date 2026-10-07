@@ -25,7 +25,7 @@ owns one tool.
 | Tool | Use for |
 |---|---|
 | `bin/hutch-state path\|get\|set\|unset\|audit\|dump` | the experiment state file — the ONLY way to read or write it |
-| `bin/hutch-daq ping\|install\|exec\|status\|logs` | the DAQ machine: live hutch-python session, process states, log files |
+| `bin/hutch-daq ping\|install\|exec\|config\|logs` | the live hutch-python session on this machine, the DAQ config, and the DAQ log files |
 | `bin/hutch-resolve` (see below) | discovering machine truth from its authoritative source |
 | `bin/hutch-lute` (see below) | LUTE: submission, monitoring, pedestals, config rendering, workspace setup |
 | `bin/hutch-log init\|append` | the beamtime log |
@@ -158,8 +158,8 @@ bin/hutch-daq --hutch mfx exec 'mfx_stopper_1.remove()'
 # after the operator approves, declare the class you actually got approval for
 bin/hutch-daq --hutch mfx exec 'daq.begin(duration=180)' --confirm write --timeout 300
 
-# DAQ process state and logs -- same ssh path, works after a crash
-bin/hutch-daq --hutch mfx status
+# DAQ config and logs -- local reads, so they work after a crash
+bin/hutch-daq --hutch mfx config
 bin/hutch-daq --hutch mfx logs --process drp -n 50
 ```
 

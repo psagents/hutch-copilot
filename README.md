@@ -14,7 +14,7 @@ such fact comes from a tool call that either answers or fails loudly.
 | tool | subcommands | owns |
 |---|---|---|
 | `hutch-state` | `path get set unset audit dump` | the experiment state file |
-| `hutch-daq` | `ping install exec status logs` | the DAQ machine |
+| `hutch-daq` | `ping install exec config logs` | the live session, the DAQ config, the DAQ logs |
 | `hutch-resolve` | 13, grouped by source (below) | machine truth |
 | `hutch-lute` | 13, grouped by what it touches (below) | LUTE: jobs, pedestals, config, workspace |
 | `hutch-log` | `init append` | the beamtime log |

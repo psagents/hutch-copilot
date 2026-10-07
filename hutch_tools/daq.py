@@ -1,8 +1,8 @@
-"""hutch-daq: the DAQ machine -- bridge listener, process states, log files.
+"""hutch-daq: the live hutch-python session, and the DAQ log files beside it.
 
-All three reach the DAQ machine over the same ssh path through ``psdev``.
-Transport constraints (what is mounted where, why ``ssh -L`` cannot be used,
-where EPICS CA reaches) are in README.md.
+Runs on a ``{hutch}-daq`` machine, where everything it needs is local: ``/cds``,
+``/sdf/data/lcls``, the ``{hutch}opr`` log tree and EPICS Channel Access. The
+session bridge is a loopback socket, not an ssh hop. README.md has the rest.
 
 Everything sent to a live session passes ``require_confirmation`` first.
 """
@@ -12,11 +12,12 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import pathlib
 import re
-import shlex
+import shutil
+import socket
 import subprocess
 import sys
-from typing import Any
 
 from .common import OK, REFUSED, UNREACHABLE, USAGE, fail, out, parser, script
 
@@ -190,9 +191,6 @@ def require_confirmation(code: str, confirmed_as: str | None) -> dict:
 # --------------------------------------------------------------------------
 # Transport
 # --------------------------------------------------------------------------
-#: SSH jump host for both /cds access and DAQ machines.
-JUMP_HOST = "psdev"
-
 #: Port oc_bridge.py listens on inside the hutch-python session.
 BRIDGE_PORT = 9999
 
@@ -200,25 +198,13 @@ BRIDGE_PORT = 9999
 T_QUERY = 10
 T_DEVICE = 30
 
-# Client that runs *on* the DAQ machine and talks to the local listener.
-# TCP forwarding (ssh -L) is disabled on DAQ machines, so the process must run
-# there and connect to localhost itself.
-_REMOTE_CLIENT = r"""
-import socket, json, sys
-payload = sys.stdin.buffer.read()
-s = socket.socket()
-s.settimeout(TIMEOUT)
-s.connect(("localhost", PORT))
-s.sendall(payload)
-s.shutdown(socket.SHUT_WR)
-buf = b""
-while True:
-    chunk = s.recv(65536)
-    if not chunk:
-        break
-    buf += chunk
-sys.stdout.write(buf.decode("utf-8", "replace"))
-"""
+
+def _start_hint() -> str:
+    """How the operator starts the listener. One spelling, used by every error."""
+    return (
+        f"in the hutch-python session, run: "
+        f"exec(open({str(script('scripts', 'oc_bridge.py'))!r}).read())"
+    )
 
 
 class BridgeError(RuntimeError):
@@ -249,7 +235,6 @@ def _ssh(
     stdin: bytes | None = None,
     timeout: int = T_QUERY,
     run_timeout: int | None = None,
-    jump: str | None = JUMP_HOST,
 ) -> str:
     """Run one command over ssh and return its stdout.
 
@@ -257,12 +242,13 @@ def _ssh(
     defaults to ``timeout + 30``. They are separate because a long-running remote
     command (``makepeds`` takes minutes) still has to fail fast on an unreachable
     host -- a single value would make a dead host hang for the command's budget.
+
+    No jump host: the tools run at the hutch, where the hosts they still reach
+    are directly reachable. ``psdev`` was the jump host and is neither needed
+    nor reachable from here.
     """
     run_timeout = timeout + 30 if run_timeout is None else run_timeout
-    argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}"]
-    if jump and host != jump:
-        argv += ["-J", jump]
-    argv += [host, remote_cmd]
+    argv = ["ssh", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={timeout}", host, remote_cmd]
     try:
         proc = subprocess.run(
             argv,
@@ -288,46 +274,55 @@ def _ssh(
 
 # --------------------------------------------------------------------------
 # IPython bridge (live hutch-python session)
+#
+# A loopback socket, not an ssh hop: the session runs on this machine, and the
+# socket is the only way into its interpreter -- oc_bridge.py exec()s in the
+# session's own globals(), so every loaded device object is in scope. Being on
+# the same host does not substitute for it; nothing else reaches another
+# process's namespace.
 # --------------------------------------------------------------------------
-def daq_host(hutch: str) -> str:
-    """DAQ machine for a hutch, e.g. mfx -> mfx-daq (the conventional spelling)."""
-    return f"{hutch.strip().lower()}-daq"
+def _bridge_request(payload: bytes, timeout: int) -> str:
+    """One request/response against the listener. Send, half-close, read to EOF."""
+    try:
+        with socket.create_connection(("localhost", BRIDGE_PORT), timeout=timeout) as sock:
+            sock.sendall(payload)
+            sock.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except (ConnectionRefusedError, FileNotFoundError) as exc:
+        raise BridgeUnavailable(
+            f"nothing is listening on localhost:{BRIDGE_PORT} -- "
+            f"no hutch-python session with the bridge started.\n"
+            f"  {_start_hint()}"
+        ) from exc
+    except OSError as exc:
+        raise BridgeUnavailable(f"bridge socket failed: {exc}") from exc
+    return b"".join(chunks).decode("utf-8", "replace")
 
 
 def exec_code(
     code: str,
     *,
-    hutch: str,
     confirm: str | None = None,
     timeout: int = T_QUERY,
-    host: str | None = None,
 ) -> dict:
-    """Run Python in the live hutch-python session.
+    """Run Python in the live hutch-python session on this machine.
 
     ``confirm`` is the action class a human has approved. Read-only snippets
     need none; anything else is refused without a matching class.
     """
     verdict = require_confirmation(code, confirm)
 
-    host = host or daq_host(hutch)
-    client = (
-        _REMOTE_CLIENT.replace("TIMEOUT", str(timeout + 20)).replace("PORT", str(BRIDGE_PORT))
-    )
-    remote_cmd = "python3 -c " + shlex.quote(client)
-    raw = _ssh(
-        host,
-        remote_cmd,
-        stdin=json.dumps({"code": code}).encode(),
-        timeout=timeout,
-    )
+    raw = _bridge_request(json.dumps({"code": code}).encode(), timeout)
     try:
         resp = json.loads(raw)
     except json.JSONDecodeError:
         raise BridgeError(
-            f"bridge returned non-JSON -- is the listener running?\n"
-            f"  start it in the hutch-python session with:\n"
-            f"    exec(open('/tmp/oc_bridge.py').read())\n"
-            f"  got: {raw[:300]!r}"
+            f"bridge returned non-JSON: {raw[:300]!r}"
         ) from None
 
     return {
@@ -335,66 +330,37 @@ def exec_code(
         "output": resp.get("output", ""),
         "error": resp.get("error"),
         "safety": verdict,
-        "host": host,
     }
 
 
-def install_listener(hutch: str, host: str | None = None) -> str:
-    """Copy oc_bridge.py to /tmp on the DAQ machine. Operator still starts it."""
-    host = host or daq_host(hutch)
-    src = script("scripts", "oc_bridge.py")
-    _ssh(host, "cat > /tmp/oc_bridge.py", stdin=src.read_bytes(), timeout=T_QUERY)
-    return (
-        f"installed {src.name} on {host}:/tmp/oc_bridge.py\n"
-        f"ask the operator to run, in the hutch-python session:\n"
-        f"    exec(open('/tmp/oc_bridge.py').read())"
-    )
+def install_listener() -> str:
+    """Nothing to copy -- the script is local. Report the path to exec()."""
+    return f"the operator starts the bridge on this machine:\n    {_start_hint()}"
 
 
-def ping(hutch: str, host: str | None = None) -> dict:
+def ping() -> dict:
     """Is the live session reachable? Read-only, so never needs confirmation."""
     try:
-        res = exec_code("True", hutch=hutch, host=host, timeout=T_QUERY)
+        res = exec_code("True", timeout=T_QUERY)
     except (BridgeError, BridgeUnavailable) as exc:
         return {"ok": False, "detail": str(exc), "mode": "offline"}
     return {
         "ok": res["ok"] and res["output"].strip() == "True",
         "detail": res["output"].strip() or res.get("error"),
         "mode": "live",
-        "host": res["host"],
     }
 
 
 # --------------------------------------------------------------------------
-# DAQ processes and their logs
-# 
-# Neither `status` nor `logs` has behavioural coverage: both are remote-command
-# wrappers whose correctness is in the output shape daqmgr actually produces,
-# and there is no live DAQ machine to check that against yet.
+# DAQ log files
+#
+# Local reads: /cds/home/opr/{hutch}opr is mounted on the DAQ machine. Note the
+# `<host>` in a log file name is the drp node that wrote it
+# (drp-srcf-cmp0NN), never this machine -- which is why the process filter
+# matches the `:<process>.log` field and not the whole name.
 # --------------------------------------------------------------------------
-def process_status(hutch: str, host: str | None = None, timeout: int = T_DEVICE) -> dict:
-    """``daqmgr status <hutch>.py`` on the DAQ machine: process name -> state."""
-    hutch = hutch.strip().lower()
-    host = host or daq_host(hutch)
-    raw = _ssh(host, f"daqmgr status {shlex.quote(hutch + '.py')}", timeout=timeout)
-
-    processes: dict[str, str] = {}
-    for line in raw.splitlines():
-        parts = line.split()
-        # daqmgr prints `<name> <state> ...`; anything else is a banner or a
-        # blank. Keep the raw text so an unparsed format is still readable.
-        if len(parts) >= 2 and not line.startswith(" "):
-            processes[parts[0]] = parts[1]
-    return {
-        "host": host,
-        "hutch": hutch,
-        "processes": processes,
-        "raw": raw,
-    }
-
-
 def _log_dir(hutch: str, when: "datetime.date | None" = None) -> str:
-    """Per-process DAQ log directory, under /cds -- so it must be read remotely."""
+    """Per-process DAQ log directory for a hutch's operator account."""
     d = when or datetime.date.today()
     return f"/cds/home/opr/{hutch.strip().lower()}opr/{d.year:04d}/{d.month:02d}"
 
@@ -405,38 +371,38 @@ def logs(
     process: str | None = None,
     lines: int = 0,
     count: int = 20,
-    host: str | None = None,
     when: "datetime.date | None" = None,
-    timeout: int = T_DEVICE,
 ) -> dict:
     """List the most recent DAQ log files, or tail the newest when ``lines`` > 0.
 
-    Files are named ``<timestamp>_<host>:<process>.log``.
+    Files are named ``<DD_HH:MM:SS>_<host>:<process>.log``.
     """
     hutch = hutch.strip().lower()
-    host = host or daq_host(hutch)
     d = _log_dir(hutch, when)
-    # A process filter matches the `:<process>.log` field, not the whole name,
-    # so it cannot accidentally match the host or the timestamp.
+    directory = pathlib.Path(d)
+    if not directory.is_dir():
+        raise BridgeUnavailable(f"DAQ log directory does not exist: {d}")
+
     pattern = f"*:{process}.log" if process else "*.log"
-    listing = (
-        f"ls -1t {shlex.quote(d)}/{pattern} 2>/dev/null | head -n {int(count)}"
+    newest_first = sorted(
+        directory.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True
     )
 
     if lines > 0:
-        newest = f"$({listing} | head -n 1)"
-        raw = _ssh(
-            host,
-            f'f={newest}; [ -n "$f" ] && echo "==> $f" && tail -n {int(lines)} "$f"',
-            timeout=timeout,
-        )
-        return {"host": host, "directory": d, "process": process,
-                "tail_lines": lines, "content": raw}
+        if not newest_first:
+            raise BridgeUnavailable(f"no log matching {pattern!r} in {d}")
+        newest = newest_first[0]
+        tail = newest.read_text(errors="replace").splitlines()[-int(lines):]
+        return {
+            "directory": d,
+            "process": process,
+            "tail_lines": lines,
+            "file": newest.name,
+            "content": "\n".join(tail),
+        }
 
-    raw = _ssh(host, listing, timeout=timeout)
-    files = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    files = [p.name for p in newest_first[: int(count)]]
     return {
-        "host": host,
         "directory": d,
         "process": process,
         "count": len(files),
@@ -445,37 +411,69 @@ def logs(
 
 
 # --------------------------------------------------------------------------
-# psdev (read /cds from S3DF)
+# DAQ configuration -- dumped verbatim, never interpreted
+#
+# Judging whether a config is safe belongs to a layer above this one, so this
+# parses nothing. The LCLS-II config is `<hutch>.py`; the `.cnf` files beside
+# it are LCLS-I era and reference rhel7 paths that no longer exist.
 # --------------------------------------------------------------------------
-def psdev_python(script: str, params: dict[str, Any] | None = None, timeout: int = T_QUERY) -> str:
-    """Run a stdlib-only Python script on psdev, params injected as a JSON literal.
-
-    Arrives on stdin and must not name /sdf paths -- /sdf is not mounted there.
-    """
-    prologue = f"import json\nP = json.loads({json.dumps(json.dumps(params or {}))})\n"
-    return _ssh("psdev", "python3 -", stdin=(prologue + script).encode(), timeout=timeout, jump=None)
+DAQ_CONFIG_DIR = "/cds/group/pcds/dist/pds/{hutch}/scripts"
 
 
-def psdev_read(path: str, timeout: int = T_QUERY) -> str:
-    """cat a /cds file."""
-    if path.startswith("/sdf"):
-        raise BridgeError(f"/sdf is not mounted on psdev: {path}")
-    return _ssh("psdev", f"cat {shlex.quote(path)}", timeout=timeout, jump=None)
+def daq_config(hutch: str) -> dict:
+    """The live DAQ config file for a hutch, verbatim, with its path."""
+    hutch = hutch.strip().lower()
+    path = pathlib.Path(DAQ_CONFIG_DIR.format(hutch=hutch)) / f"{hutch}.py"
+    try:
+        text = path.read_text(errors="replace")
+    except OSError as exc:
+        raise BridgeUnavailable(f"cannot read DAQ config {path}: {exc}") from exc
+    return {
+        "path": str(path),
+        "source": f"resolved:{path}",
+        "lines": text.count("\n") + 1,
+        "content": text,
+    }
 
 
 # --------------------------------------------------------------------------
-# controls machine (EPICS CA)
+# EPICS Channel Access
+#
+# Local: CA reaches the IOCs from the hutch machines, so there is no hop. Do
+# not set EPICS_CA_ADDR_LIST -- it is unset on the DAQ machine and CA works by
+# broadcast; setting it would be a guess that could break a working path.
 # --------------------------------------------------------------------------
-CAGET = "/cds/group/pcds/epics/extensions/bin/linux-x86_64/caget"
+#: rhel9 build. A hardcoded `linux-x86_64` path is wrong on these hosts, and
+#: the old extensions path does not exist on either of them.
+CAGET_FALLBACK = "/cds/group/pcds/epics/base/R7.0.2-2.0/bin/rhel9-x86_64/caget"
 
 
-def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, str]:
-    """Read PVs from ``{hutch}-control`` -- the only host where CA reaches the IOCs."""
+def caget_binary() -> str:
+    """``caget`` from PATH when it is there, else the known rhel9 build."""
+    found = shutil.which("caget")
+    if found:
+        return found
+    if pathlib.Path(CAGET_FALLBACK).exists():
+        return CAGET_FALLBACK
+    raise BridgeUnavailable(
+        f"no caget on PATH and {CAGET_FALLBACK} does not exist -- "
+        f"is this a hutch machine?"
+    )
+
+
+def caget(pvs: list[str], *, timeout: int = T_QUERY) -> dict[str, str]:
+    """Read PVs locally over Channel Access."""
     if not pvs:
         return {}
-    host = f"{hutch.strip().lower()}-control"
-    cmd = f"{shlex.quote(CAGET)} " + " ".join(shlex.quote(p) for p in pvs)
-    out = _ssh(host, cmd, timeout=timeout)
+    try:
+        proc = subprocess.run(
+            [caget_binary(), "-w", str(timeout), *pvs],
+            capture_output=True,
+            timeout=timeout + 10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BridgeUnavailable(f"caget timed out after {timeout + 10}s") from exc
+    out = proc.stdout.decode("utf-8", "replace")
     values: dict[str, str] = {}
     for line in out.splitlines():
         parts = line.split(None, 1)
@@ -483,7 +481,10 @@ def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, st
             values[parts[0]] = parts[1].strip()
     missing = [p for p in pvs if p not in values]
     if missing:
-        raise BridgeUnavailable(f"no value returned for {missing}")
+        # caget exits non-zero and prints the reason here -- a PV that does not
+        # exist and an IOC that is down look different, so quote it.
+        err = proc.stderr.decode("utf-8", "replace").strip()
+        raise BridgeUnavailable(f"no value returned for {missing}" + (f": {err}" if err else ""))
     return values
 
 
@@ -491,7 +492,7 @@ def caget(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict[str, st
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-daq: ping | install | exec | status | logs."""
+_DOC = """hutch-daq: ping | install | exec | config | logs."""
 
 
 def _confirm_and_timeout(p, post: bool = False) -> None:
@@ -521,11 +522,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     ap, sub = parser("hutch-daq", _DOC)
     ap.add_argument("--hutch", required=True)
-    ap.add_argument("--host", default=None, help="override the DAQ host")
     _confirm_and_timeout(ap)
 
     sub.add_parser("ping")
-    sub.add_parser("install", help="copy oc_bridge.py to the DAQ machine")
+    sub.add_parser("install", help="where to find oc_bridge.py for the operator to start")
 
     exec_parser = sub.add_parser("exec", help="run python in the live hutch-python session")
     exec_parser.add_argument("code", help="python source, or - to read stdin")
@@ -533,7 +533,7 @@ def build_parser() -> argparse.ArgumentParser:
     # namespace, so a same-dest option would reset the parent's value.
     _confirm_and_timeout(exec_parser, post=True)
 
-    sub.add_parser("status", help="daqmgr process states on the DAQ machine")
+    sub.add_parser("config", help="dump the DAQ config file verbatim; interprets nothing")
 
     logs_parser = sub.add_parser("logs", help="list or tail per-process DAQ log files")
     logs_parser.add_argument("--process", default=None,
@@ -546,21 +546,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """hutch-daq: ping | install | exec | status | logs."""
+    """hutch-daq: ping | install | exec | config | logs."""
     args = build_parser().parse_args(argv)
     confirm, timeout = _resolve(args)
     try:
         if args.cmd == "ping":
-            res = ping(args.hutch, host=args.host)
+            res = ping()
             out(res)
             return OK if res["ok"] else UNREACHABLE
         if args.cmd == "install":
-            return out(install_listener(args.hutch, host=args.host), plain=True)
-        if args.cmd == "status":
-            return out(process_status(args.hutch, host=args.host, timeout=timeout))
+            return out(install_listener(), plain=True)
+        if args.cmd == "config":
+            return out(daq_config(args.hutch))
         if args.cmd == "logs":
             return out(logs(args.hutch, process=args.process, lines=args.lines,
-                            count=args.count, host=args.host, timeout=timeout))
+                            count=args.count))
         if args.cmd == "exec":
             code = sys.stdin.read() if args.code == "-" else args.code
             verdict = classify(code)
@@ -568,8 +568,7 @@ def main(argv: list[str] | None = None) -> int:
                 # Nothing is transmitted: exec_code is never reached.
                 out(verdict)
                 return REFUSED
-            res = exec_code(code, hutch=args.hutch, confirm=confirm,
-                            timeout=timeout, host=args.host)
+            res = exec_code(code, confirm=confirm, timeout=timeout)
             out(res)
             return OK if res["ok"] else UNREACHABLE
     except SafetyRefusal as exc:

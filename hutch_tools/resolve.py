@@ -24,8 +24,6 @@ from .daq import (
     BridgeError,
     caget,
     exec_code,
-    psdev_python,
-    psdev_read,
 )
 from .state import RESOLVED, State
 
@@ -52,40 +50,52 @@ def persist(st: State, field: str, rec: dict, *, kind: str = RESOLVED) -> dict:
 # --------------------------------------------------------------------------
 # happi: device inventory
 # --------------------------------------------------------------------------
-_DEVICES_SCRIPT = r"""
-import json
-with open(P["db"]) as fh:
-    db = json.load(fh)
-beamline = P["beamline"].upper()
-rows = []
-for entry in db.values():
-    if (entry.get("beamline") or "").upper() != beamline:
-        continue
-    z = entry.get("z")
+def _read_local(path: str) -> str:
+    """Read a file that is authoritative in itself. Raises rather than defaulting."""
     try:
-        z = float(z)
-    except (TypeError, ValueError):
-        z = float("inf")
-    rows.append({
-        "name": entry.get("name"),
-        "prefix": entry.get("prefix"),
-        "device_class": entry.get("device_class"),
-        "z": None if z == float("inf") else z,
-    })
-rows.sort(key=lambda r: (r["z"] is None, r["z"] if r["z"] is not None else 0))
-print(json.dumps(rows))
-"""
+        return pathlib.Path(path).read_text(errors="replace")
+    except OSError as exc:
+        raise ResolveError(f"cannot read {path}: {exc}") from exc
 
 
-def devices(hutch: str, *, timeout: int = T_QUERY) -> dict:
-    """Full device inventory for a beamline, ordered along the beam (z)."""
-    out = psdev_python(
-        _DEVICES_SCRIPT, {"db": HAPPI_DB, "beamline": hutch}, timeout=timeout
-    )
+def _happi_rows(db_path: str, beamline: str) -> list[dict]:
+    """Devices on one beamline from the happi db, ordered along the beam (z).
+
+    Reads the db file rather than importing happi: it is plain JSON, so this
+    needs nothing beyond the standard library and works in any interpreter.
+    """
     try:
-        rows = json.loads(out)
+        with open(db_path) as fh:
+            db = json.load(fh)
+    except OSError as exc:
+        raise ResolveError(f"cannot read happi db {db_path}: {exc}") from exc
     except json.JSONDecodeError as exc:
-        raise ResolveError(f"happi query returned non-JSON: {out[:200]!r}") from exc
+        raise ResolveError(f"happi db {db_path} is not valid JSON: {exc}") from exc
+
+    beamline = beamline.strip().upper()
+    rows = []
+    for entry in db.values():
+        if (entry.get("beamline") or "").upper() != beamline:
+            continue
+        try:
+            z = float(entry.get("z"))
+        except (TypeError, ValueError):
+            z = None
+        rows.append({
+            "name": entry.get("name"),
+            "prefix": entry.get("prefix"),
+            "device_class": entry.get("device_class"),
+            "z": z,
+        })
+    # Unknown z sorts last rather than at the origin: a device with no recorded
+    # position is not at the front of the beamline.
+    rows.sort(key=lambda r: (r["z"] is None, r["z"] if r["z"] is not None else 0))
+    return rows
+
+
+def devices(hutch: str) -> dict:
+    """Full device inventory for a beamline, ordered along the beam (z)."""
+    rows = _happi_rows(HAPPI_DB, hutch)
     if not rows:
         raise ResolveError(
             f"happi has no devices with beamline={hutch.upper()!r}. "
@@ -166,7 +176,7 @@ def beampath(hutch: str, *, timeout: int = T_DEVICE) -> dict:
     ``method`` rather than taken silently.
     """
     code = _BEAMPATH_SCRIPT.format(hutch=hutch.strip().lower())
-    res = exec_code(code, hutch=hutch, timeout=timeout)
+    res = exec_code(code, timeout=timeout)
     if not res["ok"]:
         raise ResolveError(f"beampath query failed: {res.get('error') or res['output'][:200]}")
     try:
@@ -177,7 +187,7 @@ def beampath(hutch: str, *, timeout: int = T_DEVICE) -> dict:
         raise ResolveError(report["error"])
     return _record(
         report,
-        f"resolved:lightpath via {res['host']} ({report.get('method')})",
+        f"resolved:lightpath via the hutch-python session ({report.get('method')})",
         blocking=report.get("blocking", []),
     )
 
@@ -223,10 +233,10 @@ def detectors(experiment: str, run: int, *, timeout: int = 300) -> dict:
 # --------------------------------------------------------------------------
 # hutch-python config: DAQ host, load list
 # --------------------------------------------------------------------------
-def hutch_conf(hutch: str, *, timeout: int = T_QUERY) -> dict:
+def hutch_conf(hutch: str) -> dict:
     """The hutch's conf.yml, source of the DAQ host and platform."""
     path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/conf.yml"
-    text = psdev_read(path, timeout=timeout)
+    text = _read_local(path)
     parsed: dict[str, Any] = {}
     for line in text.splitlines():
         m = re.match(r"^([a-zA-Z_][\w-]*):\s*(.*)$", line)
@@ -253,20 +263,20 @@ def daq(hutch: str, *, timeout: int = T_QUERY) -> dict:
         "        out[key] = 'ERROR: %s' % exc\n"
         "print(json.dumps(out))\n"
     )
-    res = exec_code(code, hutch=hutch, timeout=timeout)
+    res = exec_code(code, timeout=timeout)
     if not res["ok"]:
         raise ResolveError(f"DAQ query failed: {res.get('error') or res['output'][:200]}")
     try:
         payload = json.loads(res["output"].strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError) as exc:
         raise ResolveError(f"DAQ query returned non-JSON: {res['output'][:200]!r}") from exc
-    return _record(payload, f"resolved:daq signals via {res['host']}")
+    return _record(payload, "resolved:daq signals via the hutch-python session")
 
 
-def preset(hutch: str, device_name: str, *, timeout: int = T_QUERY) -> dict:
+def preset(hutch: str, device_name: str) -> dict:
     """A motor's saved positions. Nominal setpoints come from here, never a literal."""
     path = f"{HUTCH_PYTHON}/{hutch.strip().lower()}/presets/{device_name}.yml"
-    text = psdev_read(path, timeout=timeout)
+    text = _read_local(path)
     return _record(text, f"resolved:{path}")
 
 
@@ -308,16 +318,16 @@ def xtc2(hutch: str, experiment: str, run: int) -> dict:
     )
 
 
-def cds_file(path: str, *, timeout: int = T_QUERY) -> dict:
-    """Read any /cds file from S3DF. /cds is not mounted here; psdev bridges it."""
-    return _record(psdev_read(path, timeout=timeout), f"resolved:psdev cat {path}")
+def cds_file(path: str) -> dict:
+    """Read any /cds file. Mounted locally on the hutch machines."""
+    return _record(_read_local(path), f"resolved:{path}")
 
 
-def pv_values(pvs: list[str], *, hutch: str, timeout: int = T_QUERY) -> dict:
-    """Live PV values from ``{hutch}-control``. Compose the name with ``pv()``."""
+def pv_values(pvs: list[str], *, timeout: int = T_QUERY) -> dict:
+    """Live PV values over Channel Access. Compose the name with ``pv()``."""
     return _record(
-        caget(pvs, hutch=hutch, timeout=timeout),
-        f"resolved:caget on {hutch.lower()}-control",
+        caget(pvs, timeout=timeout),
+        f"resolved:caget {' '.join(pvs)}",
     )
 
 
@@ -349,8 +359,9 @@ def build_parser() -> argparse.ArgumentParser:
     pv_parser.add_argument("name")
     pv_parser.add_argument("--suffix", default="")
 
-    caget_parser = sub.add_parser("caget", help="read PVs from a hutch control machine")
-    caget_parser.add_argument("--hutch", required=True)
+    # No --hutch: CA is read locally and reaches the IOCs from any hutch
+    # machine, so the hutch was never part of the question.
+    caget_parser = sub.add_parser("caget", help="read PVs over Channel Access")
     caget_parser.add_argument("pv", nargs="+")
 
     detectors_parser = sub.add_parser("detectors")
@@ -370,7 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
     xtc2_parser.add_argument("--hutch", required=True)
     xtc2_parser.add_argument("--experiment", required=True)
     xtc2_parser.add_argument("--run", required=True, type=int)
-    sub.add_parser("cat", help="read a /cds file from S3DF via psdev").add_argument("path")
+    sub.add_parser("cat", help="read a /cds file").add_argument("path")
 
     return ap
 
@@ -387,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "pv":
             rec = pv(args.hutch, args.name, args.suffix)
         elif args.cmd == "caget":
-            rec = pv_values(args.pv, hutch=args.hutch)
+            rec = pv_values(args.pv)
         elif args.cmd == "beampath":
             rec = beampath(args.hutch)
         elif args.cmd == "daq":
