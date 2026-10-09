@@ -4,9 +4,6 @@
 # Silence off-hutch is the whole point. On S3DF or a laptop the tools cannot
 # reach /cds, Channel Access or the DAQ logs, so injecting hutch context there
 # would be misleading rather than merely noisy.
-#
-# Never exits non-zero and never blocks: a hook that fails degrades every
-# session start, including on the hosts it has no business firing on.
 set -u
 
 host="$(hostname -s 2>/dev/null)" || exit 0

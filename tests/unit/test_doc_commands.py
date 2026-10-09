@@ -29,7 +29,12 @@ SKILL = pathlib.Path(hutch_tools.__file__).resolve().parent.parent
 BINARIES = {
     "state": "state",
     "daq": "daq",
-    "resolve": "resolve",
+    "happi": "happi",
+    "epics": "epics",
+    "lightpath": "lightpath",
+    "python": "session",
+    "data": "data",
+    "skills": "skills",
     "lute": "lute",
     "log": "log",
 }

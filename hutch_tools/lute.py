@@ -76,6 +76,7 @@ from .common import (
     REFUSED,
     UNREACHABLE,
     USAGE,
+    external_path,
     fail,
     out,
     parser,
@@ -83,11 +84,11 @@ from .common import (
     skill_root,
     xtc2_files,
 )
-from .daq import BridgeUnavailable, SafetyRefusal, require_confirmation
-from .daq import _ssh as ssh
+from .session import BridgeUnavailable, SafetyRefusal, require_confirmation
+from .session import _ssh as ssh
 from .state import MissingValue, StaleValue, State
 
-PSCONDA = "/sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh"
+PSCONDA = external_path("PSCONDA")
 DEFAULT_PARTITION = "milano"
 
 #: Job-name fragments that mark a job as a LUTE/analysis workflow.
@@ -949,8 +950,8 @@ def _render(args) -> int:
 # requests and krtc are imported inside register() so planning, patching and
 # workspace setup work without them.
 # --------------------------------------------------------------------------
-PYTHON39 = "/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9"
-PYTHON311 = "/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11"
+PYTHON39 = external_path("LUTE_PY39")
+PYTHON311 = external_path("LUTE_PY311")
 ENVS = (("lute_env_py39", PYTHON39), ("lute_env_py311", PYTHON311))
 
 ELOG_URL = ("https://pswww.slac.stanford.edu/ws-kerb/lgbk/lgbk/"

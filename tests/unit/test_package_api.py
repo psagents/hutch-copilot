@@ -27,7 +27,12 @@ import hutch_tools
 TOOLS = {
     "state": "hutch-state",
     "daq": "hutch-daq",
-    "resolve": "hutch-resolve",
+    "happi": "hutch-happi",
+    "epics": "hutch-epics",
+    "lightpath": "hutch-lightpath",
+    "session": "hutch-python",
+    "data": "hutch-data",
+    "skills": "hutch-skills",
     "lute": "hutch-lute",
     "log": "hutch-log",
 }

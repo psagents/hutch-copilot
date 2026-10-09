@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 import pathlib
+import re
 import sys
 from typing import Any
 
@@ -79,10 +80,56 @@ def local_hhmm() -> str:
 
 
 # --------------------------------------------------------------------------
+# External paths -- declared by bin/hutch-env, never by this package
+#
+# This package holds no path outside its own checkout. bin/hutch-env is the
+# single source of truth; a hardcoded literal here is how the EPICS bin dir
+# came to be written down twice, in two languages, free to drift apart.
+# --------------------------------------------------------------------------
+#: Matches either declaration shape bin/hutch-env uses:
+#:   export HUTCH_X="${HUTCH_X:-/value}"
+#:   export HUTCH_X='/value'            (inside an `if [ -z ... ]` guard)
+#: Greedy to the last brace on purpose -- HUTCH_DAQ_CONFIG_DIR's value contains
+#: a literal `{hutch}`, which a `[^}]+` pattern would truncate.
+_DECLARATION = (
+    r"""^\s*export HUTCH_%(n)s="\$\{HUTCH_%(n)s:-(?P<expanded>.*)\}"\s*$"""
+    r"""|^\s*export HUTCH_%(n)s='(?P<quoted>[^']*)'\s*$"""
+)
+
+
+def external_path(name: str) -> str:
+    """A path outside this repo: ``$HUTCH_<name>``, else what bin/hutch-env declares.
+
+    Reading the file when the variable is unset is deliberate: the five
+    ``bin/hutch-*`` shims are plain Python and nothing sources hutch-env, so
+    requiring the export would break every invocation that does not.
+    """
+    env = os.environ.get("HUTCH_" + name)
+    if env:
+        return env
+    # Resolved from this file rather than via script(), which is defined below
+    # and would be a forward reference at import time.
+    env_file = pathlib.Path(__file__).resolve().parent.parent / "bin" / "hutch-env"
+    try:
+        text = env_file.read_text(errors="replace")
+    except OSError as exc:
+        raise FileNotFoundError(f"cannot read {env_file}: {exc}") from exc
+    match = re.search(_DECLARATION % {"n": name}, text, re.M)
+    if match is None:
+        raise FileNotFoundError(
+            f"bin/hutch-env does not declare HUTCH_{name}. It is the single "
+            f"source of truth for external paths -- add it there, not here."
+        )
+    found = match.group("expanded")
+    return found if found is not None else match.group("quoted")
+
+
+# --------------------------------------------------------------------------
 # Paths -- the only place a hutch-copilot path is constructed
 # --------------------------------------------------------------------------
-#: Root of the LCLS data filesystem. Overridable so tests can use a fixture tree.
-DS_ROOT = pathlib.Path(os.environ.get("HUTCH_DS_ROOT", "/sdf/data/lcls/ds"))
+def ds_root() -> pathlib.Path:
+    """Root of the LCLS data filesystem."""
+    return pathlib.Path(external_path("DS_ROOT"))
 
 #: Where hutch-copilot keeps its own artifacts inside an experiment directory.
 AGENT_SUBDIR = "results/psagents"
@@ -95,7 +142,7 @@ def _norm_hutch(hutch: str) -> str:
 
 def experiment_dir(hutch: str, experiment: str) -> pathlib.Path:
     """Top-level experiment directory, pre-provisioned by LCLS DM."""
-    return DS_ROOT / _norm_hutch(hutch) / experiment
+    return ds_root() / _norm_hutch(hutch) / experiment
 
 
 def agent_dir(hutch: str, experiment: str) -> pathlib.Path:

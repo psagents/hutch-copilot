@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import common as _cli, daq
+from hutch_tools import common as _cli
+from hutch_tools import session as daq
 
 
 @pytest.fixture
@@ -148,11 +149,12 @@ def test_run_and_classify_are_gone():
     """Both were removed in M1.a: `run` shipped whole scripts into the session
     (and its callers are resolver calls now), `classify` folded into `exec`.
 
-    `status` went with the move onto the DAQ machine: it wrapped a bare
-    `daqmgr`, which is not on PATH for anyone and is gated behind the operator
-    account. `config` replaced it -- a verbatim dump for a judging layer."""
+    `config` and `logs` left with the Oct 2026 split -- they read the DAQ's own
+    files, not the session, so they are `hutch-daq`. What stays here is the
+    session and the gate in front of it, plus `conf` (hutch-python's own
+    conf.yml, which is session truth rather than DAQ truth)."""
     choices = _subcommands()
-    assert choices == {"ping", "install", "exec", "config", "logs"}
+    assert choices == {"ping", "install", "exec", "conf"}
 
 
 def _subcommands() -> set:

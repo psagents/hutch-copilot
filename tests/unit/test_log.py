@@ -18,7 +18,7 @@ from hutch_tools import common as paths, log
 
 @pytest.fixture()
 def logged(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     log.init("mfx", "e1", shift_date="2026-08-31", shift_start="08:00")
     return log.path("mfx", "e1")
 
@@ -27,7 +27,7 @@ def logged(tmp_path, monkeypatch):
 # init
 # --------------------------------------------------------------------------
 def test_init_writes_the_document_header(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     res = log.init("mfx", "e1", shift_date="2026-08-31", shift_start="08:00")
     text = log.path("mfx", "e1").read_text()
     assert res["created"] is True
@@ -45,7 +45,7 @@ def test_init_is_idempotent_and_never_overwrites(logged):
 
 
 def test_init_carries_optional_header_fields(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     log.init("mfx", "e1", shift_date="2026-08-31",
              header_fields={"Sample": "Lyso, 10 mM", "Photon energy": "9500 eV"})
     text = log.path("mfx", "e1").read_text()
@@ -54,7 +54,7 @@ def test_init_carries_optional_header_fields(tmp_path, monkeypatch):
 
 
 def test_appending_without_init_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     with pytest.raises(log.LogError, match="hutch-log init"):
         log.append("mfx", "e1", "something happened")
     assert not log.path("mfx", "e1").exists()
@@ -123,18 +123,20 @@ def test_only_init_and_append_are_exposed():
 # concurrency -- several agents plus the operator write during a shift
 # --------------------------------------------------------------------------
 def _writer(args):
+    """One pool worker appending to the shared log.
+
+    Sets HUTCH_DS_ROOT rather than patching an attribute: a pool worker is a
+    fresh process, so monkeypatch does not reach it. No reload needed --
+    common.ds_root() reads the environment per call.
+    """
     root, text = args
     os.environ["HUTCH_DS_ROOT"] = str(root)
-    import importlib
     from hutch_tools import log as lg
-    from hutch_tools import common as p
-    importlib.reload(p)
-    importlib.reload(lg)
     lg.append("mfx", "e1", text, at="12:00")
 
 
 def test_concurrent_appends_lose_nothing(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     log.init("mfx", "e1", shift_date="2026-08-31")
     texts = [f"concurrent entry {i}" for i in range(8)]
     with multiprocessing.Pool(4) as pool:

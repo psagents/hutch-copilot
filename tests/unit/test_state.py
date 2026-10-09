@@ -12,7 +12,7 @@ from hutch_tools import common as paths, state
 
 @pytest.fixture()
 def st(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     return state.State("mfx", "mfxl1013621")
 
 
@@ -23,7 +23,7 @@ def test_path_is_the_canonical_one(st, tmp_path):
 
 
 def test_hutch_case_does_not_change_the_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     assert state.State("MFX", "e1").path == state.State("mfx", "e1").path
 
 

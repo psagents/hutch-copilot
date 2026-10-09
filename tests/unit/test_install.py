@@ -73,7 +73,7 @@ def test_a_dag_with_no_slurm_params_reports_zero():
 # --------------------------------------------------------------------------
 @pytest.fixture()
 def workspace(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     out = tmp_path / "mfx/e1/results/lute_output"
     out.mkdir(parents=True)
     (out / "mfx_lute.yaml").write_text("title: x\n")
@@ -82,7 +82,7 @@ def workspace(tmp_path, monkeypatch):
 
 
 def test_plan_touches_nothing(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     lute.plan(experiment="e1", hutch="mfx", workflows=["sfx_cctbx"])
     assert list(tmp_path.iterdir()) == []
 
@@ -173,24 +173,24 @@ def test_trigger_defaults_per_workflow(workspace):
 # --------------------------------------------------------------------------
 def test_results_path_comes_from_paths_not_an_fstring(tmp_path, monkeypatch):
     """The original built /sdf/data/lcls/ds/... by hand."""
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     p = lute.plan(experiment="e1", hutch="mfx", workflows=[])
     assert p["results_dir"] == str(tmp_path / "mfx/e1/results")
 
 
 def test_optional_subdirectory_is_honoured(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     p = lute.plan(experiment="e1", hutch="mfx", directory="lconreux", workflows=[])
     assert p["lute_output_dir"].endswith("results/lconreux/lute_output")
 
 
 def test_hutch_defaults_to_the_experiment_prefix(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     assert lute.plan(experiment="mfxl1013621", workflows=[])["hutch"] == "mfx"
 
 
 def test_account_defaults_to_the_experiment(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     assert lute.plan(experiment="e1", hutch="mfx", workflows=[])["account"] == "lcls:e1"
 
 

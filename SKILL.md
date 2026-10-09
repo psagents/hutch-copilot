@@ -18,14 +18,20 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 
 ## Tool Layer (`hutch-tools`) — read this before any procedure below
 
-Mechanism lives in `hutch-tools`, not in prose. **Never guess** — call the tool. 
-All five print JSON, and one module owns one tool.
+Mechanism lives in `hutch-tools`, not in prose. **Never guess** — call the tool.
+They all print JSON, one module owns one tool, and **one tool owns one backend** —
+so the tool to call follows from which source answers the question.
 
 | Tool | Owns |
 |---|---|
 | `bin/hutch-state` | Keeps track of the experiment state |
-| `bin/hutch-daq` | Manages the live hutch-python session, the safety gate |
-| `bin/hutch-resolve` | Machine truth: happi, lightpath, EPICS, DataSource, `/cds` |
+| `bin/hutch-happi` | The device database: what exists, where, under which PV prefix |
+| `bin/hutch-epics` | Channel Access: live PV reads |
+| `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
+| `bin/hutch-python` | The live hutch-python session, and the safety gate in front of it |
+| `bin/hutch-daq` | The DAQ: its state, logs and config. Read-only |
+| `bin/hutch-data` | What landed on disk: psana2 detectors, XTC2, PDB cells, `/cds` files |
+| `bin/hutch-skills` | Which skills are installed, and where |
 | `bin/hutch-lute` | LUTE: submission, monitoring, pedestals, config rendering, workspace setup |
 | `bin/hutch-log` | the beamtime log |
 
@@ -68,7 +74,6 @@ sub-skill rather than working from memory of it.
 |---|---|
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beam path status" | Read `are-we-ready/SKILL.md` |
-| `/align-spectrometer` or "align the beam", "optimize beam", "run amine's routine" | **Not implemented.** Say so, offer `/are-we-ready`, and guide the operator through moves by hand via `hutch-daq` with the safety gate. |
 | `/analyze-data` or "how does the data look", "assess the run", "is the dataset good", "sfx metrics", "read the merge log" — **or** "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready" | Read `analyze-data/SKILL.md`. It owns both halves: setting up analysis workflows, and tracking and interpreting their output. Pass all known experiment state (hutch, experiment, detectors, photon energy) so it does not re-ask. |
 
 ---
@@ -79,8 +84,8 @@ Separate skills, installed across two roots — `~/.claude/skills` and
 `/sdf/group/lcls/ds/dm/apps/dev/opencode/skills`. **Don't assume; ask:**
 
 ```bash
-bin/hutch-resolve skills                  # everything installed, and where
-bin/hutch-resolve skills ask-smalldata    # one, with the roots it searched
+bin/hutch-skills list                     # everything installed, and where
+bin/hutch-skills list ask-smalldata       # one, with the roots it searched
 ```
 
 The listing names each one and what it covers — there are advisors for LUTE internals, SFX

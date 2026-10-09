@@ -22,7 +22,7 @@ import re
 
 import pytest
 
-from hutch_tools import common as paths, lute, resolve as resolvers
+from hutch_tools import common as paths, data as resolvers, lute
 
 CAMPAIGN = pathlib.Path(
     "/sdf/data/lcls/ds/prj/prjlute22/results/benchmarks/hutch_copilot/campaigns/"

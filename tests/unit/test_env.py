@@ -8,7 +8,10 @@ not a hutch machine at all, and a SessionStart hook that fires off-hutch.
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
+
+import pytest
 
 from hutch_tools.common import script
 
@@ -110,6 +113,64 @@ def test_the_hook_never_fails_the_session():
     hosts this has no business firing on."""
     for host in ["mfx-daq", "sdflogin001", ""]:
         assert _hook_on(host).returncode == 0
+
+
+# --------------------------------------------------------------------------
+# External paths -- bash declares, Python reads the same declaration
+# --------------------------------------------------------------------------
+def test_no_external_path_literal_survives_in_the_package():
+    """The drift test, and the reason this contract exists.
+
+    The EPICS bin dir was hand-written in both daq.py and hutch-env, with
+    nothing tying them together: an upgrade updates one and leaves the other,
+    and which copy wins depends on the code path that host takes. With one
+    declaration and Python reading it, drift is not possible.
+    """
+    from hutch_tools import common as paths
+
+    offenders = {}
+    pattern = re.compile(r'"(/cds/[^"]+|/sdf/(?:group|data)/[^"]+)"')
+    for py in sorted((paths.skill_root() / "hutch_tools").glob("*.py")):
+        hits = set(pattern.findall(py.read_text(errors="replace")))
+        if hits:
+            offenders[py.name] = sorted(hits)
+    assert not offenders, (
+        f"external path literals in the package: {offenders}. Declare them in "
+        f"bin/hutch-env and read them with common.external_path()."
+    )
+
+
+@pytest.mark.parametrize("name", [
+    "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "PCDS_PYTHON", "PSCONDA",
+    "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
+    "DS_ROOT", "SKILL_ROOTS",
+])
+def test_bash_and_python_agree_on_every_external_path(name):
+    """Sourcing hutch-env and calling external_path() must give one answer."""
+    from hutch_tools import common as paths
+
+    from_bash = _sh(f'echo "$HUTCH_{name}"').stdout.strip()
+    assert from_bash, f"hutch-env did not export HUTCH_{name}"
+    assert from_bash == paths.external_path(name)
+
+
+def test_a_preset_external_path_is_respected():
+    """`${VAR:-default}` and the `if [ -z ]` guard, not a bare assignment: an
+    operator or a test must be able to point a path somewhere else."""
+    for name in ("EPICS_BIN", "DAQ_CONFIG_DIR"):
+        out = subprocess.run(
+            ["bash", "-c", f"source {ENV} >/dev/null 2>&1; echo \"$HUTCH_{name}\""],
+            capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin", f"HUTCH_{name}": "/tmp/preset"},
+        ).stdout.strip()
+        assert out == "/tmp/preset", f"HUTCH_{name} was clobbered: {out!r}"
+
+
+def test_the_external_paths_survive_the_unset():
+    """They are exported for Python to read; unsetting them defeats the point."""
+    unset = [ln for ln in ENV.read_text().splitlines() if ln.startswith("unset ")]
+    assert unset, "the unset line vanished"
+    assert not any("HUTCH_" in ln for ln in unset), unset
 
 
 def test_pythonpath_is_not_exported():

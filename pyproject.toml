@@ -31,7 +31,12 @@ dev = ["pytest>=7", "ruff>=0.1"]
 [project.scripts]
 hutch-state = "hutch_tools.state:main"
 hutch-daq = "hutch_tools.daq:main"
-hutch-resolve = "hutch_tools.resolve:main"
+hutch-happi = "hutch_tools.happi:main"
+hutch-epics = "hutch_tools.epics:main"
+hutch-lightpath = "hutch_tools.lightpath:main"
+hutch-python = "hutch_tools.session:main"
+hutch-data = "hutch_tools.data:main"
+hutch-skills = "hutch_tools.skills:main"
 hutch-lute = "hutch_tools.lute:main"
 hutch-log = "hutch_tools.log:main"
 
@@ -41,8 +46,10 @@ packages = ["hutch_tools"]
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
 # Makes hutch_tools importable without an install and without a conftest sys.path
-# hack, so the suite behaves identically installed or from a checkout.
-pythonpath = ["."]
+# hack, so the suite behaves identically installed or from a checkout. The
+# readiness scripts are on it too: they own the composite checks, so
+# test_readiness.py imports them directly rather than shelling out.
+pythonpath = [".", "are-we-ready/scripts"]
 addopts = "-q"
 # Set the option rather than filtering the warning: pytest-asyncio emits it during
 # plugin init, before ini filters are installed, so muting it does not work anyway.

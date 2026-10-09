@@ -15,7 +15,7 @@
 _hutch_env_repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
 # The hutch comes from the hostname -- this skill serves MEC, MFX, RIX, TMO and
-# XPP, so a hardcoded `mfx` would be wrong four times out of five.
+# XPP
 hutch_from_hostname() {
     case "${1:-$(hostname -s)}" in
         *-daq|*-control|*-console|*-monitor)
@@ -24,13 +24,40 @@ hutch_from_hostname() {
     esac
 }
 
-# caget is on PATH on the control machines but not on the DAQ machines, where
-# only the absolute rhel9 build exists. Prepend it when it is missing rather
-# than unconditionally, so a host that ships its own keeps it.
-_hutch_env_epics="/cds/group/pcds/epics/base/R7.0.2-2.0/bin/rhel9-x86_64"
+# --------------------------------------------------------------------------
+# External paths -- the single source of truth for every path outside this repo
+# --------------------------------------------------------------------------
 
-if ! command -v caget >/dev/null 2>&1 && [ -x "$_hutch_env_epics/caget" ]; then
-    PATH="$_hutch_env_epics:$PATH"
+# EPICS Channel Access binaries (caget). The rhel9 build: a linux-x86_64 path is
+# wrong on these hosts, and the old extensions path exists on neither.
+export HUTCH_EPICS_BIN="${HUTCH_EPICS_BIN:-/cds/group/pcds/epics/base/R7.0.2-2.0/bin/rhel9-x86_64}"
+
+# happi device database, and the hutch-python app tree beside it.
+export HUTCH_HAPPI_DB="${HUTCH_HAPPI_DB:-/cds/group/pcds/pyps/apps/hutch-python/device_config/db.json}"
+export HUTCH_PYTHON_APPS="${HUTCH_PYTHON_APPS:-/cds/group/pcds/pyps/apps/hutch-python}"
+
+# Interpreters. PCDS_PYTHON runs lightpath/happi; the psconda script and the two
+# LUTE interpreters are the analysis side.
+export HUTCH_PCDS_PYTHON="${HUTCH_PCDS_PYTHON:-/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/bin/python3.12}"
+export HUTCH_PSCONDA="${HUTCH_PSCONDA:-/sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh}"
+export HUTCH_LUTE_PY39="${HUTCH_LUTE_PY39:-/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9}"
+export HUTCH_LUTE_PY311="${HUTCH_LUTE_PY311:-/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11}"
+
+# The operator log root is joined with <hutch>opr/YYYY/MM.
+export HUTCH_OPR_LOG_ROOT="${HUTCH_OPR_LOG_ROOT:-/cds/home/opr}"
+
+# DAQ config dir carries a {hutch} field, filled in by the caller.
+if [ -z "${HUTCH_DAQ_CONFIG_DIR:-}" ]; then
+    export HUTCH_DAQ_CONFIG_DIR='/cds/group/pcds/dist/pds/{hutch}/scripts'
+fi
+
+# LCLS data filesystem, and the skill roots (colon-separated, ~ allowed).
+export HUTCH_DS_ROOT="${HUTCH_DS_ROOT:-/sdf/data/lcls/ds}"
+export HUTCH_SKILL_ROOTS="${HUTCH_SKILL_ROOTS:-~/.claude/skills:/sdf/group/lcls/ds/dm/apps/dev/opencode/skills}"
+
+# EPICS Channel Access binaries (caget). Prepend the build path if caget is not on PATH.
+if ! command -v caget >/dev/null 2>&1 && [ -x "$HUTCH_EPICS_BIN/caget" ]; then
+    PATH="$HUTCH_EPICS_BIN:$PATH"
 fi
 
 case ":$PATH:" in
@@ -47,4 +74,5 @@ else
          "but anything reading /cds, CA or the DAQ logs will fail here." >&2
 fi
 
-unset _hutch_env_repo _hutch_env_epics
+# Only the internals. Every HUTCH_* path above must survive into the environment.
+unset _hutch_env_repo

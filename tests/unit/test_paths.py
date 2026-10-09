@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from hutch_tools import common as paths
 
 
@@ -30,8 +32,51 @@ def test_script_lookup_fails_loudly():
 
 
 def test_ds_root_is_overridable(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     assert paths.xtc2_dir("mfx", "e1") == tmp_path / "mfx/e1/xtc"
+
+
+# --------------------------------------------------------------------------
+# external_path -- bin/hutch-env owns every path outside this checkout
+#
+# The EPICS bin dir used to be written down twice, in daq.py and in
+# bin/hutch-env, free to drift apart on the next EPICS upgrade. These pin the
+# contract that replaced it: one declaration, read by both languages.
+# --------------------------------------------------------------------------
+#: Every name bin/hutch-env must declare. One that stops being declared is a
+#: path some tool resolves to nothing.
+DECLARED = [
+    "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "PCDS_PYTHON", "PSCONDA",
+    "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
+    "DS_ROOT", "SKILL_ROOTS",
+]
+
+
+@pytest.mark.parametrize("name", DECLARED)
+def test_every_external_path_is_declared(name, monkeypatch):
+    """With no environment at all, the value still comes from bin/hutch-env."""
+    monkeypatch.delenv("HUTCH_" + name, raising=False)
+    assert paths.external_path(name)
+
+
+def test_the_environment_wins_over_the_file(monkeypatch):
+    monkeypatch.setenv("HUTCH_EPICS_BIN", "/tmp/somewhere-else")
+    assert paths.external_path("EPICS_BIN") == "/tmp/somewhere-else"
+
+
+def test_a_templated_value_keeps_its_field(monkeypatch):
+    """`${VAR:-default}` cannot hold `{hutch}`: bash reads the template's
+    closing brace as the end of its own expansion and yields
+    `pds/{hutch/scripts}` with the brace moved. Hence the `if [ -z ]` guard."""
+    monkeypatch.delenv("HUTCH_DAQ_CONFIG_DIR", raising=False)
+    assert paths.external_path("DAQ_CONFIG_DIR").endswith("{hutch}/scripts")
+
+
+def test_an_undeclared_path_raises(monkeypatch):
+    """Never a guessed default -- the bug this whole contract removes."""
+    monkeypatch.delenv("HUTCH_NOT_A_REAL_PATH", raising=False)
+    with pytest.raises(FileNotFoundError, match="HUTCH_NOT_A_REAL_PATH"):
+        paths.external_path("NOT_A_REAL_PATH")
 
 
 def test_xtc2_lives_in_xtc_not_xtc2(tmp_path, monkeypatch):
@@ -42,14 +87,14 @@ def test_xtc2_lives_in_xtc_not_xtc2(tmp_path, monkeypatch):
     `xtc2/`. So `hutch-resolve xtc2` answered `present: false` for data that
     had landed, and the peds trap refused every DARK run on that evidence.
     """
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     assert paths.xtc2_dir("mfx", "e1").name == "xtc"
 
 
 def test_only_xtc2_files_count_as_landed_data(tmp_path, monkeypatch):
     """`xtc/` also holds index/, md5/ and smalldata/ entries carrying the run
     number, so a bare `*r0004*` glob over-counts."""
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     d = tmp_path / "mfx" / "e1" / "xtc"
     d.mkdir(parents=True)
     (d / "e1-r0004-s001-c000.xtc2").write_bytes(b"x")
@@ -84,7 +129,7 @@ def test_cell_string_matches_the_format_in_production_use(tmp_path):
     rendered YAML, so '90.0' vs '90' is the difference between passing and a
     spurious failure. Its read_cryst1 emits str(float); match that.
     """
-    from hutch_tools import resolve as resolvers
+    from hutch_tools import data as resolvers
     pdb = tmp_path / "x.pdb"
     pdb.write_text(
         "CRYST1   77.050   77.050   37.210  90.00  90.00  90.00 P 43 21 2     8\n"

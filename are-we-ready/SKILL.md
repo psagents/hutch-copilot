@@ -14,9 +14,9 @@ Read-only readiness. You move nothing.
 Run all three, then report one verdict:
 
 ```bash
-bin/hutch-resolve check-beam  --hutch "$H"
-bin/hutch-resolve check-hutch --hutch "$H"
-bin/hutch-resolve check-daq   --hutch "$H" --experiment "$E"
+are-we-ready/scripts/check_beam.py  --hutch "$H"
+are-we-ready/scripts/check_hutch.py --hutch "$H"
+are-we-ready/scripts/check_daq.py   --hutch "$H" --experiment "$E"
 ```
 
 Run all three even when the question names only one — "beam is fine" is not readiness

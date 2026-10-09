@@ -18,11 +18,17 @@ install step and there is no `conftest.py`. `pip install -e .` stays optional, b
 - **The suite is in-process.** No test shells out to `bin/hutch-*`. CLI *shape* is checked by
   introspecting `build_parser()` (`test_doc_commands.py`), behaviour by calling module functions
   directly. That is why every module keeps `build_parser()` separate from `main()`.
-- **Filesystem fixtures go through `monkeypatch.setattr(paths, "DS_ROOT", tmp_path)`** —
-  `paths` is the tests' alias for `hutch_tools.common`, which owns the path helpers — and
-  paths under it are built with the `paths.*` helpers rather than written as literals. A literal
-  is how the `xtc2/` vs `xtc/` bug survived: the test asserted the same wrong directory the code
-  produced, so both agreed and neither matched the filesystem.
+- **Filesystem fixtures go through `monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))`** —
+  and paths under it are built with the `paths.*` helpers (`paths` is the tests' alias for
+  `hutch_tools.common`) rather than written as literals. A literal is how the `xtc2/` vs
+  `xtc/` bug survived: the test asserted the same wrong directory the code produced, so both
+  agreed and neither matched the filesystem.
+
+  `setenv`, not `setattr`: every external path is declared in `bin/hutch-env` and read per
+  call by `common.external_path()`, so one override mechanism works everywhere — including
+  in a `multiprocessing` worker, which `setattr` cannot reach (see `_writer` in
+  `test_log.py`). `DS_ROOT` was a frozen module constant until Oct 2026 and needed an
+  `importlib.reload()` in that worker to pick a new root up at all.
 - **SSH is not mocked anywhere.** Nothing that requires `psdev` or a DAQ machine has behavioural
   coverage; `hutch-daq status` and `logs` are deliberately in that category until there is a live
   experiment to verify them against.

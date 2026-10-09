@@ -40,19 +40,34 @@ source bin/hutch-env     # sets PATH and $HUTCH, finds caget
 At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
 every session start. Off-hutch it stays silent, by design.
 
-## The five tools
+## The tools
+
+**One tool, one backend.** The tool to call follows from which source answers the
+question, so there is never a choice to make about where a fact comes from.
 
 | tool | owns |
 |---|---|
 | `hutch-state` | the experiment state file — facts, with provenance and TTL |
-| `hutch-daq` | the live hutch-python session, the safety gate, the DAQ config and logs |
-| `hutch-resolve` | machine truth: happi, lightpath, EPICS, DataSource, `/cds` |
+| `hutch-happi` | the device database — what exists, where, under which PV prefix |
+| `hutch-epics` | Channel Access — live PV reads |
+| `hutch-lightpath` | the beam path to a hutch, and what blocks it |
+| `hutch-python` | the live hutch-python session, and the safety gate in front of it |
+| `hutch-daq` | the DAQ — state, logs, config. Read-only |
+| `hutch-data` | what landed on disk — psana2 detectors, XTC2, PDB cells, `/cds` files |
+| `hutch-skills` | which skills are installed, and where |
 | `hutch-lute` | LUTE: jobs, pedestals, config rendering, workspace setup |
 | `hutch-log` | the beamtime log — events, for humans |
 
 `--help` on any of them lists its subcommands. `SKILL.md` carries the
 contract the agent must obey — provenance on every write, stale reads fail, a
 resolver that cannot reach its source raises rather than guessing.
+
+A question that composes several backends — "is beam reaching the hutch?", "can the
+DAQ record?" — is a readiness *judgment*, not a backend read, and belongs to the
+sub-skill that asks it. Those three live in `are-we-ready/scripts/`. They were
+`hutch-resolve check-*` until Oct 2026, which is also why the EPICS bin path ended up
+hardcoded in the DAQ module: one tool reaching into four backends has nowhere correct
+to put anything.
 
 They run from a bare checkout with no install step. The package is stdlib-only at
 module scope and Python 3.9-compatible, because psconda ships 3.9 and the bridge
@@ -82,10 +97,10 @@ read-only.
 
 ```bash
 # no --confirm: prints the classification, transmits nothing, exits 5
-bin/hutch-daq --hutch mfx exec 'mfx_stopper_1.remove()'
+bin/hutch-python --hutch mfx exec 'mfx_stopper_1.remove()'
 
 # declaring a weaker class than the code needs is a refusal, not a downgrade
-bin/hutch-daq --hutch mfx exec 'mfx_stopper_1.remove()' --confirm write   # rc=5
+bin/hutch-python --hutch mfx exec 'mfx_stopper_1.remove()' --confirm write   # rc=5
 ```
 
 This is defence in depth, not a proof — patterns cannot capture every unsafe

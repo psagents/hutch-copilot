@@ -11,7 +11,7 @@ from hutch_tools import common as paths, lute
 # The ordering guard: makepeds reads the XTC2 files, so they must have landed
 # --------------------------------------------------------------------------
 def test_missing_xtc2_blocks_deployment(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     paths.xtc2_dir("mfx", "e1").mkdir(parents=True)
     with pytest.raises(lute.LuteError, match="no XTC2 files found for run 43"):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm="write")
@@ -19,7 +19,7 @@ def test_missing_xtc2_blocks_deployment(tmp_path, monkeypatch):
 
 def test_present_xtc2_gets_past_the_guard(tmp_path, monkeypatch):
     """With data on disk the guard passes and the command reaches the transport."""
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)
     (d / "e1-r0043-s000.xtc2").write_bytes(b"x")
@@ -43,7 +43,7 @@ def test_a_failed_step_is_reported_not_raised(tmp_path, monkeypatch):
     daq._ssh raises on non-zero rather than returning a returncode, so this is
     the case that would regress into an unhandled BridgeUnavailable.
     """
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)
     (d / "e1-r0043-s000.xtc2").write_bytes(b"x")
@@ -105,7 +105,7 @@ def test_the_refusal_does_not_depend_on_what_is_on_disk(tmp_path, monkeypatch):
     is absent reports the wrong reason and, worse, an unconfirmed command on one
     whose data HAS landed is the only case the gate is exercised on.
     """
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     paths.xtc2_dir("mfx", "e1").mkdir(parents=True)     # no files: guard would trip
     with pytest.raises(lute.SafetyRefusal):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm=None)
@@ -125,7 +125,7 @@ def test_the_cli_maps_a_refusal_to_rc_5(monkeypatch, capsys):
 
 def test_fallback_commands_are_also_gated(tmp_path, monkeypatch):
     """The per-detector tools match no read-only pattern, so they err upward."""
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
 
     def no_ssh(*a, **kw):
         raise AssertionError("a refused command reached the network")
@@ -138,7 +138,7 @@ def test_fallback_commands_are_also_gated(tmp_path, monkeypatch):
 
 
 def test_unknown_detector_has_no_fallback(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     xtc2 = paths.xtc2_dir("mfx", "e1")
     xtc2.mkdir(parents=True)
     (xtc2 / "e1-r0043-s000.xtc2").touch()
@@ -156,8 +156,8 @@ def test_unknown_detector_has_no_fallback(tmp_path, monkeypatch):
 
 
 def test_xtc2_resolver_reports_absence_without_guessing(tmp_path, monkeypatch):
-    from hutch_tools import resolve as resolvers
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    from hutch_tools import data as resolvers
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     rec = resolvers.xtc2("mfx", "e1", 43)
     assert rec["value"]["present"] is False
     assert rec["value"]["count"] == 0
@@ -165,8 +165,8 @@ def test_xtc2_resolver_reports_absence_without_guessing(tmp_path, monkeypatch):
 
 
 def test_xtc2_resolver_counts_and_sizes(tmp_path, monkeypatch):
-    from hutch_tools import resolve as resolvers
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    from hutch_tools import data as resolvers
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     # Built through the resolver's own path function, not a literal, so a wrong
     # directory name cannot be asserted true by both sides at once -- this test
     # passed for months against `xtc2/`, which no experiment on disk has.
@@ -183,8 +183,8 @@ def test_xtc2_resolver_counts_and_sizes(tmp_path, monkeypatch):
 
 def test_the_resolver_and_the_peds_guard_agree(tmp_path, monkeypatch):
     """Both read paths.xtc2_files, so 'the data has landed' has one definition."""
-    from hutch_tools import resolve as resolvers
-    monkeypatch.setattr(paths, "DS_ROOT", tmp_path)
+    from hutch_tools import data as resolvers
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)
     (d / "e1-r0043-s000.xtc2").write_bytes(b"x")

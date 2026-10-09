@@ -20,7 +20,7 @@ This file owns the gate, the confirmation, and the verdict on what came back.
 
 ```bash
 bin/hutch-state audit --hutch "$H" --experiment "$E"    # everything known, with age
-bin/hutch-resolve check-daq --hutch "$H"
+bin/hutch-daq state --hutch "$H"
 ```
 
 `MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
@@ -70,8 +70,8 @@ reasons, the duration and the sample, and wait for explicit approval. Then re-se
 the class you were actually granted:
 
 ```bash
-bin/hutch-daq --hutch "$H" --timeout 300 --confirm write exec "<run command>"
-bin/hutch-daq --hutch "$H" exec 'get_run()'
+bin/hutch-python --hutch "$H" --timeout 300 --confirm write exec "<run command>"
+bin/hutch-python --hutch "$H" exec 'get_run()'
 ```
 
 **`DARK` is two writes, and the second is gated.** `takepeds()` records through the
@@ -90,7 +90,7 @@ Record the time the run command returned — `watch` needs it next.
 ## 4. Verify and watch — mandatory, do not skip
 
 ```bash
-bin/hutch-resolve xtc2 --hutch "$H" --experiment "$E" --run {run}
+bin/hutch-data xtc2 --hutch "$H" --experiment "$E" --run {run}
 bin/hutch-lute watch --user "${H}opr" --since "$RUN_END_ISO" --timeout 90
 bin/hutch-lute status "$JOB_ID"
 ```
