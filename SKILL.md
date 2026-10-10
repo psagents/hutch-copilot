@@ -26,7 +26,7 @@ so the tool to call follows from which source answers the question.
 |---|---|
 | `bin/hutch-state` | Keeps track of the experiment state |
 | `bin/hutch-happi` | The device database: what exists, where, under which PV prefix |
-| `bin/hutch-epics` | Channel Access: live PV reads |
+| `bin/hutch-epics` | Channel Access: live PV reads, and archived PV history |
 | `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
 | `bin/hutch-python` | The live hutch-python session, and the safety gate in front of it |
 | `bin/hutch-daq` | The DAQ: its state, logs and config. Read-only |
@@ -52,16 +52,54 @@ Three rules that the tools enforce and you must not work around:
 Resolve, don't recall: device lists, PV prefixes, detector aliases, DAQ hosts and unit
 cells all come from `hutch-resolve`. This skill deliberately ships no tables of them.
 
+**"Did this move overnight?" is not a `caget` question.** `caget` reads now. For what
+changed between two times, ask the archiver — and ask it for `.MSTA`, not `.RBV`:
+
+```bash
+bin/hutch-epics moved MFX:DG1:PIC:01 --from 2026-10-02T18:00
+```
+
+`.RBV` is archived with a deadband, so a move smaller than it leaves no sample and reads
+as "did not move"; `moved` reads `.MSTA` instead, which is archived on change, and
+discards IOC reconnects that would otherwise look like motion. `moved: null` means no
+usable sample — unknown, never a confident no. Use `history <pv>` for the raw series.
+The archiver is on the hutch network only; off-hutch both fail rc=4 rather than
+returning an empty series.
+
 Two rules about the experiment state file, which every sub-skill reads and writes:
 
 - **Get its path from `hutch-state path --hutch H --experiment E` — never write it out.**
 - Use any field already present without re-asking the user. If a field **required for the
   current task** is missing or null, ask for it — do not infer or assume a value.
 
-> **No experiment-context manager is installed.** Session-start state recovery, ambient
-> per-turn logging, condition tracking and the shift handoff are being redesigned, so
-> nothing restores context automatically and `hutch-log` currently has no caller. Each
-> sub-skill still writes its own conclusions with provenance.
+> **No experiment-context manager is installed.** Ambient per-turn logging, condition
+> tracking and the shift handoff are being redesigned, so `hutch-log` currently has no
+> caller. Each sub-skill still writes its own conclusions with provenance.
+
+---
+
+## Establish the experiment first
+
+The hutch comes from the host; the experiment does not. **Before dispatching to any
+sub-skill, ask the operator which experiment this session is for.** Once, at the top —
+not when some sub-skill turns out to need it.
+
+Then load what is already recorded for it:
+
+```bash
+bin/hutch-state audit --hutch $H --experiment $E
+```
+
+Every field with its provenance and staleness, most stale first. A fresh experiment has
+no state file and audits empty — that is a new experiment, not a failure.
+
+Report the experiment and the loaded context back in one line, then proceed. Three rules:
+
+- **Carry `$E` for the session** and pass it to every sub-skill. Do not ask twice.
+- **A stale field is not a value.** Re-resolve it, or report its age — never use it bare.
+- **The experiment is `operator`, never `resolved`**, if you write it. The operator's
+  answer is intent. The DAQ's `experiment` signal is the separate, resolved reading, and
+  the two disagreeing is a finding — see `are-we-ready`.
 
 ---
 

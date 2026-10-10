@@ -49,7 +49,7 @@ question, so there is never a choice to make about where a fact comes from.
 |---|---|
 | `hutch-state` | the experiment state file — facts, with provenance and TTL |
 | `hutch-happi` | the device database — what exists, where, under which PV prefix |
-| `hutch-epics` | Channel Access — live PV reads |
+| `hutch-epics` | Channel Access — live PV reads; and PV history from the archiver |
 | `hutch-lightpath` | the beam path to a hutch, and what blocks it |
 | `hutch-python` | the live hutch-python session, and the safety gate in front of it |
 | `hutch-daq` | the DAQ — state, logs, config. Read-only |

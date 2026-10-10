@@ -22,6 +22,14 @@ The hutch-copilot skill and its tools are installed at:
   $repo
 Put the tools on PATH with: source $repo/bin/hutch-env
 Use the hutch-copilot skill for any experiment operation at this hutch.
+
+The hutch is known; the experiment is not, and the host cannot tell you. The
+systemMessage has already asked the operator which experiment this session is for.
+If they have not answered yet, ask again in your first reply and do not guess.
+Once you have it, load its state with
+  bin/hutch-state audit --hutch $hutch --experiment <experiment>
+This applies to ANY hutch work in this session, not only an explicit
+hutch-copilot dispatch.
 EOF
 )"
 
@@ -34,7 +42,8 @@ esac
 
 # systemMessage is the only channel the operator actually sees; additionalContext
 # is for the model. jq builds the JSON so hostnames and paths cannot break it.
-jq -n --arg ctx "$context" --arg msg "hutch-copilot is ready to help you at ${hutch^^} ($host)." \
+jq -n --arg ctx "$context" \
+    --arg msg "hutch-copilot is ready to help you at ${hutch^^} ($host). Which experiment is this session for?" \
     '{systemMessage: $msg, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}' \
     || printf '%s\n' "$context"
 

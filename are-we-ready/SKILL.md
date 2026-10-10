@@ -25,7 +25,7 @@ if the DAQ is unallocated. A failure in one does not skip the others.
 `check-daq` is the only one needing a live session; the other two read Channel Access
 directly and work with nothing running.
 
-Three things the JSON does not say on its face:
+Four things the JSON does not say on its face:
 
 - `impediment` is the first blocker along z, the one to act on. Everything downstream
   is blocked by consequence, so list length is not severity.
@@ -34,6 +34,11 @@ Three things the JSON does not say on its face:
 - **`settled: false` means undetermined, not a fault.** Re-run with a longer
   `--settle-s` before reporting anything — passing an unsettled read on as a fault
   looks machine-wide.
+- **`experiment_mismatch` outranks a green DAQ.** It means the DAQ has a different
+  experiment open than the one the operator named, and it deliberately does not change
+  `can_record`. So this is the one case where every signal reads ready and the data still
+  lands in the wrong experiment — usually a session left over from the previous shift.
+  Report it with the impediment, never as a footnote.
 
 Anything else unexpected: investigate with the tools before reporting it, and say what
 you checked. For a `needs_session` device, read it in-session rather than guessing a PV

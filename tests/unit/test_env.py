@@ -7,6 +7,7 @@ not a hutch machine at all, and a SessionStart hook that fires off-hutch.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import subprocess
@@ -100,6 +101,13 @@ def test_the_hook_names_the_hutch_on_a_hutch_host():
         out = _hook_on(host).stdout
         assert f"hutch={hutch}" in out, f"{host}: {out!r}"
         assert "hutch-copilot" in out
+        # The host names the hutch but never the experiment, so the hook has to
+        # ask -- otherwise a session starts with no $E and the sub-skills that
+        # require it ask at some arbitrary later moment. It must land in
+        # systemMessage: additionalContext is model-facing, and an ask the
+        # operator cannot see is one nobody answers.
+        msg = json.loads(out)["systemMessage"]
+        assert "Which experiment" in msg, f"{host}: {msg!r}"
 
 
 def test_the_hook_flags_control_machines_as_the_wrong_host():
@@ -143,7 +151,7 @@ def test_no_external_path_literal_survives_in_the_package():
 @pytest.mark.parametrize("name", [
     "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "PCDS_PYTHON", "PSCONDA",
     "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
-    "DS_ROOT", "SKILL_ROOTS",
+    "DS_ROOT", "SKILL_ROOTS", "ARCHIVER_URL",
 ])
 def test_bash_and_python_agree_on_every_external_path(name):
     """Sourcing hutch-env and calling external_path() must give one answer."""
