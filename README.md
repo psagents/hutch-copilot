@@ -89,7 +89,7 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-epics` | Channel Access — live PV reads; and PV history from the archiver |
 | `hutch-lightpath` | the beam path to a hutch, and what blocks it |
 | `hutch-python` | the live hutch-python session, and the safety gate in front of it |
-| `hutch-daq` | the DAQ — state, logs, config. Read-only |
+| `hutch-daq` | the DAQ — state (via its control port, no session needed), logs, config. Read-only |
 | `hutch-data` | what landed on disk — psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `hutch-skills` | which skills are installed, and where |
 | `hutch-lute` | LUTE: jobs, pedestals, config rendering, workspace setup |
@@ -160,8 +160,10 @@ The tools run directly on `{hutch}-daq`. Outstanding:
   DAQ cluster. They need a hop to `psana`/`s3dflogin` to reach the analysis cluster.
 - **`hutch-lute peds`** is the last `psdev` caller and will fail until it either runs
   `makepeds` locally or hops to a host that can.
-- **`hutch-daq logs` filter interface** — process names, date range and retention
-  are unconfirmed. Needs a live experiment to verify against.
+- **`hutch-daq logs` retention** — verified live at MFX on 2026-10-12 (88 sessions in one
+  month, `.log.zst` once rotated), but how far back the tree is kept is unconfirmed. The
+  split is settled: listing sessions and reading a file is here, deciding which `<E>`/`<C>`
+  lines matter is `@psana-daq-logs`.
 - **Is `github.com/psagents` the shared home for skills?** Not settled, and the advisor
   tiers depend on the answer. Today the advisors live in three places: 14 on the org, 7
   only on `/sdf/group/lcls/ds/dm/apps/dev/claude/skills` (`ask-lcls2`, `ask-smalldata`,

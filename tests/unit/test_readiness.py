@@ -3,59 +3,59 @@
 Each test here pins a failure that actually happened on mfx-daq, because every
 one of them produces a plausible-looking wrong answer rather than an error:
 
-- `check_daq` refused its own read-only snippet, so the DAQ state was
-  unreadable through the tool that exists to read it.
+- `check_daq` read state through hutch-python's bridge, which is usually not
+  running, so a reachable DAQ read as unknown.
 - `check_beam` reports every device as blocking while Channel Access is still
   connecting, which reads as a facility-wide fault.
 - `can_record` guessed False from a state string it did not recognise.
 - `preset` looked in a directory that has never existed.
 
-No live machine: the bridge and the subprocess are faked, so these run anywhere.
+No live machine: every subprocess is faked, so these run anywhere.
 """
 
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
 from hutch_tools import daq, happi, lightpath
-from hutch_tools import session as safety
 from hutch_tools.epics import EpicsError
 
 import check_beam, check_daq, check_hutch
 
 
-def _fake_exec(payload: dict):
-    """Stand in for a bridge round-trip returning ``payload``."""
-    def run(code, timeout=None):
-        return {"ok": True, "output": json.dumps(payload), "error": None}
-    return run
-
-
-def _daq_payload(**over):
-    base = {"state": "configured", "config_alias": "BEAM",
-            "experiment": "mfx101609126", "recording": "False", "run_number": "7"}
-    base.update(over)
-    return base
+def _fake_state(monkeypatch, **over):
+    """Make ``daq.state`` return a DaqControl status with ``over`` applied."""
+    status = {"transition": "configure", "state": "configured", "config_alias": "BEAM",
+              "recording": False, "platform": {}, "bypass_activedet": False,
+              "experiment": "mfx101609126", "run_number": 7, "last_run_number": 7}
+    status.update(over)
+    monkeypatch.setattr(daq, "state", lambda hutch, timeout=None: {
+        "value": status, "source": "resolved:fake", "retrieved_at": "now"})
 
 
 # --------------------------------------------------------------------------
 # check_daq
 # --------------------------------------------------------------------------
-def test_the_daq_query_is_not_refused_by_our_own_classifier():
-    """It was: `out[key] = str(eval(expr))` is not provably read-only.
-
-    The snippet is a fixed set of getters, so the fix is to write it as
-    something the gate recognises -- not to loosen the gate.
-    """
-    verdict = safety.classify(daq._STATE_CODE)
-    assert verdict["class"] == safety.READ_ONLY, verdict["reasons"]
-
-
 def test_the_daq_query_is_valid_python():
     """It is assembled by string concatenation, so a stray comma is invisible."""
     compile(daq._STATE_CODE, "<check_daq>", "exec")
+
+
+def test_the_daq_query_calls_only_read_only_daqcontrol():
+    """psana-daq-control owns the read-only allowlist; a mutating call here is
+    a write dressed as a state read, and nothing else would catch it."""
+    called = set(re.findall(r"c\.(\w+)\(", daq._STATE_CODE))
+    assert called and called <= set(daq._READ_ONLY_CALLS), called
+
+
+def test_the_status_fields_match_what_getstatus_returns():
+    """getStatus() answers a bare 9-tuple, so a name dropped from this list
+    silently shifts every field after it onto the wrong value."""
+    assert len(daq._STATUS_FIELDS) == 9
+    assert daq._STATUS_FIELDS.index("state") == 1
 
 
 @pytest.mark.parametrize("state,expected", [
@@ -69,7 +69,7 @@ def test_the_daq_query_is_valid_python():
     ("reset", False),
 ])
 def test_can_record_follows_the_daq_state(monkeypatch, state, expected):
-    monkeypatch.setattr(daq, "exec_code", _fake_exec(_daq_payload(state=state)))
+    _fake_state(monkeypatch, state=state)
     assert check_daq.check_daq("mfx")["value"]["can_record"] is expected
 
 
@@ -80,7 +80,7 @@ def test_an_uninterpretable_state_is_unknown_not_a_no(monkeypatch, state):
     "Not ready" sends an operator to fix the DAQ; "unknown" sends them to find
     out why we cannot see it. Guessing False conflates the two.
     """
-    monkeypatch.setattr(daq, "exec_code", _fake_exec(_daq_payload(state=state)))
+    _fake_state(monkeypatch, state=state)
     assert check_daq.check_daq("mfx")["value"]["can_record"] is None
 
 
@@ -90,7 +90,7 @@ CONFIG_FIXTURE = '''\
 collect_host = "drp-srcf-cmp014"
 data_dir = "/cds/data/drpsrcf"
 hutch, station, user = ("mfx", 0, "mfxopr")
-ea_cfg = "/cds/group/pcds/dist/pds/mfx/misc/epicsArch.txt"
+ea_cfg = "/sdf/home/m/mfxopr/daq/epics/epicsArch.txt"
 procmgr_config = [
  { host: collect_host, id: "teb0", cmd: f"{teb_cmd}"},
  #{ host: "old-host",  id: "teb0", cmd: f"{teb_cmd} --dead-variant"},
@@ -137,7 +137,7 @@ def test_the_config_summary_reports_referenced_file_readability(daq_cfg):
     """An unreadable epicsArch.txt breaks a run while the DAQ still reads
     `configured`, so readiness has to see it."""
     reads = daq.config_summary("mfx")["also_reads"]
-    entry = reads["/cds/group/pcds/dist/pds/mfx/misc/epicsArch.txt"]
+    entry = reads["/sdf/home/m/mfxopr/daq/epics/epicsArch.txt"]
     assert set(entry) >= {"readable"}
 
 
@@ -160,7 +160,7 @@ def test_a_missing_scalar_is_null_not_absent(tmp_path, monkeypatch):
 def test_an_unreadable_config_does_not_change_the_verdict(monkeypatch):
     """A config we cannot parse is worth reporting but is not a readiness
     failure -- it must not be able to turn can_record from True to False."""
-    monkeypatch.setattr(daq, "exec_code", _fake_exec(_daq_payload()))
+    _fake_state(monkeypatch)
     def boom(hutch):
         raise daq.DaqError("cannot read DAQ config")
     monkeypatch.setattr(check_daq.daq, "config_summary", boom)
@@ -170,22 +170,21 @@ def test_an_unreadable_config_does_not_change_the_verdict(monkeypatch):
 
 
 def test_check_daq_carries_the_config_summary(monkeypatch, daq_cfg):
-    monkeypatch.setattr(daq, "exec_code", _fake_exec(_daq_payload()))
+    _fake_state(monkeypatch)
     v = check_daq.check_daq("mfx")["value"]
     assert v["config"]["collect_host"] == "drp-srcf-cmp014"
     assert "content" not in v["config"], "the summary must not inline the file"
 
 
 def test_a_different_experiment_is_surfaced(monkeypatch):
-    monkeypatch.setattr(daq, "exec_code",
-                        _fake_exec(_daq_payload(experiment="mfxOTHER")))
+    _fake_state(monkeypatch, experiment="mfxOTHER")
     rec = check_daq.check_daq("mfx", experiment="mfx101609126")
     assert rec["value"]["experiment_mismatch"] == {
         "daq": "mfxOTHER", "expected": "mfx101609126"}
 
 
 def test_the_matching_experiment_raises_no_alarm(monkeypatch):
-    monkeypatch.setattr(daq, "exec_code", _fake_exec(_daq_payload()))
+    _fake_state(monkeypatch)
     rec = check_daq.check_daq("mfx", experiment="mfx101609126")
     assert "experiment_mismatch" not in rec["value"]
 

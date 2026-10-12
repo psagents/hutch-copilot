@@ -14,9 +14,9 @@ nothing; the skills carry the judgment.
 
 | Sub-skill | State |
 |---|---|
-| **`are-we-ready`** | **Works**, verified against MFX hardware: 29 happi devices, 21 of them on the lightpath, 4 motor readbacks, `settled: true`, the impediment named, and 4 unreadable diagnostics reported as unknown rather than guessed. With no bridge running, `check_daq` returns unknown (rc=4) — which is the correct answer, not a failure |
+| **`are-we-ready`** | **Works**, verified against MFX hardware: 29 happi devices, 21 of them on the lightpath, 4 motor readbacks, `settled: true`, the impediment named, and 4 unreadable diagnostics reported as unknown rather than guessed. `check_daq` reads DAQ state off the control port, so it no longer needs a bridge; an unreachable control port still returns unknown (rc=4), which is the correct answer, not a failure |
 | **`analyze-data`** | **Written, untested.** Calls only `hutch-lute` and `hutch-state`. Needs one real LUTE run to exercise |
-| **`take-run`** | **Blocked on Q1.** Its hard gate reads `bin/hutch-daq state` and works; the run commands themselves transit the bridge socket |
+| **`take-run`** | **Blocked on Q1.** Its hard gate reads `bin/hutch-daq --hutch $H state`, which needs no bridge; the run commands themselves still transit the bridge socket |
 | **`coordinate-experiment`** | **Not implemented.** No directory, and `hutch-log` has no caller anywhere in the skill tree |
 
 ---
@@ -32,7 +32,7 @@ hutch-happi      list device pv preset
 hutch-epics      caget
 hutch-lightpath  path
 hutch-python     ping install exec conf
-hutch-daq        state config logs            (read-only)
+hutch-daq        state config logs [--sessions] (read-only)
 hutch-data       detectors xtc2 cell cat
 hutch-skills     list
 hutch-lute       sbatch status watch peds readiness kerberos render
@@ -163,7 +163,8 @@ Its gate works. Its writes do not have a boundary yet, so exercise Q1 first.
 
 ### Also open
 
-- `hutch-daq logs` filter interface: which process names to expose, and retention.
+- `hutch-daq logs` retention: how far back the tree is kept. The listing/judgment split is
+  settled — `@psana-daq-logs` owns which log lines matter.
 - Publication-quality thresholds for the `analyze-data` verdict — CC½, completeness,
   multiplicity, Rsplit. Needs a crystallographer.
 - Whether the CCTBX merge log keeps completeness and multiplicity in the same section as

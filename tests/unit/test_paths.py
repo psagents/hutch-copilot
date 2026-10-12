@@ -64,12 +64,19 @@ def test_the_environment_wins_over_the_file(monkeypatch):
     assert paths.external_path("EPICS_BIN") == "/tmp/somewhere-else"
 
 
-def test_a_templated_value_keeps_its_field(monkeypatch):
+@pytest.mark.parametrize("name", ["DAQ_CONFIG_DIR", "OPR_LOG_ROOT"])
+def test_a_templated_value_keeps_its_fields(monkeypatch, name):
     """`${VAR:-default}` cannot hold `{hutch}`: bash reads the template's
     closing brace as the end of its own expansion and yields
-    `pds/{hutch/scripts}` with the brace moved. Hence the `if [ -z ]` guard."""
-    monkeypatch.delenv("HUTCH_DAQ_CONFIG_DIR", raising=False)
-    assert paths.external_path("DAQ_CONFIG_DIR").endswith("{hutch}/scripts")
+    `pds/{hutch/scripts}` with the brace moved. Hence the `if [ -z ]` guard.
+
+    Both now also carry `{hutch[0]}` for the `/sdf/home/<letter>` level, which
+    only resolves because the caller formats with a keyword.
+    """
+    monkeypatch.delenv("HUTCH_" + name, raising=False)
+    value = paths.external_path(name)
+    assert "{hutch[0]}" in value and "{hutch}" in value
+    assert value.format(hutch="mfx").startswith("/sdf/home/m/mfxopr/daq/")
 
 
 def test_an_undeclared_path_raises(monkeypatch):

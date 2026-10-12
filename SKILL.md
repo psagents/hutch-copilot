@@ -29,7 +29,7 @@ so the tool to call follows from which source answers the question.
 | `bin/hutch-epics` | Channel Access: live PV reads, and archived PV history |
 | `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
 | `bin/hutch-python` | The live hutch-python session, and the safety gate in front of it |
-| `bin/hutch-daq` | The DAQ: its state, logs and config. Read-only |
+| `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
 | `bin/hutch-data` | What landed on disk: psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |
 | `bin/hutch-lute` | LUTE: submission, monitoring, pedestals, config rendering, workspace setup |
@@ -112,8 +112,9 @@ sub-skill rather than working from memory of it.
 |---|---|
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beam path status" | Read `are-we-ready/SKILL.md` |
-| `/setup-analysis` or "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready", "submit the analysis" | Read `setup-analysis/SKILL.md`. It owns everything up to a job id existing. Pass all known experiment state (hutch, experiment, detectors, photon energy) so it does not re-ask. |
-| `/assess-analysis` or "how does the data look", "assess the run", "is the dataset good", "sfx metrics", "read the merge log", "what did the analysis say" | Read `assess-analysis/SKILL.md`. It owns everything after a job id exists: watching it, reading its logs, the verdict. If nothing was ever submitted, it sends you to `setup-analysis` rather than submitting. |
+| `/debug-daq` or "the DAQ is broken", "DAQ won't start", "we're losing data", "high deadtime", "damage events", "why did the run fail", "what happened last night" | Read `debug-daq/SKILL.md` |
+| `/setup-analysis` or "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready", "submit the analysis" | Read `setup-analysis/SKILL.md`. |
+| `/assess-analysis` or "how does the data look", "assess the run", "is the dataset good", "what did the analysis say" | Read `assess-analysis/SKILL.md` |
 
 ---
 

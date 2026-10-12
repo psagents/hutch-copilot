@@ -14,17 +14,17 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
 
 from hutch_tools import daq
 from hutch_tools.common import UNREACHABLE, fail, out, utcnow
-from hutch_tools.session import T_QUERY, BridgeError
 
 
 def check_daq(hutch: str, *, experiment: str | None = None,
-              timeout: int = T_QUERY) -> dict:
+              timeout: int = daq.T_CONTROL_MS) -> dict:
     """The DAQ's signals with a readiness verdict over them."""
     payload = dict(daq.state(hutch, timeout=timeout)["value"])
 
@@ -41,7 +41,7 @@ def check_daq(hutch: str, *, experiment: str | None = None,
     # to change the verdict.
     try:
         payload["config"] = daq.config_summary(hutch)
-    except (daq.DaqError, BridgeError, OSError, re.error) as exc:
+    except (daq.DaqError, OSError, re.error) as exc:
         payload["config"] = {"error": str(exc)}
     return {
         "value": payload,
@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     try:
         return out(check_daq(args.hutch, experiment=args.experiment))
-    except (daq.DaqError, BridgeError, OSError) as exc:
+    except (daq.DaqError, OSError, subprocess.SubprocessError) as exc:
         return fail(exc, UNREACHABLE)
 
 

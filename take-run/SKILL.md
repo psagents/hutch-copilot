@@ -20,7 +20,7 @@ This file owns the gate, the confirmation, and the verdict on what came back.
 
 ```bash
 bin/hutch-state audit --hutch "$H" --experiment "$E"    # everything known, with age
-bin/hutch-daq state --hutch "$H"
+bin/hutch-daq --hutch "$H" state
 ```
 
 `MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
@@ -104,9 +104,10 @@ Two judgments, neither of which is in the JSON:
 - **`COMPLETED` is a Slurm verdict, not a scientific one.** A Task can fail inside a job
   Slurm considers successful.
 
-If XTC2 did not land, or a run call raised, investigate with `hutch-daq logs`,
-`hutch-daq config` and `hutch-lute status`, and report what you found. Never report a run
-as recorded on the strength of the command having returned.
+If XTC2 did not land, or a run call raised, hand it to `/debug-daq` with the run number and
+the time you attempted it — it collects the readings and routes them to `@psana-daq`. Check
+`hutch-lute status` yourself; that half is the analysis side. Never report a run as recorded
+on the strength of the command having returned.
 
 ---
 
