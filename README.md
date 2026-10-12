@@ -3,11 +3,10 @@
 A Claude Code skill for running an LCLS/LCLS-II experiment: beam readiness, data
 collection, and reading back what the analysis produced.
 
-Two halves. The **skills** (`SKILL.md` and the four sub-skill directories) carry
+Two halves. The **skills** (`SKILL.md` and the four sub-skill directories — `take-run`,
+`are-we-ready`, `setup-analysis`, `assess-analysis`) carry
 judgment — what to ask the operator, when to confirm, how to sequence a shift. The
-**tools** (`hutch_tools/`) carry mechanism. The split exists because an agent must
-never hand-write a path, compose a PV name, or improvise an `ssh` command: every
-such fact comes from a tool call that either answers or fails loudly.
+**tools** (`hutch_tools/`) carry mechanism.
 
 ## Installing
 
@@ -40,6 +39,44 @@ source bin/hutch-env     # sets PATH and $HUTCH, finds caget
 At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
 every session start. Off-hutch it stays silent, by design.
 
+### Advisors
+
+**This repo holds no science knowledge, so the advisor skills hold all of it** — every
+threshold, parameter meaning and symptom→knob judgment. They are separate skills and are
+installed separately:
+
+```bash
+scripts/fetch-advisors.sh --report   # the two tiers, and what is missing
+scripts/fetch-advisors.sh            # clone/update them, then report
+```
+
+Two tiers, both derived — there is no third list to maintain:
+
+| tier | what it means | absent |
+|---|---|---|
+| **required** | a `SKILL.md` cites it by name, so a judgment routes through it | the judgment is refused; the script exits 4 |
+| **available** | declared in `DECLARED_ADVISORS`, cited nowhere | reported and ignored |
+
+The script clones every `psagents` repo that contains a `SKILL.md` plus the LCLS-II DAQ
+diagnostic suite from `slac-lcls/lcls2` into `~/.claude/advisor-src`, and symlinks each
+skill directory into `~/.claude/skills`. Both paths are overridable with
+`$HUTCH_ADVISOR_CACHE` and `$CLAUDE_SKILLS_DIR` — point the latter at
+`~/.claude-lcls/skills` to populate that root instead. An existing non-symlink directory
+is left alone, so a clone you maintain yourself is never overwritten.
+
+Seven advisors are **not on GitHub** — `ask-lcls2`, `ask-smalldata`, `ask-ami`,
+`elog-copilot`, `experimental-hutch-python`, `xpm-seq` and `lcls-catalog` live only on
+`/sdf/group/lcls/ds/dm/apps/dev/claude/skills`. The script cannot fetch them and they are
+unreachable off S3DF and the hutches. None is currently required. See *Status* — whether
+the org is the shared home for all of them is an open question.
+
+The tiers are derived from the docs rather than from a GitHub topic (`knowledge` or
+similar) for that reason: a topic query cannot see those seven, so it would report a
+required advisor as absent, or omit it entirely. Revisit if they move to the org.
+
+**Restart Claude Code afterwards** — the skill list is read once at session start, so a
+freshly linked advisor is invisible until then.
+
 ## The tools
 
 **One tool, one backend.** The tool to call follows from which source answers the
@@ -61,13 +98,6 @@ question, so there is never a choice to make about where a fact comes from.
 `--help` on any of them lists its subcommands. `SKILL.md` carries the
 contract the agent must obey — provenance on every write, stale reads fail, a
 resolver that cannot reach its source raises rather than guessing.
-
-A question that composes several backends — "is beam reaching the hutch?", "can the
-DAQ record?" — is a readiness *judgment*, not a backend read, and belongs to the
-sub-skill that asks it. Those three live in `are-we-ready/scripts/`. They were
-`hutch-resolve check-*` until Oct 2026, which is also why the EPICS bin path ended up
-hardcoded in the DAQ module: one tool reaching into four backends has nowhere correct
-to put anything.
 
 They run from a bare checkout with no install step. The package is stdlib-only at
 module scope and Python 3.9-compatible, because psconda ships 3.9 and the bridge
@@ -116,7 +146,7 @@ on our own calls, not an enforcement boundary.
 ## Tests
 
 ```bash
-/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/bin/python -m pytest tests/unit -q
+/sdf/group/lcls/ds/ana/sw/conda2/inst/envs/ps_20260504/bin/python -m pytest tests/unit -q
 ```
 
 Any interpreter with pytest will do — the package is stdlib-only — but the bare
@@ -132,11 +162,26 @@ The tools run directly on `{hutch}-daq`. Outstanding:
   `makepeds` locally or hops to a host that can.
 - **`hutch-daq logs` filter interface** — process names, date range and retention
   are unconfirmed. Needs a live experiment to verify against.
-- **Publication-quality thresholds** for the `analyze-data` verdict (CC½,
-  completeness, multiplicity, Rsplit) are plausible working numbers, not reference
-  values. Needs a crystallographer.
-- **CCTBX merge-log layout** — whether completeness and multiplicity sit in the same
-  section as CC½ and Rsplit. Needs a real merge output.
+- **Is `github.com/psagents` the shared home for skills?** Not settled, and the advisor
+  tiers depend on the answer. Today the advisors live in three places: 14 on the org, 7
+  only on `/sdf/group/lcls/ds/dm/apps/dev/claude/skills` (`ask-lcls2`, `ask-smalldata`,
+  `ask-ami`, `elog-copilot`, `experimental-hutch-python`, `xpm-seq`, `lcls-catalog`, all
+  owned by `cwang31`, no git remote), and the 6 LCLS-II DAQ skills on a `slac-lcls/lcls2`
+  feature branch. Consequences of leaving it:
+  - `fetch-advisors.sh` cannot install the filesystem-only 7 at all, so they are
+    unavailable off S3DF and the hutches — and unavailable to anyone outside `ps-users`.
+    None is required today; citing one in a `SKILL.md` would make it required and
+    immediately unsatisfiable for those users.
+  - The DAQ suite is pinned to `features/psana-daq-monitor`. A feature branch is not a
+    release: it can be rebased or merged away under us.
+  - Each is a few KB of markdown, so size is not the obstacle. Several do depend on
+    shared-storage artifacts (`.code-index.db` under `apps/dev/software/`, the
+    `elog-copilot` SQLite DB), which pushing the skill does **not** make portable — that
+    split is the real design question, not the hosting.
+
+  Moving them to the org would also let the two tiers be checked without a filesystem:
+  see the rejected `knowledge` topic note under *Advisors*, which only fails today
+  because a topic query cannot see those 7.
 - **A terminal API instead of the session bridge.** `hutch-python` takes a script
   argument (`hutch-python --cfg <conf.yml> script.py`), which may remove the need for
   a live interactive session and the socket entirely. Worth measuring before

@@ -98,7 +98,7 @@ bin/hutch-lute status "$JOB_ID"
 Two judgments, neither of which is in the JSON:
 
 - **You do not submit anything.** LUTE triggers from the eLog ARP; you only confirm it
-  fired. If no job appears, say so and hand it to `/analyze-data`, which owns the
+  fired. If no job appears, say so and hand it to `/setup-analysis`, which owns the
   workflow registration and can check it. **Do not
   re-submit** — a duplicate job on the same run is worse than a missing one.
 - **`COMPLETED` is a Slurm verdict, not a scientific one.** A Task can fail inside a job

@@ -16,8 +16,12 @@ verdict. Standing up and submitting workflows is `setup-analysis` — if no job 
 submitted, go there rather than submitting one here.
 
 Science interpretation comes from `@ask-lute` — thresholds, the per-shell reading, which
-knob answers a symptom. It is a consultant, not a dependency: if it is missing, say so,
-report the numbers you read, and reason from them.
+knob answers a symptom. **It is required here, because the verdict is exactly that
+interpretation.** If it will not load: report every number with the path and line you
+read it from, say which advisor is missing and that you cannot interpret them, and point
+the operator at `scripts/fetch-advisors.sh`. Then stop — do not rank runs, recommend a
+knob, or call a dataset good from a threshold you remember. Ask the operator for the
+threshold instead and record it `--kind operator` if they give you one.
 
 **Inspecting output is your job, not the operator's.** `hutch-lute status` returns the log
 paths; read those files. Never ask for a paste.
@@ -60,10 +64,6 @@ where you read it.
 
 When reporting counts from a scan of many per-event files, **say how many files you
 scanned** — a truncated scan produces a plausible wrong total silently.
-
-Report `events_attempted` and the yield alongside any count of indexed lattices. Under a
-fixed wall clock a raw count is `coverage × yield`, so two jobs with identical parameters
-can differ purely because one attempted more events. Compare on yield, not on the count.
 
 ---
 

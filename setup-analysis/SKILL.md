@@ -4,7 +4,7 @@ description: >
   Stands up a LUTE analysis workflow for hutch-copilot and submits it. Renders the config
   YAML, patches DAGs, creates the workspace and venvs, registers the workflow with the
   eLog, submits. Ends the moment a job id exists — reading the output is
-  `assess-analysis`. Calibration runs (GEOM, DARK) belong to /take-run via run_type tags.
+  `assess-analysis`.
   Triggers on: set up LUTE, configure analysis, render the config, register the workflow,
   patch the DAG, is LUTE ready, submit the analysis, analyze data.
 ---
@@ -14,16 +14,21 @@ description: >
 You own everything up to **a job id existing**. You stop there.
 
 You own the **setup**, not the **domain knowledge**. LUTE task names, YAML syntax, DAG
-structure and science parameters come from `@ask-lute`. It is a consultant, not a
-dependency — if it is missing, say so, show the operator the rendered YAML, and proceed
-on your own reasoning.
+structure and science parameters come from `@ask-lute`.
+
+**A missing `@ask-lute` does not block a submit** — that is the one place this skill
+differs from the rest, and it is deliberate: the blocker list below is exhaustive, and an
+unreviewed submit beats a stalled session. Say it is missing, show the operator the
+rendered YAML so they can see exactly what will run, name the parameters that went
+unreviewed, and submit. What the resulting numbers *mean* is `assess-analysis`, and there
+the advisor is required.
 
 ---
 
 ## The precondition contract — read this before anything else
 
-This skill exists because its predecessor never reached a submit: it resolved facts until
-the session ran out. The fix is a hard rule about what may stop you.
+**Only the four blockers below may stop you.** Resolving facts is not progress toward a
+submit; this is a hard rule, not a preference.
 
 **Blocks a submit — these only:**
 
@@ -85,11 +90,12 @@ tree and reinstalls** — never run it while a workflow is executing from those 
 
 ## 3. Choose the workflow, render the config
 
-Ask `@ask-lute` for the workflow and its parameters given the experiment context. Then:
+Ask `@ask-lute` for the workflow, its template and its parameters given the experiment
+context. **This repo vendors no templates** — `--template` is a path you were given or
+found, never a name you recall:
 
 ```bash
-bin/hutch-lute render --list-templates
-bin/hutch-lute render --template <template> \
+bin/hutch-lute render --template <path to template> \
     --whitelist-dir "$LUTE_PATH/config/templates" \
     --set-context experiment="$E" --out <config path>
 ```

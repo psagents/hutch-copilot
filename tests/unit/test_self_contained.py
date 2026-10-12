@@ -16,15 +16,21 @@ from hutch_tools import common as paths
 
 ROOT = paths.skill_root()
 
-#: Skills that may be referenced as `@name` in the docs. They are consultants,
-#: never dependencies: the skill must work with none of them installed. Adding a
-#: name here is a deliberate act -- see the Optional advisors table in SKILL.md.
+#: Skills that MAY be referenced as `@name` in the docs. Being listed here is
+#: permission, not a requirement -- the tier is derived, never stored: an advisor
+#: a SKILL.md actually cites as `@name` is *required* (a judgment routes through
+#: it, and this skill holds no science knowledge of its own to fall back on),
+#: while a declared-but-uncited one is merely available. `fetch-advisors.sh`
+#: reads this set and that citation scan to report the two tiers, and exits 4
+#: when a required advisor is absent. Adding a name here is a deliberate act.
 DECLARED_ADVISORS = {
     "ask-lute", "ask-cctbx-xfel", "ask-happi",          # ~/.claude/skills
     "ask-smalldata", "ask-lcls2", "ask-ami", "ask-epics",
     "ask-slurm-s3df", "ask-s3df", "lcls-catalog",
     "elog-copilot", "elog-search", "confluence-search",
     "experimental-hutch-python", "xpm-seq",             # opencode root
+    "psana-daq", "psana-daq-control", "psana-daq-monitor",
+    "psana-daq-logs", "psana-daq-history", "psana-configdb",
 }
 
 CODE_DIRS = ("hutch_tools", "bin", "are-we-ready/scripts")
@@ -83,7 +89,27 @@ def test_docs_reference_only_declared_advisors():
     assert not undeclared, (
         f"undeclared advisor references: {undeclared}. Either remove the pointer "
         f"and give in-repo guidance instead, or add the skill to DECLARED_ADVISORS "
-        f"and to the Optional advisors table in SKILL.md."
+        f"and to the Advisors section in SKILL.md."
+    )
+
+
+def test_some_advisor_is_cited_and_so_required():
+    """A citation is what makes an advisor required, so losing them all is silent.
+
+    `fetch-advisors.sh` derives its required tier from these `@name` citations. A
+    docs refactor that dropped every one would leave it reporting nothing
+    required and exiting 0 -- the skill would look healthy with no source of
+    judgment installed.
+    """
+    cited = {
+        name
+        for p in _docs() if p.name == "SKILL.md"
+        for name in re.findall(r"@([a-z][a-z0-9-]*)", p.read_text())
+    } & DECLARED_ADVISORS
+    assert cited, (
+        "no SKILL.md cites an advisor as @name, so fetch-advisors.sh would treat "
+        "every advisor as optional. This repo holds no science knowledge -- some "
+        "judgment must route through a named advisor."
     )
 
 

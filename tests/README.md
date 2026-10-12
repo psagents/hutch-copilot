@@ -20,15 +20,13 @@ install step and there is no `conftest.py`. `pip install -e .` stays optional, b
   directly. That is why every module keeps `build_parser()` separate from `main()`.
 - **Filesystem fixtures go through `monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))`** —
   and paths under it are built with the `paths.*` helpers (`paths` is the tests' alias for
-  `hutch_tools.common`) rather than written as literals. A literal is how the `xtc2/` vs
-  `xtc/` bug survived: the test asserted the same wrong directory the code produced, so both
-  agreed and neither matched the filesystem.
+  `hutch_tools.common`) rather than written as literals. A literal lets a test assert the
+  same wrong directory the code produces: both agree and neither matches the filesystem.
 
   `setenv`, not `setattr`: every external path is declared in `bin/hutch-env` and read per
   call by `common.external_path()`, so one override mechanism works everywhere — including
   in a `multiprocessing` worker, which `setattr` cannot reach (see `_writer` in
-  `test_log.py`). `DS_ROOT` was a frozen module constant until Oct 2026 and needed an
-  `importlib.reload()` in that worker to pick a new root up at all.
+  `test_log.py`).
 - **SSH is not mocked anywhere.** Nothing that requires `psdev` or a DAQ machine has behavioural
   coverage; `hutch-daq status` and `logs` are deliberately in that category until there is a live
   experiment to verify them against.

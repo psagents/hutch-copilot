@@ -717,34 +717,15 @@ DELIMITERS = {
     "standard": {},
 }
 
-TEMPLATE_DIR_NAME = "templates"
-DEFAULT_TEMPLATE = "cctbx_pipeline"
-
-
-def template_dir() -> pathlib.Path:
-    return skill_root() / TEMPLATE_DIR_NAME
-
-
-def available_templates() -> list[str]:
-    d = template_dir()
-    return sorted({p.name.split(".")[0] for p in d.glob("*.j2")}) if d.is_dir() else []
-
-
 def resolve_template(name_or_path: str | pathlib.Path) -> pathlib.Path:
-    """Accept a filesystem path, or a bare name resolved against templates/."""
-    text = str(name_or_path)
-    p = pathlib.Path(text)
-    if p.suffix or "/" in text:
-        if not p.exists():
-            raise ConfigError(f"template not found: {p}")
-        return p
-    for candidate in (template_dir() / f"{text}.yaml.j2", template_dir() / f"{text}.j2"):
-        if candidate.exists():
-            return candidate
-    raise ConfigError(
-        f"no template named {text!r} in {template_dir()}. "
-        f"Available: {', '.join(available_templates()) or '(none)'}"
-    )
+    """Locate a template by path. This repo ships none -- the caller names one."""
+    p = pathlib.Path(name_or_path)
+    if not p.exists():
+        raise ConfigError(
+            f"template not found: {p}. Pass a path to a LUTE config template; "
+            f"this repo vendors no pipeline templates."
+        )
+    return p
 
 
 def render_template(
@@ -886,16 +867,12 @@ def parse_set(pairs: list[str]) -> dict[str, Any]:
 def _render(args) -> int:
     """Execute `hutch-lute render` from an already-parsed namespace."""
     try:
-        if args.list_templates:
-            return out({"template_dir": str(template_dir()),
-                        "templates": available_templates()})
-
         ctx = json.load(open(args.context)) if args.context else {}
         ctx.update(parse_set(args.set_context))
 
         ovr = json.load(open(args.overrides)) if args.overrides else {}
         if isinstance(ovr, dict) and "overrides" in ovr:
-            ovr = ovr["overrides"]      # accept the campaign's params/*.json shape
+            ovr = ovr["overrides"]      # a top-level 'overrides' key is unwrapped
         ovr.update(parse_set(args.sets))
 
         if not args.no_whitelist and not args.whitelist_dir:
@@ -905,7 +882,7 @@ def _render(args) -> int:
             )
 
         report = build(
-            template=args.template or DEFAULT_TEMPLATE, context=ctx, overrides=ovr,
+            template=args.template, context=ctx, overrides=ovr,
             whitelist_dir=None if args.no_whitelist else args.whitelist_dir,
             delims=args.delims,
         )
@@ -1325,11 +1302,8 @@ def _install_common(p: argparse.ArgumentParser) -> None:
 
 
 def _render_args(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--template", default=None,
-                   help=f"template name from this repo's templates/ (default: "
-                        f"{DEFAULT_TEMPLATE}) or a path to one")
-    p.add_argument("--list-templates", action="store_true",
-                   help="print the templates shipped with this repo and exit")
+    p.add_argument("--template", required=True,
+                   help="path to a LUTE config template; this repo vendors none")
     p.add_argument("--context", default=None, help="JSON file of template context")
     # action="extend", not the default "store": with plain nargs="*" a second
     # --set silently REPLACED the first, so `--set a=1 --set b=2` applied only

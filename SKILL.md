@@ -49,8 +49,9 @@ Three rules that the tools enforce and you must not work around:
 3. **A resolver that cannot reach its source raises.** Never substitute a remembered or
    documented value. Report the failure and either use explicitly-stale state or ask the operator.
 
-Resolve, don't recall: device lists, PV prefixes, detector aliases, DAQ hosts and unit
-cells all come from `hutch-resolve`. This skill deliberately ships no tables of them.
+Resolve, don't recall: device lists and PV prefixes come from `hutch-happi`, detector
+aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq`. This skill
+deliberately ships no tables of them.
 
 **"Did this move overnight?" is not a `caget` question.** `caget` reads now. For what
 changed between two times, ask the archiver — and ask it for `.MSTA`, not `.RBV`:
@@ -72,9 +73,8 @@ Two rules about the experiment state file, which every sub-skill reads and write
 - Use any field already present without re-asking the user. If a field **required for the
   current task** is missing or null, ask for it — do not infer or assume a value.
 
-> **No experiment-context manager is installed.** Ambient per-turn logging, condition
-> tracking and the shift handoff are being redesigned, so `hutch-log` currently has no
-> caller. Each sub-skill still writes its own conclusions with provenance.
+> **`hutch-log` has no caller.** There is no ambient per-turn logging, condition tracking
+> or shift handoff — each sub-skill writes its own conclusions with provenance instead.
 
 ---
 
@@ -112,33 +112,52 @@ sub-skill rather than working from memory of it.
 |---|---|
 | `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
 | `/are-we-ready` or "are we ready", "is beam blocked", "beam path status" | Read `are-we-ready/SKILL.md` |
-| `/analyze-data` or "how does the data look", "assess the run", "is the dataset good", "sfx metrics", "read the merge log" — **or** "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready" | Read `analyze-data/SKILL.md`. It owns both halves: setting up analysis workflows, and tracking and interpreting their output. Pass all known experiment state (hutch, experiment, detectors, photon energy) so it does not re-ask. |
+| `/setup-analysis` or "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready", "submit the analysis" | Read `setup-analysis/SKILL.md`. It owns everything up to a job id existing. Pass all known experiment state (hutch, experiment, detectors, photon energy) so it does not re-ask. |
+| `/assess-analysis` or "how does the data look", "assess the run", "is the dataset good", "sfx metrics", "read the merge log", "what did the analysis say" | Read `assess-analysis/SKILL.md`. It owns everything after a job id exists: watching it, reading its logs, the verdict. If nothing was ever submitted, it sends you to `setup-analysis` rather than submitting. |
 
 ---
 
-## Optional advisors
+## Advisors — where the judgment lives
 
-Separate skills, installed across two roots — `~/.claude/skills` and
+This skill holds no science knowledge, so **the advisors hold all of it.** They are
+separate skills, installed across two roots — `~/.claude/skills` and
 `/sdf/group/lcls/ds/dm/apps/dev/opencode/skills`. **Don't assume; ask:**
 
 ```bash
 bin/hutch-skills list                     # everything installed, and where
 bin/hutch-skills list ask-smalldata       # one, with the roots it searched
+scripts/fetch-advisors.sh --report        # the two tiers, and what is missing
+scripts/fetch-advisors.sh                 # install/update them
 ```
 
 The listing names each one and what it covers — there are advisors for LUTE internals, SFX
 parameters, happi, psana2, SmallData, EPICS, AMI, Slurm and S3DF, the eLog, Confluence,
-hutch-python and XPM timing. `@ask-lute` and `@ask-cctbx-xfel` are the two `analyze-data`
-leans on.
+hutch-python, XPM timing and LCLS-II DAQ diagnostics. Most are **available**: useful when
+present, and nothing breaks without them.
 
-They are **consultants, not dependencies.** If one is missing, say so and proceed with the
-in-repo guidance plus your own reasoning. Never block on one, and never assume a value one
-would have supplied.
+**Three are required, because a judgment routes through them:** `@ask-lute` and
+`@ask-cctbx-xfel` for what an analysis number means, `@psana-daq` for which angle a DAQ
+fault belongs to. A required advisor you cannot load is tool rule 3 — a source you could
+not reach. So:
+
+- **Report every value you read, with where you read it.** Those are facts and they stand.
+- **Say plainly that you cannot interpret them, and name the advisor that is missing.**
+  Give the operator `scripts/fetch-advisors.sh`, and restart afterwards or a freshly
+  installed advisor stays invisible.
+- **Do not produce the verdict anyway.** No remembered threshold, no number from your own
+  reasoning dressed as a finding. Offer instead to apply a threshold the operator gives
+  you — that is theirs, recorded `--kind operator`.
+
+`setup-analysis` is the deliberate exception: a missing `@ask-lute` does **not** block a
+submit. See its precondition contract.
 
 ---
 
 ## Reference
 
-- `references/sfx-cctbx-patterns.md` — CCTBX DAG pattern, the `d_min` ranking hazard,
-  coverage×yield, and the symptom→knob table. Cited by `analyze-data`.
 - `README.md` — installation, the exit-code contract, the safety gate, open work.
+
+**This repo holds no science knowledge** — no parameter defaults, no metric thresholds,
+no DAG recipes. Operating a workflow is here; what its numbers mean is `@ask-lute` and
+`@ask-cctbx-xfel`. A table of "typical values" in this repo is a bug: it goes stale
+silently and an agent cannot tell it apart from a resolved reading.
