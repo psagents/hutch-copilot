@@ -58,6 +58,7 @@ DEFAULT_TTL: dict[str, float | None] = {
     "sample_delivery": None,
     "transmission": None,
     "current_phase": None,
+    "sync_log": None,  # the /sync-log watermark: a position in a transcript, not a reading
 }
 
 

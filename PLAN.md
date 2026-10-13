@@ -17,7 +17,8 @@ nothing; the skills carry the judgment.
 | **`are-we-ready`** | **Works**, verified against MFX hardware: 29 happi devices, 21 of them on the lightpath, 4 motor readbacks, `settled: true`, the impediment named, and 4 unreadable diagnostics reported as unknown rather than guessed. `check_daq` reads DAQ state off the control port, so it no longer needs a bridge; an unreachable control port still returns unknown (rc=4), which is the correct answer, not a failure |
 | **`analyze-data`** | **Written, untested.** Calls only `hutch-lute` and `hutch-state`. Needs one real LUTE run to exercise |
 | **`take-run`** | **Blocked on Q1.** Its hard gate reads `bin/hutch-daq --hutch $H state`, which needs no bridge; the run commands themselves still transit the bridge socket |
-| **`coordinate-experiment`** | **Not implemented.** No directory, and `hutch-log` has no caller anywhere in the skill tree |
+| **`sync-log`** | **Written, hook verified live.** `bin/hutch-stop` blocks once per experiment-touching turn; 16 unit tests cover the loop guard and every silent path. It fired on the turn that wrote it — a false positive, since developing the copilot had put `--experiment` in a test fixture; a checkout-cwd guard now suppresses that. Needs one real shift to exercise the write side |
+| **`coordinate-experiment`** | **Partly subsumed.** `sync-log` gives ambient events and facts; shift-handoff summaries and condition tracking are still unbuilt |
 
 ---
 
@@ -39,6 +40,9 @@ hutch-lute       sbatch status watch peds readiness kerberos render
                  plan workspace dags envs register all
 hutch-log        init append
 ```
+
+Two shell hooks sit beside them, and are not CLIs: `bin/hutch-session-start` restores
+context at session start, `bin/hutch-stop` asks for the log to be synced at turn end.
 
 `--help` on any of them lists its flags. They work from a bare checkout with no install
 step; `pip install -e .` only adds the same commands to PATH.
@@ -144,18 +148,32 @@ worth encoding rather than rediscovering:
   `/retrieval/bpl/getAllPVs` and `getApplianceInfo` both 404, so "PV not archived" is
   inferred from a per-PV 404 rather than asked directly.
 
-### Q3 — How to build the context manager
+### Q3 — How to build the context manager — **settled**
 
-The gap is the **trigger, not the storage**. `hutch-state audit` already returns value,
-source, kind, age and staleness for every field, and a `SessionStart` hook is already
-wired and working (`bin/hutch-session-start`). Possible shapes, undecided:
+The gap was the **trigger, not the storage**, and the trigger is now `bin/hutch-stop`: a
+`Stop` hook that blocks once per turn that touched the experiment, so `sync-log` writes
+the entry from the session that still has the context. The concern that "a Stop hook has
+no judgment" is resolved by splitting it — the hook decides only *whether to ask*
+(`last_assistant_message` matches a hutch tool, an experiment is known, the session is
+not in this checkout), and the sub-skill decides *what to record*.
 
-- **SessionStart hook + SKILL.md** — the hook injects `audit` output so restoring context
-  is automatic, and SKILL.md carries the write-back discipline.
-- **Add a Stop hook** so logging is ambient too. But a Stop hook has no judgment: it
-  knows the turn ended, not whether a sample changed or a run mattered, so it may need
-  the agent to stage the entry anyway.
-- **SKILL.md only** — nothing to install, and nothing to enforce it.
+**The filter cannot tell "operated on" from "mentioned."** A transcript that writes
+`--experiment E` into a test file reads the same as one that ran it against the DAQ, and
+prose *about* `hutch-state` matches the same pattern as a call to it. The cwd guard covers
+the case that actually bit (developing the skill); distinguishing the general case means
+parsing tool-call structure out of the transcript, which is the parser this design
+deliberately does not have. A false block costs one turn and the agent is told to write
+nothing — the failure is cheap, which is why the coarse filter is the right trade.
+
+Rejected: `entr` or any watchdog over a copied transcript. `entr` is not installed at the
+hutches, the harness already fires at turn end with `transcript_path` in hand, and a
+headless `claude -p` would write the beamtime log with no operator in the loop.
+
+One thing to re-check on upgrade: the Stop payload and the `{"decision":"block"}`
+contract were read out of the shipping binary (2.1.285) because the docs site is
+unreachable from the hutches. They are not a published API. `tests/unit/test_stop_hook.py`
+pins the behaviour we depend on, so a contract change should surface as a test failure
+rather than a silent no-op.
 
 ### Q4 — `/take-run` is sequenced behind Q1
 

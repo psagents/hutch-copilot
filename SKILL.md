@@ -73,8 +73,9 @@ Two rules about the experiment state file, which every sub-skill reads and write
 - Use any field already present without re-asking the user. If a field **required for the
   current task** is missing or null, ask for it — do not infer or assume a value.
 
-> **`hutch-log` has no caller.** There is no ambient per-turn logging, condition tracking
-> or shift handoff — each sub-skill writes its own conclusions with provenance instead.
+> **Logging is ambient.** A `Stop` hook (`bin/hutch-stop`) asks you to sync at the end of
+> any turn that touched the experiment; `sync-log` does the writing. Each sub-skill still
+> records its own conclusions with provenance — `sync-log` catches what they did not.
 
 ---
 
@@ -115,6 +116,7 @@ sub-skill rather than working from memory of it.
 | `/debug-daq` or "the DAQ is broken", "DAQ won't start", "we're losing data", "high deadtime", "damage events", "why did the run fail", "what happened last night" | Read `debug-daq/SKILL.md` |
 | `/setup-analysis` or "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready", "submit the analysis" | Read `setup-analysis/SKILL.md`. |
 | `/assess-analysis` or "how does the data look", "assess the run", "is the dataset good", "what did the analysis say" | Read `assess-analysis/SKILL.md` |
+| `/sync-log` or "log that", "update the log", "write it down", or a Stop-hook request to sync | Read `sync-log/SKILL.md` |
 
 ---
 

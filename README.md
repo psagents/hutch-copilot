@@ -39,6 +39,25 @@ source bin/hutch-env     # sets PATH and $HUTCH, finds caget
 At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
 every session start. Off-hutch it stays silent, by design.
 
+Logging is ambient via a second hook. Register both in `settings.json`:
+
+```json
+"hooks": {
+  "SessionStart": [{"hooks": [{"type": "command",
+      "command": "<checkout>/bin/hutch-session-start", "timeout": 5}]}],
+  "Stop":         [{"hooks": [{"type": "command",
+      "command": "<checkout>/bin/hutch-stop", "timeout": 10}]}]
+}
+```
+
+`hutch-stop` blocks the turn once when it ended having touched the experiment, so
+`sync-log` records it while the context is still live. It spawns nothing, writes nothing,
+and exits silently off-hutch, inside this checkout (developing the copilot is not
+operating the hutch), with no experiment established, or on any malformed input.
+Four things stop it looping: `stop_hook_active`, the harness's own
+`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (default 8), the advancing `sync_log.last_uuid`
+watermark, and the fact that it issues no tool call.
+
 ### Advisors
 
 **This repo holds no science knowledge, so the advisor skills hold all of it** — every
@@ -94,6 +113,8 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-skills` | which skills are installed, and where |
 | `hutch-lute` | LUTE: jobs, pedestals, config rendering, workspace setup |
 | `hutch-log` | the beamtime log — events, for humans |
+
+Two shell hooks sit beside them and are not CLIs: `hutch-session-start` and `hutch-stop`.
 
 `--help` on any of them lists its subcommands. `SKILL.md` carries the
 contract the agent must obey — provenance on every write, stale reads fail, a

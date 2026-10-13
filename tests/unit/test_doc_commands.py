@@ -90,9 +90,10 @@ def test_markdown_contains_invocations_to_check():
 
 
 #: Not argparse CLIs, so there is no parser to check a documented invocation
-#: against. `env` is sourced into a shell rather than run and `session-start` is a
-#: hook the harness calls with no arguments; test_env.py covers both.
-NOT_CLIS = {"env", "session-start"}
+#: against. `env` is sourced into a shell rather than run; `session-start` and `stop`
+#: are hooks the harness calls with no arguments, the latter reading JSON on stdin.
+#: test_env.py covers the first two, test_stop_hook.py the third.
+NOT_CLIS = {"env", "session-start", "stop"}
 
 
 def test_every_binary_is_covered():
