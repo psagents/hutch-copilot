@@ -1,11 +1,17 @@
-"""hutch-python: the live session on this machine, and the safety gate in front of it.
+"""hutch-python: the device namespace, and the safety gate in front of it.
 
-The bridge is a loopback socket into a running hutch-python IPython session:
-oc_bridge.py exec()s in the session's own globals(), so every loaded device
-object is in scope. Nothing else reaches another process's namespace.
+Two ways in. ``run`` launches the hutch's own ``{hutch}python`` wrapper on a
+staged script: ``load()`` runs before hutch_python's interactive/script branch,
+so the script gets the identical namespace a session would, with no session and
+no listener. This is the supported path.
 
-Everything sent to a live session passes ``require_confirmation`` first. That
-gate, the transport, and the session's own conf.yml live here; the DAQ's state,
+``exec`` is the older one: a loopback socket into a running IPython session
+(``oc_bridge.py``), the only way into an already-live process's namespace. It is
+launch-authenticated but **use-unauthenticated** -- any local account can
+connect to the port and move hardware -- and is being removed. Prefer ``run``.
+
+Everything passes ``require_confirmation`` first, whichever way it goes. That
+gate, both transports, and the hutch's conf.yml live here; the DAQ's state,
 logs and config file are ``hutch-daq``.
 """
 
@@ -208,6 +214,9 @@ BRIDGE_PORT = 9999
 #: Timeout classes, in seconds. Named rather than magic numbers at call sites.
 T_QUERY = 10
 T_DEVICE = 30
+#: A fresh load, not a live session: the import alone measured 24.5s cold on
+#: mfx-daq off NFS, before any device instantiation. See PLAN.md Q1.
+T_LOAD = 180
 
 
 def _start_hint() -> str:
@@ -342,6 +351,71 @@ def exec_code(
         "safety": verdict,
     }
 
+#: Prepended to every staged script. The happi load sits inside safe_load(), so a
+#: db it cannot read leaves an empty namespace and rc=0 -- silently reporting
+#: nothing rather than failing. Keyed off elog, not daq: MEC/CXI/XCS omit
+#: daq_type (so lcls1) and `las` is nodaq, none of which get a daq object.
+_GUARD = (
+    "assert 'elog' in globals() and len(globals()) > 50, (\n"
+    "    'hutch-python loaded a near-empty namespace -- check that conf.yml db "
+    "is readable by this user (the /reg/g spelling is not)')\n"
+)
+
+#: Printed last so the caller can see the namespace it actually got.
+_SIZE_MARKER = "HUTCH_NS_SIZE:"
+
+
+def run_script(
+    hutch: str,
+    code: str,
+    *,
+    confirm: str | None = None,
+    timeout: int = T_LOAD,
+) -> dict:
+    """Run python in a fresh hutch-python load, with no live session.
+
+    Returns the same keys as ``exec_code`` plus ``returncode`` and
+    ``namespace_size``. ``timeout`` is in seconds.
+    """
+    verdict = require_confirmation(code, confirm)
+
+    h = hutch.strip().lower()
+    # The hutch's own wrapper, not hutch-python directly: it sources {hutch}env,
+    # which sets the conda env and the PYTHONPATH that `load: mfx.beamline` and
+    # `from mfx.db import elog` need. Reimplementing that here would drift.
+    launcher = f"{external_path('PYTHON_APPS')}/{h}/{h}python"
+    staged = f"{_GUARD}{code}\nprint({_SIZE_MARKER!r}, len(globals()))\n"
+
+    # /dev/stdin, not a temp file: cli.py reads the script to EOF before exec, so
+    # an input() prompt in the snippet raises EOFError instead of hanging here.
+    try:
+        proc = subprocess.run(
+            [launcher, "/dev/stdin"],
+            input=staged.encode(),
+            capture_output=True,
+            timeout=timeout,
+        )
+    except OSError as exc:
+        raise SessionError(f"cannot run {launcher}: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise SessionError(f"{launcher} did not finish within {timeout}s") from exc
+
+    text = proc.stdout.decode("utf-8", "replace")
+    size = None
+    if _SIZE_MARKER in text:
+        tail = text.split(_SIZE_MARKER, 1)[1].split()
+        size = int(tail[0]) if tail and tail[0].isdigit() else None
+        text = text.split(_SIZE_MARKER, 1)[0]
+    return {
+        "ok": proc.returncode == 0,
+        "output": text,
+        "error": proc.stderr.decode("utf-8", "replace").strip() or None,
+        "safety": verdict,
+        "returncode": proc.returncode,
+        "namespace_size": size,
+    }
+
+
 def install_listener() -> str:
     """Nothing to copy -- the script is local. Report the path to exec()."""
     return f"the operator starts the bridge on this machine:\n    {_start_hint()}"
@@ -387,7 +461,7 @@ def hutch_conf(hutch: str) -> dict:
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-python: ping | install | exec | conf."""
+_DOC = """hutch-python: ping | install | exec | run | conf."""
 
 
 def _confirm_and_timeout(p, post: bool = False) -> None:
@@ -397,12 +471,15 @@ def _confirm_and_timeout(p, post: bool = False) -> None:
     p.add_argument("--confirm", dest="confirm" + suffix,
                    choices=[READ_ONLY, WRITE, BEAM_CRITICAL], default=None,
                    help="action class a human has approved")
-    p.add_argument("--timeout", dest="timeout" + suffix, type=int,
-                   default=None if post else T_QUERY)
+    p.add_argument("--timeout", dest="timeout" + suffix, type=int, default=None)
 
 
 def _resolve(args) -> tuple:
-    """(confirm, timeout), taking the post-subcommand spelling when both appear."""
+    """(confirm, timeout), taking the post-subcommand spelling when both appear.
+
+    ``timeout`` is None when the operator gave none, so each subcommand applies
+    its own class -- a shared default would give ``run`` the 10s query budget.
+    """
     confirm = getattr(args, "confirm_post", None) or args.confirm
     timeout = getattr(args, "timeout_post", None) or args.timeout
     return confirm, timeout
@@ -427,12 +504,16 @@ def build_parser() -> argparse.ArgumentParser:
     # namespace, so a same-dest option would reset the parent's value.
     _confirm_and_timeout(exec_parser, post=True)
 
+    run_parser = sub.add_parser("run", help="run python in a fresh load, no session")
+    run_parser.add_argument("code", help="python source, or - to read stdin")
+    _confirm_and_timeout(run_parser, post=True)
+
     sub.add_parser("conf", help="the hutch's conf.yml")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
-    """hutch-python: ping | install | exec | conf."""
+    """hutch-python: ping | install | exec | run | conf."""
     args = build_parser().parse_args(argv)
     confirm, timeout = _resolve(args)
     try:
@@ -444,16 +525,24 @@ def main(argv: list[str] | None = None) -> int:
             return out(install_listener(), plain=True)
         if args.cmd == "conf":
             return out(hutch_conf(args.hutch))
-        if args.cmd == "exec":
+        if args.cmd in ("exec", "run"):
             code = sys.stdin.read() if args.code == "-" else args.code
             verdict = classify(code)
             if confirm is None and SEVERITY[verdict["class"]] > 0:
-                # Nothing is transmitted: exec_code is never reached.
+                # Nothing is transmitted or launched: the gate is never passed.
                 out(verdict)
                 return REFUSED
-            res = exec_code(code, confirm=confirm, timeout=timeout)
+            if args.cmd == "exec":
+                res = exec_code(code, confirm=confirm, timeout=timeout or T_QUERY)
+                out(res)
+                return OK if res["ok"] else UNREACHABLE
+            res = run_script(args.hutch, code, confirm=confirm,
+                             timeout=timeout or T_LOAD)
             out(res)
-            return OK if res["ok"] else UNREACHABLE
+            # A snippet that raised is not an unreachable source: collapsing the
+            # two would leave a caller unable to tell "no launcher" from
+            # "the run failed".
+            return OK if res["ok"] else 1
         return USAGE
     except SafetyRefusal as exc:
         return fail(exc, REFUSED)

@@ -145,16 +145,16 @@ def _refuse_bridge(*a, **kw):
 # --------------------------------------------------------------------------
 # The surface itself
 # --------------------------------------------------------------------------
-def test_run_and_classify_are_gone():
-    """Both were removed in M1.a: `run` shipped whole scripts into the session
-    (and its callers are resolver calls now), `classify` folded into `exec`.
+def test_the_surface_is_the_two_transports_and_conf():
+    """`classify` stays folded into `exec`; `config`/`logs` left for `hutch-daq`
+    in the Oct 2026 split, since they read the DAQ's own files.
 
-    `config` and `logs` left with the Oct 2026 split -- they read the DAQ's own
-    files, not the session, so they are `hutch-daq`. What stays here is the
-    session and the gate in front of it, plus `conf` (hutch-python's own
-    conf.yml, which is session truth rather than DAQ truth)."""
+    `run` is back, but it is not the M1.a `run` that shipped whole scripts into a
+    session over the bridge: it launches a fresh load and needs no session at
+    all. It is the replacement for `exec`, not a reinstatement."""
     choices = _subcommands()
-    assert choices == {"ping", "install", "exec", "conf"}
+    assert choices == {"ping", "install", "exec", "run", "conf"}
+    assert "classify" not in choices
 
 
 def _subcommands() -> set:

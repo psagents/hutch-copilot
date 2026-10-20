@@ -14,8 +14,10 @@
 
 _hutch_env_repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
-# The hutch comes from the hostname -- this skill serves MEC, MFX, RIX, TMO and
-# XPP
+# The hutch comes from the hostname. No hutch list is hardcoded anywhere in the
+# tools, and there are 16 hutch-python deployments (abl amo cxi det icl las mec
+# mfx rix sxr tmo tst txi ued xcs xpp) -- CXI and XCS included, which an earlier
+# "MEC, MFX, RIX, TMO and XPP" comment here wrongly implied were out of scope.
 hutch_from_hostname() {
     case "${1:-$(hostname -s)}" in
         *-daq|*-control|*-console|*-monitor)

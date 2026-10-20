@@ -2,8 +2,8 @@
 name: take-run
 description: >
   DAQ run execution sub-skill for hutch-copilot. Starts DARK (pedestal), GEOM
-  (geometry calibration), or DATA (science) runs through the hutch-python IPython
-  bridge. Validates DAQ state, confirms run parameters with the operator, executes
+  (geometry calibration), or DATA (science) runs through the hutch-python CLI.
+  Validates DAQ state, confirms run parameters with the operator, executes
   the run, verifies XTC2 arrival on S3DF, and watches for the LUTE trigger.
   Triggers on: /take-run, /takerun, take a run, start collecting, begin a run,
   take data, take a dark run, take a pedestal run, take a geometry run,
@@ -60,6 +60,14 @@ pass it a duration.
 
 If `run_type` is ambiguous, ask with the three options. Never infer it silently.
 
+**This table is MFX vocabulary, not a facility contract.** `geomrun`/`takepeds` exist
+only at MFX. CXI has an `autorun` with an *incompatible* signature —
+`autorun(sample_name=…, runs=, delay=, pulsepicker=)` against MFX's
+`autorun(sample=…, tag=, run_type=…)` — so an MFX snippet raises `TypeError`
+part-way through a run there. RIX and TMO are scan-shaped and have no run verb at
+all. At any hutch other than MFX, confirm the function and its parameters before
+sending; do not translate this table.
+
 ---
 
 ## 3. Confirm — this is a write
@@ -70,12 +78,22 @@ reasons, the duration and the sample, and wait for explicit approval. Then re-se
 the class you were actually granted:
 
 ```bash
-bin/hutch-python --hutch "$H" --timeout 300 --confirm write exec "<run command>"
-bin/hutch-python --hutch "$H" exec 'get_run()'
+bin/hutch-python --hutch "$H" --timeout 300 --confirm write run "<run command>"
+bin/hutch-daq --hutch "$H" state        # run_number / last_run_number
 ```
 
-**`DARK` is two writes, and the second is gated.** `takepeds()` records through the
-bridge; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
+`run` launches a fresh device load and needs no live session. It pays that load on
+every call (tens of seconds), so batch a multi-step sequence into one snippet rather
+than issuing several. Exit code **1** means the snippet itself raised — the traceback
+is in `error`; **4** means the launcher or hutch could not be reached at all.
+
+The run number comes from the DAQ, not from `get_run()`. `get_run()` is an HTTP GET
+against the elog (`mfx/macros.py:619-622`) despite its docstring claiming otherwise, so
+it lags the DAQ and needs off-hutch HTTPS. `hutch-daq state` already reports
+`run_number` and `last_run_number` from `DaqControl.getStatus()`.
+
+**`DARK` is two writes, and the second is gated.** `takepeds()` records through
+`run`; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
 operator separately from the run itself:
 
 ```bash
@@ -115,7 +133,7 @@ on the strength of the command having returned.
 
 ```bash
 bin/hutch-state set --hutch "$H" --experiment "$E" last_run_number {run} \
-    --source "get_run() via ${H}-daq after autorun" --kind resolved
+    --source "hutch-daq state run_number after autorun" --kind resolved
 bin/hutch-state set --hutch "$H" --experiment "$E" last_run_tag "{run_type}" \
     --source "run_type confirmed with operator" --kind operator
 ```

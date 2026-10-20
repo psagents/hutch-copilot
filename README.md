@@ -107,7 +107,7 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-happi` | the device database — what exists, where, under which PV prefix |
 | `hutch-epics` | Channel Access — live PV reads; and PV history from the archiver |
 | `hutch-lightpath` | the beam path to a hutch, and what blocks it |
-| `hutch-python` | the live hutch-python session, and the safety gate in front of it |
+| `hutch-python` | the hutch-python device namespace — via the CLI (`run`), or a live session (`exec`, deprecated) — and the safety gate in front of both |
 | `hutch-daq` | the DAQ — state (via its control port, no session needed), logs, config. Read-only |
 | `hutch-data` | what landed on disk — psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `hutch-skills` | which skills are installed, and where |

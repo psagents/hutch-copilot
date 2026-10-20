@@ -28,7 +28,7 @@ so the tool to call follows from which source answers the question.
 | `bin/hutch-happi` | The device database: what exists, where, under which PV prefix |
 | `bin/hutch-epics` | Channel Access: live PV reads, and archived PV history |
 | `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
-| `bin/hutch-python` | The live hutch-python session, and the safety gate in front of it |
+| `bin/hutch-python` | The hutch-python device namespace — via the CLI (`run`), or a live session (`exec`, deprecated) — and the safety gate in front of both |
 | `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
 | `bin/hutch-data` | What landed on disk: psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |

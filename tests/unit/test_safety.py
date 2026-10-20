@@ -74,3 +74,15 @@ def test_reasons_are_quotable_in_a_confirmation_prompt():
     reasons = safety.classify("mfx_att_1.mv(0)")["reasons"]
     assert any("attenuator" in r for r in reasons)
     assert any("device move" in r for r in reasons)
+
+
+def test_run_refuses_before_launching_anything(monkeypatch):
+    """The gate must fire before the subprocess, not after it has moved hardware."""
+    def no_launch(*a, **kw):
+        pytest.fail("launched despite a refusal")
+
+    monkeypatch.setattr(safety.subprocess, "run", no_launch)
+    with pytest.raises(safety.SafetyRefusal):
+        safety.run_script("mfx", "mfx_stopper_1.remove()", confirm=None)
+    with pytest.raises(safety.SafetyRefusal):
+        safety.run_script("mfx", "mfx_stopper_1.remove()", confirm=safety.WRITE)
