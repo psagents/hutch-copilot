@@ -24,7 +24,7 @@ one of:
 
 A checkout anywhere else is invisible to the `Skill` tool no matter how correct the
 code is — the symptom is `Unknown skill: hutch-copilot`, with `SKILL.md` readable by
-hand. To serve both from one checkout, symlink the second:
+hand. To serve both from one checkout, symlink the second — to **your** checkout, never another user's:
 
 ```bash
 ln -s ~/.claude/skills/hutch-copilot ~/.claude-lcls/skills/hutch-copilot
@@ -39,16 +39,18 @@ source bin/hutch-env     # sets PATH and $HUTCH, finds caget
 At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
 every session start. Off-hutch it stays silent, by design.
 
-Logging is ambient via a second hook. Register both in `settings.json`:
+Logging is ambient via a second hook. Register both from **your own** checkout:
 
-```json
-"hooks": {
-  "SessionStart": [{"hooks": [{"type": "command",
-      "command": "<checkout>/bin/hutch-session-start", "timeout": 5}]}],
-  "Stop":         [{"hooks": [{"type": "command",
-      "command": "<checkout>/bin/hutch-stop", "timeout": 10}]}]
-}
+```bash
+scripts/install-hooks.py                        # ~/.claude-lcls (or $CLAUDE_CONFIG_DIR)
+scripts/install-hooks.py --config-dir ~/.claude # for plain `claude`
+scripts/install-hooks.py --check                # report only
 ```
+
+It adds `SessionStart`/`Stop` if missing, and replaces any that point at another
+checkout — never copy hook lines from someone else's `settings.json`: their path is
+baked in, and your session then runs their copy of the skill and hooks. Other keys are
+kept; the old file is saved as `settings.json.bak-<time>`.
 
 `hutch-stop` blocks the turn once when it ended having touched the experiment, so
 `sync-log` records it while the context is still live. It spawns nothing, writes nothing,
@@ -86,7 +88,8 @@ is left alone, so a clone you maintain yourself is never overwritten.
 Seven advisors are **not on GitHub** — `ask-lcls2`, `ask-smalldata`, `ask-ami`,
 `elog-copilot`, `experimental-hutch-python`, `xpm-seq` and `lcls-catalog` live only on
 `/sdf/group/lcls/ds/dm/apps/dev/claude/skills`. The script cannot fetch them and they are
-unreachable off S3DF and the hutches. None is currently required. See *Status* — whether
+unreachable off S3DF and the hutches. One is required — `ask-smalldata`, for SmallData
+producer configs — so SmallData verdicts are refused off S3DF. See *Status* — whether
 the org is the shared home for all of them is an open question.
 
 The tiers are derived from the docs rather than from a GitHub topic (`knowledge` or
@@ -111,7 +114,7 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-daq` | the DAQ — state (via its control port, no session needed), logs, config. Read-only |
 | `hutch-data` | what landed on disk — psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `hutch-skills` | which skills are installed, and where |
-| `hutch-lute` | LUTE: jobs, pedestals, config rendering, workspace setup |
+| `hutch-lute` | LUTE: jobs (`run-task`, `run-workflow`), pedestals, config rendering, workspace setup. Slurm calls go over `ssh psana` when the local cluster is not S3DF |
 | `hutch-log` | the beamtime log — events, for humans |
 
 Two shell hooks sit beside them and are not CLIs: `hutch-session-start` and `hutch-stop`.
@@ -177,8 +180,6 @@ Any interpreter with pytest will do — the package is stdlib-only — but the b
 
 The tools run directly on `{hutch}-daq`. Outstanding:
 
-- **`hutch-lute sbatch|watch|status`** call Slurm locally, which at the hutch is the
-  DAQ cluster. They need a hop to `psana`/`s3dflogin` to reach the analysis cluster.
 - **`hutch-lute peds`** is the last `psdev` caller and will fail until it either runs
   `makepeds` locally or hops to a host that can.
 - **`hutch-daq logs` retention** — verified live at MFX on 2026-10-12 (88 sessions in one
@@ -193,8 +194,8 @@ The tools run directly on `{hutch}-daq`. Outstanding:
   feature branch. Consequences of leaving it:
   - `fetch-advisors.sh` cannot install the filesystem-only 7 at all, so they are
     unavailable off S3DF and the hutches — and unavailable to anyone outside `ps-users`.
-    None is required today; citing one in a `SKILL.md` would make it required and
-    immediately unsatisfiable for those users.
+    `ask-smalldata` is now required (cited by the root `SKILL.md` for SmallData
+    producer configs), so for those users a SmallData verdict is refused.
   - The DAQ suite is pinned to `features/psana-daq-monitor`. A feature branch is not a
     release: it can be rebased or merged away under us.
   - Each is a few KB of markdown, so size is not the obstacle. Several do depend on

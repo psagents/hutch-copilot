@@ -32,7 +32,7 @@ so the tool to call follows from which source answers the question.
 | `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
 | `bin/hutch-data` | What landed on disk: psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |
-| `bin/hutch-lute` | LUTE: submission, monitoring, pedestals, config rendering, workspace setup |
+| `bin/hutch-lute` | LUTE: which LUTE (`--lute`), workspace setup, registration, running a Task or a whole DAG by hand, monitoring, pedestals |
 | `bin/hutch-log` | the beamtime log |
 
 Run `--help` for subcommands and flags. They work from a bare checkout with no install
@@ -48,6 +48,11 @@ Three rules that the tools enforce and you must not work around:
    it, or pass `--stale-ok` and report the age to the user. Do not silently use old numbers.
 3. **A resolver that cannot reach its source raises.** Never substitute a remembered or
    documented value. Report the failure and either use explicitly-stale state or ask the operator.
+
+**Probes are cheap or they are background.** A psana2 probe passes `detectors=[...]`
+(only what it needs — `['timing']` for event codes) and a small `max_events`, prints with
+`python -u` and never through `tail`, and anything over a minute runs in the background.
+An unbounded probe reads every jungfrau/epix stream just to count codes.
 
 Resolve, don't recall: device lists and PV prefixes come from `hutch-happi`, detector
 aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq`. This skill
@@ -138,15 +143,22 @@ parameters, happi, psana2, SmallData, EPICS, AMI, Slurm and S3DF, the eLog, Conf
 hutch-python, XPM timing and LCLS-II DAQ diagnostics. Most are **available**: useful when
 present, and nothing breaks without them.
 
-**Three are required, because a judgment routes through them:** `@ask-lute` and
-`@ask-cctbx-xfel` for what an analysis number means, `@psana-daq` for which angle a DAQ
-fault belongs to. A required advisor you cannot load is tool rule 3 — a source you could
-not reach. So:
+**Four are required, because a judgment routes through them:** `@ask-lute` for how to
+set up and read a LUTE workflow, `@ask-cctbx-xfel` for what an SFX merge statistic means,
+`@ask-smalldata` for the SmallData producer config, `@psana-daq` for which angle a DAQ
+fault belongs to.
+
+**A required advisor that is not installed: fetch it, then read it.** Run
+`scripts/fetch-advisors.sh`, then `Read` the advisor's `SKILL.md` from
+`~/.claude/skills/<name>/` directly — the skill list is fixed at session start, so the
+`Skill` tool will not see it until a restart, but its files are readable at once. Tell
+the operator you did so. `fetch-advisors.sh` clones from GitHub; it cannot install the
+filesystem-only advisors (`README.md`, *Advisors*).
+
+If that fails too, it is tool rule 3 — a source you could not reach. So:
 
 - **Report every value you read, with where you read it.** Those are facts and they stand.
 - **Say plainly that you cannot interpret them, and name the advisor that is missing.**
-  Give the operator `scripts/fetch-advisors.sh`, and restart afterwards or a freshly
-  installed advisor stays invisible.
 - **Do not produce the verdict anyway.** No remembered threshold, no number from your own
   reasoning dressed as a finding. Offer instead to apply a threshold the operator gives
   you — that is theirs, recorded `--kind operator`.
@@ -161,6 +173,6 @@ submit. See its precondition contract.
 - `README.md` — installation, the exit-code contract, the safety gate, open work.
 
 **This repo holds no science knowledge** — no parameter defaults, no metric thresholds,
-no DAG recipes. Operating a workflow is here; what its numbers mean is `@ask-lute` and
-`@ask-cctbx-xfel`. A table of "typical values" in this repo is a bug: it goes stale
+no DAG recipes. Operating a workflow is here; what to set up and how to read its output is
+`@ask-lute`, and what an SFX merge means is `@ask-cctbx-xfel`. A table of "typical values" in this repo is a bug: it goes stale
 silently and an agent cannot tell it apart from a resolved reading.

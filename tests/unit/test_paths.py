@@ -132,9 +132,9 @@ MergeCCTBXXFEL:
 def test_cell_string_matches_the_format_in_production_use(tmp_path):
     """Pin the unit_cell spelling.
 
-    setup-cctbx-pipeline's validation greps for this string verbatim in the
+    ask-lute's cctbx/validate.py greps for this string verbatim in the
     rendered YAML, so '90.0' vs '90' is the difference between passing and a
-    spurious failure. Its read_cryst1 emits str(float); match that.
+    spurious failure. setup-cctbx-pipeline's read_cryst1 emitted str(float); match that.
     """
     from hutch_tools import data as resolvers
     pdb = tmp_path / "x.pdb"

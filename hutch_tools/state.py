@@ -15,6 +15,7 @@ from .common import (
     USAGE,
     experiment_args,
     fail,
+    grant_group,
     json_or_str,
     log_file,
     out,
@@ -151,6 +152,7 @@ class State:
         Never truncates the real file, so a crash mid-write cannot lose the
         shift's context.
         """
+        first = not self.path.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".state-", suffix=".json")
         try:
@@ -162,6 +164,11 @@ class State:
             os.replace(tmp, self.path)
             with contextlib.suppress(OSError):
                 os.chmod(self.path, 0o664)
+            if first:
+                # Every experiment member logs, not just ps-data. Best effort: the
+                # directory's default ACL then covers each atomic rewrite.
+                with contextlib.suppress(OSError):
+                    grant_group(self.experiment, rw=[self.path.parent])
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)

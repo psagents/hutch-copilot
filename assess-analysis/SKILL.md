@@ -15,13 +15,22 @@ You own everything **after a job id exists**: watching it, reading its output, a
 verdict. Standing up and submitting workflows is `setup-analysis` — if no job was ever
 submitted, go there rather than submitting one here.
 
-Science interpretation comes from `@ask-lute` — thresholds, the per-shell reading, which
-knob answers a symptom. **It is required here, because the verdict is exactly that
-interpretation.** If it will not load: report every number with the path and line you
-read it from, say which advisor is missing and that you cannot interpret them, and point
-the operator at `scripts/fetch-advisors.sh`. Then stop — do not rank runs, recommend a
-knob, or call a dataset good from a threshold you remember. Ask the operator for the
-threshold instead and record it `--kind operator` if they give you one.
+You hold the **decision** — good enough, one knob, failed, iterate — and no tools or
+thresholds of your own. The facts and the criteria come from the advisors:
+
+| Analysis | Facts: parser | Criteria |
+|---|---|---|
+| BayFAI | `@ask-lute` `bayfai/parse_bayfai_log.py` | `@ask-lute` `bayfai/SKILL.md` |
+| SmallData | `@ask-lute` `smalldata/parse_smd_output.py` | `@ask-lute` `smalldata/SKILL.md` |
+| CCTBX SFX | `@ask-lute` `cctbx/parse_merge_log.py` | `@ask-cctbx-xfel` `references/merge-assessment.md` |
+
+`setup-analysis` recorded the parse command as `lute_parse` in `hutch-state`. **These
+advisors are required here, because the verdict is exactly that interpretation.** If one is
+missing, follow the required-advisor contract in `SKILL.md`: fetch it and read it; only if
+that fails, report every number with the path you read it from, say which advisor is
+missing and that you cannot interpret them, and stop — do not rank runs, recommend a knob,
+or call a dataset good from a threshold you remember. Ask the operator for the threshold
+instead and record it `--kind operator` if they give you one.
 
 **Inspecting output is your job, not the operator's.** `hutch-lute status` returns the log
 paths; read those files. Never ask for a paste.
@@ -34,6 +43,10 @@ paths; read those files. Never ask for a paste.
 bin/hutch-lute watch --user "$USER" --since "$SUBMIT_TIME"
 bin/hutch-lute status "$JOB_ID"
 ```
+
+Both reach S3DF's Slurm. A hutch host's own `squeue` answers for its DAQ cluster
+(`lcls-drp` on mfx-daq), so off S3DF the tool runs them over `ssh psana`; if psana is
+unreachable they fail rc=4 — **never** read that as "no job".
 
 `watch` reports `polls` and `waited_s`, so **"no job found" is distinguishable from "did
 not look"**. If `found` is false after a full timeout with non-zero `polls`, the workflow
@@ -54,13 +67,19 @@ Two traps, both of which have produced confident wrong reports:
   state alone — confirm output exists.
 - **Check `hit_wall_clock`.** If true the run was truncated, its statistics are
   coverage-limited, and it must not be compared against a complete run.
+- **LUTE kills a Task two ways, and neither means "hung".** `Task did not respond for
+  more than 900.0 seconds ... UNRESPONSIVE` is the executor's heartbeat: the Task printed
+  nothing for 15 min (BayFAI logs nothing inside its BO loop). `Task timed out!` (signal
+  14) is the config's `task_timeout`. Report which one, and the CPU time from `sacct` —
+  ranks that were busy the whole time were working, not stuck.
 
 ---
 
 ## 3. Read the output
 
-`status` returns the output paths. Read them directly. Report, per metric, the value and
-where you read it.
+`status` returns the output paths. Run the analysis's parser on them and report, per
+metric, the value and the file it came from. Read the log itself too when the parser
+lists `errors` or `missing_sections` — those say where to look, not what happened.
 
 When reporting counts from a scan of many per-event files, **say how many files you
 scanned** — a truncated scan produces a plausible wrong total silently.
@@ -87,6 +106,36 @@ estimating them. Ask the operator about those instead of guessing.
 monotone in the cutoff, so tightening it improves them on identical data. That is a
 re-cut, not an improvement, and must not be presented as one — judge a cutoff on the
 per-shell table, and compare jobs only at equal cutoff.
+
+---
+
+## 4b. CCTBX: iterating a multi-run merge
+
+Per-run index and scale fire on their own (`cctbx_index_scale`, `END_OF_RUN`). The merge
+is yours to fire, and the loop is:
+
+1. **Which runs are in the dataset**, and are they all scaled:
+
+   ```bash
+   bin/hutch-lute runs -e "$E" --tag <tag>            # or --sample <sample>
+   bin/hutch-lute db --db <work_dir>/lute.db --task ScaleCCTBXXFEL --runs <those runs>
+   ```
+
+   `all_completed: false` names each run still `ABSENT` or `FAILED`. Merge anyway if the
+   operator wants a look now — the merge takes only scaled runs — but say which are out.
+2. **Where the merge goes**: `bin/hutch-lute merge-version --work-dir <work_dir> --tag
+   <tag> --create`. Render the config with that `merge_version` (`setup-analysis` §3) so
+   iterations never overwrite each other.
+3. **Fire it**: `cctbx_merge` (or `cctbx_rescale` after a d_min change) is a `MANUAL`
+   workflow; launch it from the eLog, or submit with the `launch_slurm` the workflow runs
+   on.
+4. **Read it**: `parse_merge_log.py` on `merge_<tag>/<vNNN>/merge_<tag>_main.log`, then
+   the per-shell criteria in `@ask-cctbx-xfel` `references/merge-assessment.md`.
+5. **A d_min change is the operator's call.** Show the shells that support it and record
+   their answer: `bin/hutch-state set ... cctbx_d_min <value> --kind operator`. Then
+   `cctbx_rescale` at the new d_min — no re-indexing.
+
+Compare merges only at equal d_min (§4).
 
 ---
 

@@ -50,9 +50,9 @@ for — and pass on:
   the DAQ can look healthy and still write to the previous shift's experiment.
 
 If `@psana-daq` cannot be loaded, the required-advisor contract in `SKILL.md` applies
-unchanged: report every reading with its provenance, say plainly that the advisor is
-missing, give the operator `scripts/fetch-advisors.sh` and the need to restart afterwards,
-and **do not produce a verdict**. No remembered threshold, no error line you interpreted
+unchanged: run `scripts/fetch-advisors.sh` and `Read` its `SKILL.md` directly; only if
+that fails, report every reading with its provenance, say plainly that the advisor is
+missing, and **do not produce a verdict**. No remembered threshold, no error line you interpreted
 yourself.
 
 ## 3. Write nothing
