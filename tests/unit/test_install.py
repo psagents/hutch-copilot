@@ -587,9 +587,11 @@ def test_grant_group_sets_default_acls_and_strips_world_write(tmp_path):
     db = tmp_path / "ws/lute_output/lute.db"
     db.touch()
     db.chmod(0o666)
+    (tmp_path / "ws").chmod(0o2777)
     res = paths.grant_group(group, rw=[tmp_path / "ws"])
     assert res["ok"], res
-    assert not db.stat().st_mode & 0o002
+    assert db.stat().st_mode & 0o7777 == 0o775
+    assert (tmp_path / "ws").stat().st_mode & 0o7777 == 0o2775
     import subprocess
     acl = subprocess.run(["getfacl", "-p", str(tmp_path / "ws/lute_output")],
                          capture_output=True, text=True).stdout

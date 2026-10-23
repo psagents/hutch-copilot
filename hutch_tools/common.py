@@ -215,8 +215,8 @@ def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Pat
     """Give ``group`` access to these trees (access + default ACLs), then check it took.
 
     An eLog workflow runs as whoever fires it, so every experiment member needs
-    the registered workspace -- not just ``ps-data``. World permissions are
-    never the fix: any ``o+w`` found is removed. Paths this user does not own
+    the registered workspace -- not just ``ps-data``. Every owned path is set to
+    0o775, as setup_lute does, never world-writable. Paths this user does not own
     cannot take an ACL and are reported, not failed.
     """
     me = os.getuid()
@@ -235,8 +235,9 @@ def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Pat
                     skipped.append(str(p))
                     continue
                 owned.append(str(p))
-                if st.st_mode & 0o002:
-                    os.chmod(p, st.st_mode & ~0o002)
+                # setup_lute's 0o775. Group rwx is also the ACL mask, so the named group
+                # keeps write. Keep setgid: a numeric chmod(2) clears it on directories.
+                os.chmod(p, 0o775 | st.st_mode & 0o2000)
             # One recursive call per tree; it reports, and skips, what it cannot change.
             # The hutch hosts mount /sdf/data over NFSv4 without POSIX ACLs ("Operation
             # not supported", and getfacl shows none that S3DF has), so set and check on psana.
