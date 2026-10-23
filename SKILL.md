@@ -107,6 +107,26 @@ Report the experiment and the loaded context back in one line, then proceed. Thr
   answer is intent. The DAQ's `experiment` signal is the separate, resolved reading, and
   the two disagreeing is a finding — see `are-we-ready`.
 
+### Then check the Kerberos ticket
+
+```bash
+klist -s -c FILE:$HOME/krb5cc.ticket && klist -c FILE:$HOME/krb5cc.ticket | grep -m1 krbtgt
+```
+
+The eLog reads **that file**, not the ambient cache: registering a workflow, posting run
+summaries and eLog lookups all need it. `-s` exits non-zero on an expired ticket too. If
+it fails, ask the operator once, in the same reply as the context line, to run this
+**in their own terminal** — not as a `!` command, which has no TTY for the password
+prompt and falls back to PKINIT:
+
+```bash
+kinit -c FILE:$HOME/krb5cc.ticket $USER@SLAC.STANFORD.EDU
+```
+
+Then re-run the check. It is not a blocker: if they decline, proceed, and say which steps
+will fail without it when you reach them. A ticket expires, so it is checked, never
+recorded in state.
+
 ---
 
 ## Command Dispatch
