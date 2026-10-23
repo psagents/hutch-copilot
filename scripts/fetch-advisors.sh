@@ -65,6 +65,8 @@ sync_lcls2() {
 
 # Every skill directory inside a cached checkout: root SKILL.md, or one level
 # down under a skills/ parent (claude/skills/<name>, psana/psana/skills/<name>).
+# A root SKILL.md makes the whole repo one skill: ask-lute's bayfai/, smalldata/
+# and cctbx/ are its sub-skills, not skills to link beside it.
 #
 # Deduplicated by skill name, because several psagents repos ship the same skill
 # twice -- claude/skills/<name> and opencode/skills/<name> are identical copies
@@ -72,10 +74,9 @@ sync_lcls2() {
 # Claude Code copy wins and the choice is not left to directory order.
 skill_dirs() {
     local root="$1"
-    { [[ -f "$root/SKILL.md" ]] && echo "$root"
-      find "$root" -mindepth 2 -maxdepth 5 -name SKILL.md -not -path '*/.git/*' \
-          -printf '%h\n' 2>/dev/null | sort
-    } | awk -F/ '!seen[$NF]++'
+    if [[ -f "$root/SKILL.md" ]]; then echo "$root"; return; fi
+    find "$root" -mindepth 2 -maxdepth 5 -name SKILL.md -not -path '*/.git/*' \
+        -printf '%h\n' 2>/dev/null | sort | awk -F/ '!seen[$NF]++'
 }
 
 # ── link ───────────────────────────────────────────────────────────────────

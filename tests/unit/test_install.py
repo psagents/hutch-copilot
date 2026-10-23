@@ -138,6 +138,40 @@ def test_plan_names_the_destructive_step_when_envs_already_exist(workspace):
 # --------------------------------------------------------------------------
 # Triggers
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# --lute-install: a workflow not in production runs from a built branch, no venvs
+# --------------------------------------------------------------------------
+@pytest.fixture()
+def built_lute(tmp_path):
+    bin_ = tmp_path / "lute/install/bin"
+    bin_.mkdir(parents=True)
+    for name in ("launch_slurm", "submit_launch_slurm.sh"):
+        (bin_ / name).write_text("#!/bin/sh\n")
+    return tmp_path / "lute"
+
+
+def test_lute_install_supplies_the_executables_and_skips_envs(workspace, built_lute, monkeypatch):
+    p = lute.plan(experiment="e1", hutch="mfx", workflows=["sfx_cctbx"],
+                  lute_install=str(built_lute))
+    assert p["arp_executable"] == str(built_lute / "install/bin/submit_launch_slurm.sh")
+    assert p["launch_executable"] == str(built_lute / "install/bin/launch_slurm")
+    assert p["destructive"] is None and p["blocking"] == []
+    assert p["elog_payloads"][0]["executable"] == p["arp_executable"]
+
+    calls = []
+    monkeypatch.setattr(lute, "create_venvs", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(lute, "register", lambda *a, **k: {"registered": [], "failed": []})
+    rc = lute.main(["all", "-e", "e1", "--hutch", "mfx", "-W", "sfx_cctbx",
+                    "--lute-install", str(built_lute), "--confirm", "write"])
+    assert rc == 0 and calls == []
+
+
+def test_an_unbuilt_lute_install_is_blocking(workspace, tmp_path):
+    p = lute.plan(experiment="e1", hutch="mfx", workflows=["sfx_cctbx"],
+                  lute_install=str(tmp_path / "never_built"))
+    assert any("lute install" in b for b in p["blocking"])
+
+
 @pytest.mark.parametrize("spec", ["START_OF_RUN", "END_OF_RUN", "MANUAL",
                                  "start_of_run"])
 def test_simple_triggers(spec):
@@ -286,6 +320,15 @@ def test_the_two_ticket_checks_are_not_the_same_question(monkeypatch):
     assert ticket.startswith("FILE:/nonexistent")
 
 
+def test_elog_ticket_asks_klist_for_validity_not_existence(monkeypatch):
+    """`klist -c` exits 0 on an expired ticket; only `-s` checks it is still valid."""
+    seen = []
+    monkeypatch.setattr(lute.subprocess, "run", lambda cmd, **k: seen.append(cmd) or
+                        type("P", (), {"returncode": 1})())
+    assert lute.elog_ticket()[0] is False
+    assert "-s" in seen[0]
+
+
 # --------------------------------------------------------------------------
 # The generated sbatch script
 #
@@ -337,3 +380,59 @@ def test_the_task_exit_code_is_the_job_exit_code():
     text = lute.build_sbatch(**SBATCH_KW)
     assert text.rstrip().endswith("exit ${RC}")
     assert "Task failed with return code" not in text
+
+
+# --------------------------------------------------------------------------
+# db | runs | merge-version
+# --------------------------------------------------------------------------
+@pytest.fixture()
+def lute_db(tmp_path):
+    """The four tables the query joins, in the shape LUTE v2 writes them."""
+    import sqlite3
+    db = tmp_path / "lute.db"
+    with sqlite3.connect(db) as c:
+        c.executescript("""
+            CREATE TABLE tasks (id integer PRIMARY KEY, name TEXT UNIQUE);
+            CREATE TABLE config (id integer PRIMARY KEY, run TEXT);
+            CREATE TABLE results (id integer PRIMARY KEY, status INTEGER);
+            CREATE TABLE executions (id integer PRIMARY KEY, task_id INTEGER,
+                config_id INTEGER, result_id INTEGER, timestamp DATETIME);
+            INSERT INTO tasks VALUES (1, 'ScaleCCTBXXFEL');
+            INSERT INTO config VALUES (1, '36'), (2, '37');
+            INSERT INTO results VALUES (1, 'TaskStatus.FAILED'), (2, 'TaskStatus.COMPLETED');
+            INSERT INTO executions VALUES
+                (1, 1, 1, 1, '2026-08-10 10:00:00'), (2, 1, 1, 2, '2026-08-10 11:00:00'),
+                (3, 1, 2, 1, '2026-08-10 12:00:00');
+        """)
+    return str(db)
+
+
+def test_db_reports_the_latest_status_per_run(lute_db):
+    r = lute.db_rows(lute_db, "ScaleCCTBXXFEL")
+    assert r["runs"]["36"]["status"] == "COMPLETED"      # the retry wins over the failure
+    assert r["runs"]["37"]["status"] == "FAILED" and r["all_completed"] is False
+
+
+def test_db_names_runs_that_never_ran(lute_db):
+    r = lute.db_rows(lute_db, "ScaleCCTBXXFEL", runs=[36, 40])
+    assert r["runs"]["40"]["status"] == "ABSENT" and r["all_completed"] is False
+    assert lute.db_rows(lute_db, "ScaleCCTBXXFEL", runs=[36])["all_completed"] is True
+
+
+def test_db_since_drops_older_rows(lute_db):
+    r = lute.db_rows(lute_db, "ScaleCCTBXXFEL", since="2026-08-10T11:30:00")
+    assert list(r["runs"]) == ["37"]
+
+
+def test_runs_refuses_a_sample_name_that_matches_everything():
+    with pytest.raises(lute.LuteError, match="matches every run"):
+        lute.elog_runs("e1", sample="All Samples")
+
+
+def test_merge_version_counts_up_and_creates(tmp_path):
+    (tmp_path / "merge_Lyso/v001").mkdir(parents=True)
+    (tmp_path / "merge_Lyso/v003").mkdir()
+    r = lute.merge_version(str(tmp_path), "Lyso", create=True)
+    assert r["existing"] == ["v001", "v003"] and r["next"] == "v004"
+    assert (tmp_path / "merge_Lyso/v004").is_dir()
+    assert lute.merge_version(str(tmp_path / "new"), "Lyso")["next"] == "v001"

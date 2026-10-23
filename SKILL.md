@@ -138,15 +138,22 @@ parameters, happi, psana2, SmallData, EPICS, AMI, Slurm and S3DF, the eLog, Conf
 hutch-python, XPM timing and LCLS-II DAQ diagnostics. Most are **available**: useful when
 present, and nothing breaks without them.
 
-**Three are required, because a judgment routes through them:** `@ask-lute` and
-`@ask-cctbx-xfel` for what an analysis number means, `@psana-daq` for which angle a DAQ
-fault belongs to. A required advisor you cannot load is tool rule 3 — a source you could
-not reach. So:
+**Four are required, because a judgment routes through them:** `@ask-lute` for how to
+set up and read a LUTE workflow, `@ask-cctbx-xfel` for what an SFX merge statistic means,
+`@ask-smalldata` for the SmallData producer config, `@psana-daq` for which angle a DAQ
+fault belongs to.
+
+**A required advisor that is not installed: fetch it, then read it.** Run
+`scripts/fetch-advisors.sh`, then `Read` the advisor's `SKILL.md` from
+`~/.claude/skills/<name>/` directly — the skill list is fixed at session start, so the
+`Skill` tool will not see it until a restart, but its files are readable at once. Tell
+the operator you did so. `fetch-advisors.sh` clones from GitHub; it cannot install the
+filesystem-only advisors (`README.md`, *Advisors*).
+
+If that fails too, it is tool rule 3 — a source you could not reach. So:
 
 - **Report every value you read, with where you read it.** Those are facts and they stand.
 - **Say plainly that you cannot interpret them, and name the advisor that is missing.**
-  Give the operator `scripts/fetch-advisors.sh`, and restart afterwards or a freshly
-  installed advisor stays invisible.
 - **Do not produce the verdict anyway.** No remembered threshold, no number from your own
   reasoning dressed as a finding. Offer instead to apply a threshold the operator gives
   you — that is theirs, recorded `--kind operator`.
@@ -161,6 +168,6 @@ submit. See its precondition contract.
 - `README.md` — installation, the exit-code contract, the safety gate, open work.
 
 **This repo holds no science knowledge** — no parameter defaults, no metric thresholds,
-no DAG recipes. Operating a workflow is here; what its numbers mean is `@ask-lute` and
-`@ask-cctbx-xfel`. A table of "typical values" in this repo is a bug: it goes stale
+no DAG recipes. Operating a workflow is here; what to set up and how to read its output is
+`@ask-lute`, and what an SFX merge means is `@ask-cctbx-xfel`. A table of "typical values" in this repo is a bug: it goes stale
 silently and an agent cannot tell it apart from a resolved reading.

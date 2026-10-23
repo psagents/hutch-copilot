@@ -511,7 +511,7 @@ def readiness(hutch: str, experiment: str, directory: str | None = None) -> dict
         "artifacts": artifacts,
         "recorded": recorded,
         "not_checked": ["eLog workflow registration (needs a Kerberos ticket)"],
-        "next": None if configured else "run /analyze-data to configure LUTE for this experiment",
+        "next": None if configured else "run /setup-analysis to configure LUTE for this experiment",
         "lute_output_dir": str(out_dir),
     }
 
@@ -661,6 +661,13 @@ def template_whitelist(template_text: str) -> set[str]:
     return names
 
 
+#: phil_parameters keys LUTE's own model consumes before rendering, so no phil
+#: template references them: MergeCCTBXXFEL resolves input_path from tag/sample
+#: (lute/io/models/sfx_merge.py, lcls-mlcv tag-sample-based-workflow).
+# ponytail: fixed set, read the PhilParameters model fields if more appear.
+MODEL_ONLY_KEYS = frozenset({"tag", "sample"})
+
+
 def phil_templates(yaml_text: str) -> dict[str, str]:
     """Map each task block to the phil template basename it names.
 
@@ -694,7 +701,7 @@ def whitelist_for(yaml_text: str, phil_dir: str | pathlib.Path) -> dict[str, set
         path = phil_dir / basename
         if not path.exists():
             raise ConfigError(f"{task} names phil_file {basename!r}, absent from {phil_dir}")
-        allowed[task] = template_whitelist(path.read_text())
+        allowed[task] = template_whitelist(path.read_text()) | MODEL_ONLY_KEYS
     return allowed
 
 
@@ -1039,7 +1046,9 @@ def elog_ticket() -> tuple[bool, str]:
     """
     ticket = f"FILE:{os.environ.get('HOME', '')}/krb5cc.ticket"
     try:
-        rc = subprocess.run(["klist", "-c", ticket], capture_output=True,
+        # -s, not plain -c: `klist -c` exits 0 on an expired ticket as long as the
+        # cache file exists; -s exits non-zero unless a ticket is still valid.
+        rc = subprocess.run(["klist", "-s", "-c", ticket], capture_output=True,
                             timeout=10).returncode
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"klist failed: {exc}"
@@ -1050,9 +1059,13 @@ def plan(
     *, experiment: str, hutch: str | None = None, directory: str | None = None,
     workflows: list[str] | None = None, triggers: list[str] | None = None,
     partition: str = DEFAULT_PARTITION, account: str | None = None,
-    version: str = "dev", debug: bool = False,
+    version: str = "dev", debug: bool = False, lute_install: str | None = None,
 ) -> dict:
     """Everything the install would do, with every precondition, touching nothing.
+
+    ``lute_install`` is a built LUTE checkout (``<dir>/install/bin``) for a
+    workflow that is not in a release; it replaces the venvs, which are then
+    neither required nor touched.
 
     Separating the plan is what makes ordering a property of the design instead
     of a comment -- see bug 2 in the section note above.
@@ -1075,12 +1088,23 @@ def plan(
     dags = {wf: out_dir / f"{wf}.dag" for wf in workflows}
     ticket_ok, ticket = elog_ticket()
 
+    if lute_install:
+        bin_dir = pathlib.Path(lute_install) / "install" / "bin"
+        arp, launch = str(bin_dir / "submit_launch_slurm.sh"), str(bin_dir / "launch_slurm")
+        lute_checks = [{"check": "lute install built", "ok": all(
+            pathlib.Path(x).is_file() for x in (arp, launch)), "detail": str(bin_dir)}]
+    else:
+        arp = str(venv39 / "bin" / "submit_launch_slurm.sh")
+        launch = str(venv39 / "bin" / "launch_slurm")
+        lute_checks = [
+            {"check": "python3.9 interpreter", "ok": pathlib.Path(PYTHON39).is_file(),
+             "detail": PYTHON39},
+            {"check": "python3.11 interpreter", "ok": pathlib.Path(PYTHON311).is_file(),
+             "detail": PYTHON311},
+        ]
     checks = [
         {"check": "config exists", "ok": config_path.exists(), "detail": str(config_path)},
-        {"check": "python3.9 interpreter", "ok": pathlib.Path(PYTHON39).is_file(),
-         "detail": PYTHON39},
-        {"check": "python3.11 interpreter", "ok": pathlib.Path(PYTHON311).is_file(),
-         "detail": PYTHON311},
+        *lute_checks,
         {"check": "at least one workflow named", "ok": bool(workflows),
          "detail": ", ".join(workflows) or "(none)"},
         {"check": "kerberos ticket (registration only)", "ok": ticket_ok,
@@ -1090,8 +1114,6 @@ def plan(
     for wf, dag in dags.items():
         checks.append({"check": f"dag exists: {wf}", "ok": dag.exists(), "detail": str(dag)})
 
-    arp = str(venv39 / "bin" / "submit_launch_slurm.sh")
-    launch = str(venv39 / "bin" / "launch_slurm")
     payloads = [
         elog_payload(
             workflow=r["workflow"],
@@ -1108,6 +1130,7 @@ def plan(
         "partition": partition, "version": version,
         "results_dir": str(base), "lute_output_dir": str(out_dir),
         "lute_envs_dir": str(envs_dir), "config_path": str(config_path),
+        "lute_install": lute_install,
         "workflows": resolved,
         "dags": {wf: str(p) for wf, p in dags.items()},
         "arp_executable": arp, "launch_executable": launch,
@@ -1118,7 +1141,7 @@ def plan(
         "envs_dir_exists": envs_dir.exists(),
         "destructive": (
             f"`envs` deletes {envs_dir} and recreates both virtual environments"
-            if envs_dir.exists() else None
+            if envs_dir.exists() and not lute_install else None
         ),
     }
 
@@ -1246,6 +1269,7 @@ def _install(args) -> int:
             experiment=args.experiment, hutch=args.hutch, directory=args.directory,
             workflows=args.workflow, triggers=args.trigger, partition=args.partition,
             account=args.account, version=args.version, debug=args.debug,
+            lute_install=args.lute_install,
         )
         if args.cmd == "plan":
             out(plan_)
@@ -1270,7 +1294,8 @@ def _install(args) -> int:
             steps = {
                 "workspace": setup_workspace(plan_),
                 "dags": patch_dags(plan_),
-                "envs": create_venvs(plan_, confirm=args.confirm),
+                "envs": ({"skipped": f"using --lute-install {args.lute_install}"}
+                         if args.lute_install else create_venvs(plan_, confirm=args.confirm)),
             }
             steps["register"] = register(plan_, confirm=args.confirm)
             out({"plan": plan_, "steps": steps})
@@ -1281,11 +1306,88 @@ def _install(args) -> int:
 
 
 # --------------------------------------------------------------------------
+# db | runs | merge-version -- workspace state, raw
+#
+# Ported from psagents/cctbx-sfx-workflow@fd1e468 (monitor.py, iteration_log.py)
+# so assess-analysis can drive a multi-run merge without that skill's watcher.
+# Facts only: which runs finished, which runs a tag/sample names, where the
+# next merge goes. Whether to merge is the caller's decision.
+# --------------------------------------------------------------------------
+def db_rows(db_path: str, task: str, runs: list[int] | None = None,
+            since: str | None = None) -> dict:
+    """Latest status per run of one task in a lute.db, opened read-only."""
+    import sqlite3
+    if not pathlib.Path(db_path).is_file():
+        raise LuteError(f"no lute.db at {db_path}")
+    # config.run is TEXT ('38') and timestamps are naive UTC 'YYYY-MM-DD HH:MM:SS'.
+    sql = ("SELECT CAST(c.run AS INTEGER), r.status, e.timestamp FROM executions e "
+           "JOIN tasks t ON e.task_id = t.id JOIN config c ON e.config_id = c.id "
+           "LEFT JOIN results r ON e.result_id = r.id WHERE t.name = ?")
+    args: list[Any] = [task]
+    if since:
+        sql += " AND e.timestamp > ?"
+        args.append(since.replace("T", " ")[:19])
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        rows = conn.execute(sql + " ORDER BY e.timestamp", args).fetchall()
+    latest = {run: {"status": (status or "").replace("TaskStatus.", ""), "timestamp": ts}
+              for run, status, ts in rows}
+    if runs is not None:
+        latest = {r: latest.get(r, {"status": "ABSENT", "timestamp": None}) for r in runs}
+    return {"db": db_path, "task": task, "since": since,
+            "runs": {str(r): v for r, v in sorted(latest.items())},
+            "all_completed": bool(latest) and all(
+                v["status"] == "COMPLETED" for v in latest.values())}
+
+
+def elog_runs(experiment: str, *, tag: str | None = None, sample: str | None = None) -> dict:
+    """Run numbers carrying an eLog tag, or assigned to an eLog sample."""
+    if bool(tag) == bool(sample):
+        raise LuteError("give exactly one of --tag or --sample")
+    # The eLog treats these as no filter at all and returns every run.
+    if sample in ("All Samples", "Current Sample"):
+        raise LuteError(f"sample name {sample!r} matches every run; name a real sample")
+    ok, ticket = elog_ticket()
+    if not ok:
+        raise LuteError(f"no valid Kerberos ticket at {ticket}. Run:\n"
+                        f"  kinit -c {ticket} <username>@SLAC.STANFORD.EDU")
+    try:
+        import requests
+        from krtc import KerberosTicket
+    except ImportError as exc:                       # pragma: no cover
+        raise LuteError(f"eLog queries need requests and krtc ({exc}). Source psconda.sh.") from exc
+    os.environ["KRB5CCNAME"] = ticket
+    base = f"https://pswww.slac.stanford.edu/ws-kerb/lgbk/lgbk/{experiment}/ws"
+    url, params = ((f"{base}/get_runs_with_tag", {"tag": tag}) if tag else
+                   (f"{base}/runs", {"sampleName": sample, "includeParams": "false"}))
+    try:
+        resp = requests.get(url, params=params, timeout=60, headers=KerberosTicket(
+            "HTTP@pswww.slac.stanford.edu").getAuthHeaders())
+        resp.raise_for_status()
+        value = resp.json().get("value") or []
+    except Exception as exc:                         # noqa: BLE001 - report, don't trace
+        raise LuteError(f"eLog query failed: {exc}") from None
+    runs = sorted(int(r["num"] if isinstance(r, dict) else r) for r in value)
+    return {"experiment": experiment, "tag": tag, "sample": sample, "runs": runs}
+
+
+def merge_version(work_dir: str, tag: str, *, create: bool = False) -> dict:
+    """Next free merge_<tag>/vNNN, optionally created: cctbx.xfel.merge will not mkdir it."""
+    base = pathlib.Path(work_dir) / f"merge_{tag}"
+    existing = sorted(int(p.name[1:]) for p in base.glob("v[0-9][0-9][0-9]") if p.is_dir())
+    nxt = base / f"v{(existing[-1] + 1) if existing else 1:03d}"
+    if create:
+        nxt.mkdir(parents=True)
+    return {"existing": [f"v{n:03d}" for n in existing], "next": nxt.name,
+            "path": str(nxt), "created": create}
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
 _DOC = """hutch-lute: sbatch | status | watch | peds | readiness | kerberos
-    | render | plan | workspace | dags | envs | register | all."""
+    | render | plan | workspace | dags | envs | register | all
+    | db | runs | merge-version."""
 
 
 def _install_common(p: argparse.ArgumentParser) -> None:
@@ -1298,6 +1400,8 @@ def _install_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--partition", default=DEFAULT_PARTITION)
     p.add_argument("--account", default=None, help="defaults to lcls:<experiment>")
     p.add_argument("--version", "-v", default="dev", help="lute-lcls version, or 'dev'")
+    p.add_argument("--lute-install", default=None,
+                   help="built LUTE checkout to run from instead of pip venvs; skips envs")
     p.add_argument("--debug", action="store_true")
 
 
@@ -1380,6 +1484,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     _render_args(sub.add_parser("render", help="render a LUTE config YAML, validated"))
 
+    db_parser = sub.add_parser("db", help="latest status per run of one task in lute.db")
+    db_parser.add_argument("--db", required=True, help="path to lute.db")
+    db_parser.add_argument("--task", required=True, help="Task class name, e.g. ScaleCCTBXXFEL")
+    db_parser.add_argument("--runs", nargs="*", type=int, default=None,
+                           help="report exactly these runs, ABSENT if never run")
+    db_parser.add_argument("--since", default=None, help="UTC timestamp; newer rows only")
+
+    runs_parser = sub.add_parser("runs", help="runs an eLog tag or sample names")
+    runs_parser.add_argument("--experiment", "-e", required=True)
+    pick = runs_parser.add_mutually_exclusive_group(required=True)
+    pick.add_argument("--tag")
+    pick.add_argument("--sample")
+
+    mv_parser = sub.add_parser("merge-version", help="next merge_<tag>/vNNN directory")
+    mv_parser.add_argument("--work-dir", required=True)
+    mv_parser.add_argument("--tag", required=True, help="eLog tag or sample naming the dataset")
+    mv_parser.add_argument("--create", action="store_true", help="also create it")
+
     for name, helptext in INSTALL_SUBCOMMANDS:
         install_parser = sub.add_parser(name, help=helptext)
         _install_common(install_parser)
@@ -1438,6 +1560,14 @@ def main(argv: list[str] | None = None) -> int:
             res = readiness(args.hutch, args.experiment, args.directory)
             out(res)
             return OK if res["configured"] else UNREACHABLE
+        if args.cmd == "db":
+            res = db_rows(args.db, args.task, args.runs, args.since)
+            out(res)
+            return OK if res["all_completed"] else UNREACHABLE
+        if args.cmd == "runs":
+            return out(elog_runs(args.experiment, tag=args.tag, sample=args.sample))
+        if args.cmd == "merge-version":
+            return out(merge_version(args.work_dir, args.tag, create=args.create))
         if args.cmd == "kerberos":
             needed, why = needs_kerberos(open(args.yaml).read())
             return out({"needs_kerberos": needed, "why": why,

@@ -227,3 +227,14 @@ def test_campaign_params_file_shape_is_accepted(tmp_path):
     p.write_text(json.dumps(spec))
     loaded = json.loads(p.read_text())
     assert "overrides" in loaded and len(loaded["overrides"]) == 1
+
+
+def test_model_only_keys_are_not_flagged(tpl, tmp_path):
+    """tag never reaches cctbx_merge.phil -- LUTE resolves input_path from it."""
+    d = tmp_path / "upstream"
+    d.mkdir()
+    (d / "cctbx_index.phil").write_text(INDEX_PHIL)
+    (d / "cctbx_merge.phil").write_text(MERGE_PHIL.replace(
+        "  {%- if tag is defined %}\n  tag = {{ tag }}\n  {%- endif %}\n", ""))
+    assert "tag" not in (d / "cctbx_merge.phil").read_text()
+    assert lute.build(template=tpl, context=CTX, whitelist_dir=d)["whitelist_checked"]

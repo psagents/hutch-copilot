@@ -86,7 +86,8 @@ is left alone, so a clone you maintain yourself is never overwritten.
 Seven advisors are **not on GitHub** — `ask-lcls2`, `ask-smalldata`, `ask-ami`,
 `elog-copilot`, `experimental-hutch-python`, `xpm-seq` and `lcls-catalog` live only on
 `/sdf/group/lcls/ds/dm/apps/dev/claude/skills`. The script cannot fetch them and they are
-unreachable off S3DF and the hutches. None is currently required. See *Status* — whether
+unreachable off S3DF and the hutches. One is required — `ask-smalldata`, for SmallData
+producer configs — so SmallData verdicts are refused off S3DF. See *Status* — whether
 the org is the shared home for all of them is an open question.
 
 The tiers are derived from the docs rather than from a GitHub topic (`knowledge` or
@@ -193,8 +194,8 @@ The tools run directly on `{hutch}-daq`. Outstanding:
   feature branch. Consequences of leaving it:
   - `fetch-advisors.sh` cannot install the filesystem-only 7 at all, so they are
     unavailable off S3DF and the hutches — and unavailable to anyone outside `ps-users`.
-    None is required today; citing one in a `SKILL.md` would make it required and
-    immediately unsatisfiable for those users.
+    `ask-smalldata` is now required (cited by the root `SKILL.md` for SmallData
+    producer configs), so for those users a SmallData verdict is refused.
   - The DAQ suite is pinned to `features/psana-daq-monitor`. A feature branch is not a
     release: it can be rebased or merged away under us.
   - Each is a few KB of markdown, so size is not the obstacle. Several do depend on
