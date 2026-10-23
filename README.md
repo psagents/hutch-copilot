@@ -24,7 +24,7 @@ one of:
 
 A checkout anywhere else is invisible to the `Skill` tool no matter how correct the
 code is — the symptom is `Unknown skill: hutch-copilot`, with `SKILL.md` readable by
-hand. To serve both from one checkout, symlink the second:
+hand. To serve both from one checkout, symlink the second — to **your** checkout, never another user's:
 
 ```bash
 ln -s ~/.claude/skills/hutch-copilot ~/.claude-lcls/skills/hutch-copilot
@@ -39,16 +39,18 @@ source bin/hutch-env     # sets PATH and $HUTCH, finds caget
 At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
 every session start. Off-hutch it stays silent, by design.
 
-Logging is ambient via a second hook. Register both in `settings.json`:
+Logging is ambient via a second hook. Register both from **your own** checkout:
 
-```json
-"hooks": {
-  "SessionStart": [{"hooks": [{"type": "command",
-      "command": "<checkout>/bin/hutch-session-start", "timeout": 5}]}],
-  "Stop":         [{"hooks": [{"type": "command",
-      "command": "<checkout>/bin/hutch-stop", "timeout": 10}]}]
-}
+```bash
+scripts/install-hooks.py                        # ~/.claude-lcls (or $CLAUDE_CONFIG_DIR)
+scripts/install-hooks.py --config-dir ~/.claude # for plain `claude`
+scripts/install-hooks.py --check                # report only
 ```
+
+It adds `SessionStart`/`Stop` if missing, and replaces any that point at another
+checkout — never copy hook lines from someone else's `settings.json`: their path is
+baked in, and your session then runs their copy of the skill and hooks. Other keys are
+kept; the old file is saved as `settings.json.bak-<time>`.
 
 `hutch-stop` blocks the turn once when it ended having touched the experiment, so
 `sync-log` records it while the context is still live. It spawns nothing, writes nothing,
