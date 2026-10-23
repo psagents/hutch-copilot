@@ -12,6 +12,8 @@ import json
 import os
 import pathlib
 import re
+import shlex
+import subprocess
 import sys
 from typing import Any
 
@@ -201,3 +203,52 @@ def script(*parts: str) -> pathlib.Path:
     if not p.exists():
         raise FileNotFoundError(f"skill script not found: {p}")
     return p
+
+
+def _acl(argv: list[str], remote: bool) -> subprocess.CompletedProcess:
+    if remote:
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "psana", shlex.join(argv)]
+    return subprocess.run(argv, capture_output=True)
+
+
+def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Path] = ()) -> dict:
+    """Give ``group`` access to these trees (access + default ACLs), then check it took.
+
+    An eLog workflow runs as whoever fires it, so every experiment member needs
+    the registered workspace -- not just ``ps-data``. World permissions are
+    never the fix: any ``o+w`` found is removed. Paths this user does not own
+    cannot take an ACL and are reported, not failed.
+    """
+    me = os.getuid()
+    skipped, failed = [], []
+    for perm, roots in (("rwX", rw), ("rX", rx)):
+        want = "rw" if perm == "rwX" else "r"
+        for root in map(pathlib.Path, roots):
+            if not root.exists():
+                continue
+            owned = []
+            for p in [root, *root.rglob("*")]:
+                if p.is_symlink():
+                    continue
+                st = p.lstat()
+                if st.st_uid != me:
+                    skipped.append(str(p))
+                    continue
+                owned.append(str(p))
+                if st.st_mode & 0o002:
+                    os.chmod(p, st.st_mode & ~0o002)
+            # One recursive call per tree; it reports, and skips, what it cannot change.
+            # The hutch hosts mount /sdf/data over NFSv4 without POSIX ACLs ("Operation
+            # not supported", and getfacl shows none that S3DF has), so set and check on psana.
+            setfacl = ["setfacl", "-R", "-m", f"g:{group}:{perm},d:g:{group}:{perm}", str(root)]
+            remote = b"Operation not supported" in _acl(setfacl, False).stderr
+            if remote:
+                _acl(setfacl, True)
+            acls = _acl(["getfacl", "-Rp", str(root)], remote).stdout.decode("utf-8", "replace")
+            granted = set()
+            for block in acls.split("\n\n"):
+                name = re.search(r"^# file: (.+)$", block, re.M)
+                if name and re.search(rf"^group:{re.escape(group)}:{want}", block, re.M):
+                    granted.add(name.group(1))
+            failed += [p for p in owned if p not in granted]
+    return {"group": group, "ok": not failed, "failed": failed, "skipped_not_owned": skipped}

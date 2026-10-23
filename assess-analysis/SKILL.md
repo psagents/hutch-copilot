@@ -44,6 +44,10 @@ bin/hutch-lute watch --user "$USER" --since "$SUBMIT_TIME"
 bin/hutch-lute status "$JOB_ID"
 ```
 
+Both reach S3DF's Slurm. A hutch host's own `squeue` answers for its DAQ cluster
+(`lcls-drp` on mfx-daq), so off S3DF the tool runs them over `ssh psana`; if psana is
+unreachable they fail rc=4 — **never** read that as "no job".
+
 `watch` reports `polls` and `waited_s`, so **"no job found" is distinguishable from "did
 not look"**. If `found` is false after a full timeout with non-zero `polls`, the workflow
 never fired — that is a registration or trigger problem, **not an analysis result**:
@@ -63,6 +67,11 @@ Two traps, both of which have produced confident wrong reports:
   state alone — confirm output exists.
 - **Check `hit_wall_clock`.** If true the run was truncated, its statistics are
   coverage-limited, and it must not be compared against a complete run.
+- **LUTE kills a Task two ways, and neither means "hung".** `Task did not respond for
+  more than 900.0 seconds ... UNRESPONSIVE` is the executor's heartbeat: the Task printed
+  nothing for 15 min (BayFAI logs nothing inside its BO loop). `Task timed out!` (signal
+  14) is the config's `task_timeout`. Report which one, and the CPU time from `sacct` —
+  ranks that were busy the whole time were working, not stuck.
 
 ---
 

@@ -32,7 +32,7 @@ so the tool to call follows from which source answers the question.
 | `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
 | `bin/hutch-data` | What landed on disk: psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |
-| `bin/hutch-lute` | LUTE: submission, monitoring, pedestals, config rendering, workspace setup |
+| `bin/hutch-lute` | LUTE: which LUTE (`--lute`), workspace setup, registration, running a Task or a whole DAG by hand, monitoring, pedestals |
 | `bin/hutch-log` | the beamtime log |
 
 Run `--help` for subcommands and flags. They work from a bare checkout with no install
@@ -48,6 +48,11 @@ Three rules that the tools enforce and you must not work around:
    it, or pass `--stale-ok` and report the age to the user. Do not silently use old numbers.
 3. **A resolver that cannot reach its source raises.** Never substitute a remembered or
    documented value. Report the failure and either use explicitly-stale state or ask the operator.
+
+**Probes are cheap or they are background.** A psana2 probe passes `detectors=[...]`
+(only what it needs — `['timing']` for event codes) and a small `max_events`, prints with
+`python -u` and never through `tail`, and anything over a minute runs in the background.
+An unbounded probe reads every jungfrau/epix stream just to count codes.
 
 Resolve, don't recall: device lists and PV prefixes come from `hutch-happi`, detector
 aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq`. This skill

@@ -112,7 +112,7 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-daq` | the DAQ — state (via its control port, no session needed), logs, config. Read-only |
 | `hutch-data` | what landed on disk — psana2 detectors, XTC2, PDB cells, `/cds` files |
 | `hutch-skills` | which skills are installed, and where |
-| `hutch-lute` | LUTE: jobs, pedestals, config rendering, workspace setup |
+| `hutch-lute` | LUTE: jobs (`run-task`, `run-workflow`), pedestals, config rendering, workspace setup. Slurm calls go over `ssh psana` when the local cluster is not S3DF |
 | `hutch-log` | the beamtime log — events, for humans |
 
 Two shell hooks sit beside them and are not CLIs: `hutch-session-start` and `hutch-stop`.
@@ -178,8 +178,6 @@ Any interpreter with pytest will do — the package is stdlib-only — but the b
 
 The tools run directly on `{hutch}-daq`. Outstanding:
 
-- **`hutch-lute sbatch|watch|status`** call Slurm locally, which at the hutch is the
-  DAQ cluster. They need a hop to `psana`/`s3dflogin` to reach the analysis cluster.
 - **`hutch-lute peds`** is the last `psdev` caller and will fail until it either runs
   `makepeds` locally or hops to a host that can.
 - **`hutch-daq logs` retention** — verified live at MFX on 2026-10-12 (88 sessions in one

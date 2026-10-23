@@ -61,6 +61,7 @@ pull them in either. test_package_api.py enforces both.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import pathlib
@@ -81,6 +82,7 @@ from .common import (
     out,
     parser,
     results_dir,
+    grant_group,
     skill_root,
     xtc2_files,
 )
@@ -90,6 +92,7 @@ from .state import MissingValue, StaleValue, State
 
 PSCONDA = external_path("PSCONDA")
 DEFAULT_PARTITION = "milano"
+DEFAULT_LUTE = "central:dev"
 
 #: Job-name fragments that mark a job as a LUTE/analysis workflow.
 WORKFLOW_HINTS = ("lute", "dag", "sfx", "xes", "xss", "crystfel", "smalldata",
@@ -98,6 +101,44 @@ WORKFLOW_HINTS = ("lute", "dag", "sfx", "xes", "xss", "crystfel", "smalldata",
 
 class LuteError(RuntimeError):
     pass
+
+
+@functools.lru_cache(maxsize=None)
+def _on_s3df() -> bool:
+    """Is the local Slurm client talking to S3DF?
+
+    A hutch host has its own cluster (``lcls-drp`` on mfx-daq): a local
+    ``squeue`` there answers for the wrong machines, and reads as "no job".
+    """
+    try:
+        proc = subprocess.run(["scontrol", "show", "config"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(re.search(r"^ClusterName\s*=\s*s3df\s*$", proc.stdout.decode(), re.M))
+
+
+def _slurm(argv: list[str], timeout: int = 120) -> str:
+    """Run a Slurm (or Slurm-submitting) command on S3DF and return its stdout."""
+    if not _on_s3df():
+        try:
+            return ssh("psana", shlex.join(argv), timeout=30, run_timeout=timeout)
+        except BridgeUnavailable as exc:
+            raise LuteError(f"{argv[0]} via psana: {exc}") from exc
+    proc = subprocess.run(argv, capture_output=True, timeout=timeout)
+    if proc.returncode != 0:
+        raise LuteError(f"{shlex.join(argv)[:200]} failed (rc={proc.returncode}): "
+                        f"{proc.stderr.decode('utf-8', 'replace').strip()[-2000:]}")
+    return proc.stdout.decode("utf-8", "replace")
+
+
+def experiment_reservation(experiment: str) -> str | None:
+    """The S3DF reservation whose Accounts include ``lcls:<experiment>``, if any."""
+    text = _slurm(["scontrol", "show", "reservation", "-o"])
+    for line in text.splitlines():
+        m = re.search(r"ReservationName=(\S+)", line)
+        if m and re.search(rf"Accounts=\S*\blcls:{re.escape(experiment)}\b", line):
+            return m.group(1)
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -193,6 +234,15 @@ def build_sbatch(
     """Render a submission script that survives the four launcher traps above."""
     account = account or f"lcls:{experiment}"
     job_name = job_name or f"{task}_r{run:04d}"
+    # A built install has no run_task.py at its root; its entry point is bin/run_task.
+    installed = pathlib.Path(lute_path, "install", "bin", "run_task")
+    if installed.is_file():
+        lute_env = f"source {shlex.quote(str(installed.parent / 'activate_installation'))}"
+        run_cmd = shlex.quote(str(installed))
+    else:
+        lute_env = (f'export PYTHONPATH="{lute_path}:${{PYTHONPATH}}"\n'
+                    f'export LUTE_PATH="{lute_path}"')
+        run_cmd = f"python -OB {shlex.quote(lute_path)}/run_task.py"
     log = f"{log_dir}/{task}_%j.out"
 
     prte = ""
@@ -229,10 +279,9 @@ def build_sbatch(
 #SBATCH --output={log}
 #SBATCH --error={log}
 
-# psconda FIRST -- it clobbers PYTHONPATH -- then prepend the LUTE checkout.
+# psconda FIRST -- it clobbers PYTHONPATH.
 source {PSCONDA}
-export PYTHONPATH="{lute_path}:${{PYTHONPATH}}"
-export LUTE_PATH="{lute_path}"
+{lute_env}
 export EXPERIMENT="{experiment}"
 export RUN_NUM="{run}"
 export RUN="{run}"
@@ -241,7 +290,7 @@ export LUTE_USE_TCP=1
 cd {shlex.quote(log_dir)}
 echo "=== $(date -Is) {task} job ${{SLURM_JOB_ID}} on ${{SLURM_JOB_NODELIST}} ==="
 scontrol show job ${{SLURM_JOB_ID}} | grep -E 'TimeLimit|NumNodes|NumCPUs' || true
-python -OB {shlex.quote(lute_path)}/run_task.py -c {shlex.quote(config)} -t {task}
+{run_cmd} -c {shlex.quote(config)} -t {task}
 RC=$?
 echo "=== $(date -Is) {task} exit=${{RC}} ==="
 exit ${{RC}}
@@ -269,10 +318,55 @@ def submit(
         # leaves usable per-image output on disk.
         argv.append(f"--dependency=afterany:{dependency}")
     argv.append(str(p))
-    proc = subprocess.run(argv, capture_output=True, timeout=120)
-    if proc.returncode != 0:
-        raise LuteError(f"sbatch failed: {proc.stderr.decode('utf-8', 'replace').strip()}")
-    return proc.stdout.decode().strip().splitlines()[0]
+    return _slurm(argv).strip().splitlines()[0]
+
+
+def run_by_hand(
+    *, experiment: str, run: int, config: str, lute: str = DEFAULT_LUTE,
+    task: str | None = None, dag: str | None = None,
+    partition: str = DEFAULT_PARTITION, account: str | None = None,
+    reservation: str | None = None, slurm: list[str] = (), confirm: str | None = None,
+) -> dict:
+    """Submit one Task (``task``) or a whole DAG (``dag``) for one run, as the eLog would.
+
+    The command is LUTE's own launcher -- ``submit_slurm`` for a Task,
+    ``submit_launch_slurm.sh launch_slurm`` for a DAG -- run from ``work_dir``,
+    because Slurm writes the job log to the submit directory. Without
+    ``confirm="write"`` nothing is submitted and the command is returned.
+    """
+    lute_ = resolve_lute(lute, pathlib.Path(config).parent)
+    if lute_["kind"] not in ("central", "install") or not lute_["checks"][0]["ok"]:
+        raise LuteError(f"--lute {lute} is not a built LUTE ({lute_['bin_dir']}); "
+                        f"run-task/run-workflow need central:<ver> or install:<dir>")
+    m = re.search(r"^work_dir:\s*[\"']?([^\"'\n]+?)[\"']?\s*$",
+                  pathlib.Path(config).read_text(), re.M)
+    if not m:
+        raise LuteError(f"{config} has no top-level work_dir: key")
+    work_dir = m.group(1)
+    account = account or f"lcls:{experiment}"
+    slurm_args = [f"--partition={partition}", f"--account={account}", *slurm]
+    if reservation:
+        slurm_args.append(f"--reservation={reservation}")
+    common = ["-c", config, "-e", experiment, "-r", str(run)]
+    if task:
+        launcher = [lute_["submit_slurm"], "--taskname", task, *common, "--psana2", *slurm_args]
+    else:
+        launcher = [lute_["arp"], lute_["launch"], *common, "-W", dag, *slurm_args]
+    q = shlex.quote
+    cmd = (f"source {q(PSCONDA)} && source {q(lute_['activate'])} && "
+           f"export EXPERIMENT={q(experiment)} RUN_NUM={int(run)} && "
+           f"cd {q(work_dir)} && {shlex.join(launcher)}")
+    ticket_ok, ticket = elog_ticket()
+    res = {"command": cmd, "work_dir": work_dir, "lute": lute_["spec"],
+           "lute_version": lute_["version"], "submitted": False,
+           "kerberos": "ok" if ticket_ok else
+                       f"no ticket at {ticket}: the job runs, only eLog posting fails"}
+    if confirm != "write":
+        return res
+    stdout = _slurm(["bash", "-lc", cmd], timeout=300)
+    jobs = re.findall(r"Submitted batch job (\d+)", stdout)
+    return {**res, "submitted": True, "job_id": jobs[-1] if jobs else None,
+            "stdout": stdout[-2000:]}
 
 
 def watch_for_jobs(
@@ -294,11 +388,7 @@ def watch_for_jobs(
     polls = 0
     while True:
         polls += 1
-        proc = subprocess.run(
-            ["squeue", "-u", user, "-h", "-o", "%i|%j|%T|%V"],
-            capture_output=True, timeout=60,
-        )
-        for line in proc.stdout.decode("utf-8", "replace").splitlines():
+        for line in _slurm(["squeue", "-u", user, "-h", "-o", "%i|%j|%T|%V"]).splitlines():
             parts = line.split("|")
             if len(parts) != 4:
                 continue
@@ -328,15 +418,11 @@ def job_status(job_id: str) -> dict:
 
     ``COMPLETED`` is a Slurm verdict, not a scientific one.
     """
-    proc = subprocess.run(
-        ["sacct", "-j", str(job_id), "--noheader", "--parsable2",
-         "--format=JobID,JobName,State,Elapsed,Timelimit,ExitCode,StdOut,StdErr"],
-        capture_output=True,
-        timeout=60,
-    )
+    text = _slurm(["sacct", "-j", str(job_id), "--noheader", "--parsable2",
+                   "--format=JobID,JobName,State,Elapsed,Timelimit,ExitCode,StdOut,StdErr"])
     rows = [
         line.split("|")
-        for line in proc.stdout.decode("utf-8", "replace").splitlines()
+        for line in text.splitlines()
         if line and ".batch" not in line.split("|")[0] and ".extern" not in line.split("|")[0]
     ]
     if not rows:
@@ -781,8 +867,22 @@ def parse_documents(yaml_text: str) -> list[dict]:
     except ImportError as exc:  # pragma: no cover
         raise ConfigError("PyYAML is required; source psconda.sh first") from exc
     stripped = re.sub(r"^%YAML [\d.]+\n", "", yaml_text)
+
+    class _Loader(_yaml.SafeLoader):
+        pass
+
+    # A DAG's tags (!LUTE_DAG, !branch_daq2, !run_type, !param_sweep) are LUTE's to
+    # interpret; checking the YAML only needs them to load as plain nodes.
+    def _plain(loader, suffix, node):
+        if isinstance(node, _yaml.MappingNode):
+            return loader.construct_mapping(node, deep=True)
+        if isinstance(node, _yaml.SequenceNode):
+            return loader.construct_sequence(node, deep=True)
+        return loader.construct_scalar(node)
+
+    _Loader.add_multi_constructor("!", _plain)
     try:
-        return [d for d in _yaml.safe_load_all(stripped) if d is not None]
+        return [d for d in _yaml.load_all(stripped, Loader=_Loader) if d is not None]
     except Exception as exc:
         raise ConfigError(f"rendered config is not valid YAML: {exc}") from None
 
@@ -874,7 +974,10 @@ def parse_set(pairs: list[str]) -> dict[str, Any]:
 def _render(args) -> int:
     """Execute `hutch-lute render` from an already-parsed namespace."""
     try:
-        ctx = json.load(open(args.context)) if args.context else {}
+        ctx = {}
+        if args.context:
+            import yaml as _yaml     # YAML, so a defaults file can say why; JSON is a subset
+            ctx = _yaml.safe_load(open(args.context)) or {}
         ctx.update(parse_set(args.set_context))
 
         ovr = json.load(open(args.overrides)) if args.overrides else {}
@@ -947,11 +1050,11 @@ DEFAULT_TRIGGER = "END_OF_RUN"
 #: Subcommand -> help text.
 INSTALL_SUBCOMMANDS = (
     ("plan", "print every path, payload and precondition; touches nothing"),
-    ("envs", "recreate both virtual environments (destructive)"),
-    ("workspace", "create lute_output and lute.db (idempotent)"),
-    ("dags", "set account/partition in each DAG (idempotent)"),
+    ("envs", "recreate both pip virtual environments, --lute pip only (destructive)"),
+    ("workspace", "create lute_output and lute.db, grant the experiment group (idempotent)"),
+    ("dags", "set account/partition/reservation in each DAG (idempotent)"),
     ("register", "POST workflow definitions to the eLog"),
-    ("all", "workspace, dags, envs, register -- in that order, after checks"),
+    ("all", "workspace, dags, LUTE (pip/clone only), register -- in order, after checks"),
 )
 
 #: Of those, the ones that change something and so require --confirm write.
@@ -960,6 +1063,78 @@ NEEDS_CONFIRM = ("envs", "register", "all")
 
 class InstallError(RuntimeError):
     pass
+
+
+
+def _internet() -> str | None:
+    """None if github.com and pypi.org answer within 5 s, else what failed."""
+    for url in ("https://github.com", "https://pypi.org/simple/"):
+        try:
+            rc = subprocess.run(["curl", "-sS", "-o", "/dev/null", "--max-time", "5", url],
+                                capture_output=True, timeout=15).returncode
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"{url}: {exc}"
+        if rc != 0:
+            return f"{url} unreachable from {os.uname().nodename} (curl rc={rc})"
+    return None
+
+
+def resolve_lute(spec: str, base: pathlib.Path) -> dict:
+    """Where the LUTE named by ``spec`` lives, and what using it would write.
+
+    ``central[:ver]`` -- a group build under ``$HUTCH_LUTE_CENTRAL/<ver>`` (default);
+    ``install:<dir>`` -- an already-built checkout; ``clone:<repo>@<branch>`` --
+    cloned and built into ``<base>/lute``; ``pip[:ver]`` -- venvs from PyPI in
+    ``<base>/lute_envs``. Only the last two need the internet.
+    """
+    kind, _, arg = spec.partition(":")
+    res: dict[str, Any] = {"spec": spec, "kind": kind, "version": None, "root": None}
+    if kind == "central":
+        ver = arg or "dev"
+        top = pathlib.Path(external_path("LUTE_CENTRAL")) / ver
+        venv = top / "lute_env_py39" / "bin"
+        bin_dir = venv if venv.is_dir() else top / "lute" / "install" / "bin"
+        meta = sorted(top.glob("lute_env_py39/lib/python*/site-packages/lute_lcls-*.dist-info"))
+        res.update(version=meta[-1].name.removesuffix(".dist-info").split("-")[1] if meta else ver,
+                   root=str(top))
+    elif kind == "install":
+        bin_dir = pathlib.Path(arg) / "install" / "bin"
+        res["root"] = arg
+    elif kind == "clone":
+        repo, _, branch = arg.partition("@")
+        if not repo or not branch:
+            raise InstallError(f"--lute {spec!r}: expected clone:<owner/repo>@<branch>")
+        res.update(repo=repo, branch=branch, root=str(base / "lute"))
+        bin_dir = base / "lute" / "install" / "bin"
+    elif kind == "pip":
+        res["version"] = arg or "dev"
+        bin_dir = base / "lute_envs" / "lute_env_py39" / "bin"
+    else:
+        raise InstallError(f"--lute {spec!r}: kind must be central, install, clone or pip")
+
+    activate = bin_dir / ("activate" if (bin_dir / "activate").exists() or kind == "pip"
+                          else "activate_installation")
+    res.update(bin_dir=str(bin_dir), activate=str(activate),
+               arp=str(bin_dir / "submit_launch_slurm.sh"), launch=str(bin_dir / "launch_slurm"),
+               submit_slurm=str(bin_dir / "submit_slurm"), run_task=str(bin_dir / "run_task"))
+
+    if kind in ("central", "install"):
+        res["checks"] = [{"check": "lute built", "ok": all(
+            pathlib.Path(res[k]).is_file() for k in ("arp", "launch")), "detail": str(bin_dir)}]
+    else:
+        # Built by `all`, so absence is expected here; no internet is not.
+        net = _internet()
+        res["checks"] = [{"check": f"internet for --lute {kind}", "ok": net is None,
+                          "detail": f"{net}. Clone/build on an S3DF node, then pass "
+                                    f"--lute install:<dir>." if net else "ok"}]
+        if kind == "pip":
+            res["checks"] += [
+                {"check": "python3.9 interpreter", "ok": pathlib.Path(PYTHON39).is_file(),
+                 "detail": PYTHON39},
+                {"check": "python3.11 interpreter", "ok": pathlib.Path(PYTHON311).is_file(),
+                 "detail": PYTHON311},
+            ]
+    return res
 
 
 def parse_trigger(spec: str) -> dict[str, str]:
@@ -992,10 +1167,11 @@ def parse_trigger(spec: str) -> dict[str, str]:
 
 #: Tokens this tool owns and therefore may rewrite. Anything else in
 #: slurm_params was put there deliberately by whoever authored the DAG.
-_OWNED = re.compile(r"\s*--(?:account|partition)=\S+")
+_OWNED = re.compile(r"\s*--(?:account|partition|reservation)=\S+")
 
 
-def patch_slurm_params(text: str, *, partition: str, account: str) -> tuple[str, int]:
+def patch_slurm_params(text: str, *, partition: str, account: str,
+                       reservation: str | None = None) -> tuple[str, int]:
     """Set ``--account``/``--partition`` on every ``slurm_params`` line.
 
     Idempotent: existing account/partition tokens are removed before the current
@@ -1013,6 +1189,8 @@ def patch_slurm_params(text: str, *, partition: str, account: str) -> tuple[str,
         existing = stripped[len("slurm_params:"):].strip().strip("'\"")
         base = _OWNED.sub("", existing).strip()
         params = f"{base} --account={account} --partition={partition}".strip()
+        if reservation:
+            params += f" --reservation={reservation}"
         patched.append(f"{indent}slurm_params: '{params}'\n")
         changed += 1
     return "".join(patched), changed
@@ -1021,11 +1199,15 @@ def patch_slurm_params(text: str, *, partition: str, account: str) -> tuple[str,
 def elog_payload(
     *, workflow: str, trigger: dict[str, str], arp_executable: str,
     launch_executable: str, config_path: str, dag_path: str,
-    partition: str, account: str, debug: bool = False,
+    partition: str, account: str, reservation: str | None = None, debug: bool = False,
 ) -> dict[str, Any]:
     """Assemble one workflow definition for the eLog. Pure."""
     params = (f"{launch_executable} -c {config_path} -W {dag_path}"
               f" --partition={partition} --account={account}")
+    if reservation:
+        # launch_slurm forwards unknown --long=value args to every Task's sbatch;
+        # the small launcher job itself still runs outside the reservation.
+        params += f" --reservation={reservation}"
     if debug:
         params += " --debug"
     return {
@@ -1059,13 +1241,11 @@ def plan(
     *, experiment: str, hutch: str | None = None, directory: str | None = None,
     workflows: list[str] | None = None, triggers: list[str] | None = None,
     partition: str = DEFAULT_PARTITION, account: str | None = None,
-    version: str = "dev", debug: bool = False, lute_install: str | None = None,
+    debug: bool = False, lute: str = DEFAULT_LUTE, reservation: str | None = None,
 ) -> dict:
     """Everything the install would do, with every precondition, touching nothing.
 
-    ``lute_install`` is a built LUTE checkout (``<dir>/install/bin``) for a
-    workflow that is not in a release; it replaces the venvs, which are then
-    neither required nor touched.
+    ``lute`` picks the LUTE the workflow runs on -- see ``resolve_lute``.
 
     Separating the plan is what makes ordering a property of the design instead
     of a comment -- see bug 2 in the section note above.
@@ -1076,7 +1256,7 @@ def plan(
     out_dir = base / "lute_output"
     envs_dir = base / "lute_envs"
     config_path = out_dir / f"{hutch}_lute.yaml"
-    venv39 = envs_dir / "lute_env_py39"
+    lute_ = resolve_lute(lute, base)
 
     workflows = list(workflows or [])
     specs = list(triggers or [])
@@ -1088,23 +1268,10 @@ def plan(
     dags = {wf: out_dir / f"{wf}.dag" for wf in workflows}
     ticket_ok, ticket = elog_ticket()
 
-    if lute_install:
-        bin_dir = pathlib.Path(lute_install) / "install" / "bin"
-        arp, launch = str(bin_dir / "submit_launch_slurm.sh"), str(bin_dir / "launch_slurm")
-        lute_checks = [{"check": "lute install built", "ok": all(
-            pathlib.Path(x).is_file() for x in (arp, launch)), "detail": str(bin_dir)}]
-    else:
-        arp = str(venv39 / "bin" / "submit_launch_slurm.sh")
-        launch = str(venv39 / "bin" / "launch_slurm")
-        lute_checks = [
-            {"check": "python3.9 interpreter", "ok": pathlib.Path(PYTHON39).is_file(),
-             "detail": PYTHON39},
-            {"check": "python3.11 interpreter", "ok": pathlib.Path(PYTHON311).is_file(),
-             "detail": PYTHON311},
-        ]
+    arp, launch = lute_["arp"], lute_["launch"]
     checks = [
         {"check": "config exists", "ok": config_path.exists(), "detail": str(config_path)},
-        *lute_checks,
+        *lute_["checks"],
         {"check": "at least one workflow named", "ok": bool(workflows),
          "detail": ", ".join(workflows) or "(none)"},
         {"check": "kerberos ticket (registration only)", "ok": ticket_ok,
@@ -1120,17 +1287,16 @@ def plan(
             trigger={k: v for k, v in r.items() if k not in ("workflow", "spec")},
             arp_executable=arp, launch_executable=launch,
             config_path=str(config_path), dag_path=str(dags[r["workflow"]]),
-            partition=partition, account=account, debug=debug,
+            partition=partition, account=account, reservation=reservation, debug=debug,
         )
         for r in resolved
     ]
 
     return {
-        "experiment": experiment, "hutch": hutch, "account": account,
-        "partition": partition, "version": version,
+        "experiment": experiment, "hutch": hutch, "account": account, "directory": directory,
+        "partition": partition, "reservation": reservation, "lute": lute_,
         "results_dir": str(base), "lute_output_dir": str(out_dir),
         "lute_envs_dir": str(envs_dir), "config_path": str(config_path),
-        "lute_install": lute_install,
         "workflows": resolved,
         "dags": {wf: str(p) for wf, p in dags.items()},
         "arp_executable": arp, "launch_executable": launch,
@@ -1141,7 +1307,7 @@ def plan(
         "envs_dir_exists": envs_dir.exists(),
         "destructive": (
             f"`envs` deletes {envs_dir} and recreates both virtual environments"
-            if envs_dir.exists() and not lute_install else None
+            if envs_dir.exists() and lute_["kind"] == "pip" else None
         ),
     }
 
@@ -1173,7 +1339,8 @@ def create_venvs(plan_: dict, *, confirm: str | None = None) -> dict:
         shutil.rmtree(envs_dir)
     envs_dir.mkdir(parents=True, mode=0o775)
 
-    spec = "lute-lcls" if plan_["version"] == "dev" else f"lute-lcls=={plan_['version']}"
+    version = plan_["lute"]["version"]
+    spec = "lute-lcls" if version == "dev" else f"lute-lcls=={version}"
     created = []
     for name, interpreter in ENVS:
         env = envs_dir / name
@@ -1185,17 +1352,41 @@ def create_venvs(plan_: dict, *, confirm: str | None = None) -> dict:
     return {"created": created, "package": spec}
 
 
+def clone_build(plan_: dict, *, confirm: str | None = None) -> dict:
+    """Clone ``--lute clone:<repo>@<branch>`` into the workspace and build it."""
+    lute_ = plan_["lute"]
+    root = pathlib.Path(lute_["root"])
+    if confirm != "write":
+        raise InstallError(f"this clones and builds a full LUTE tree in {root}. "
+                           f"Show it to the operator, then re-run with --confirm write.")
+    if not root.exists():
+        _install_run(["git", "clone", "-b", lute_["branch"],
+                      f"https://github.com/{lute_['repo']}.git", str(root)])
+    # -e: without entry points there is no bin/launch_slurm to register.
+    _install_run(["bash", "-c", f"source {shlex.quote(PSCONDA)} && cd {shlex.quote(str(root))}"
+                                f" && ./build.sh -e"])
+    return {"root": str(root), "bin_dir": lute_["bin_dir"],
+            "built": pathlib.Path(lute_["launch"]).is_file()}
+
+
 def setup_workspace(plan_: dict) -> dict:
-    """Create the output directory and lute.db. Idempotent."""
+    """Create the output directory and lute.db, and open both to the experiment group."""
     out_dir = pathlib.Path(plan_["lute_output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(out_dir, 0o777)
     db = out_dir / "lute.db"
     created = not db.exists()
     if created:
         db.touch()
-        os.chmod(db, 0o664)
-    return {"lute_output_dir": str(out_dir), "db": str(db), "db_created": created}
+    # Without --directory the workspace is results/ itself: grant only what LUTE writes.
+    base = pathlib.Path(plan_["results_dir"]) if plan_["directory"] else out_dir
+    rx = [base / "smalldata_tools"]
+    if plan_["lute"]["kind"] in ("install", "clone"):
+        rx.append(pathlib.Path(plan_["lute"]["root"]))
+    acl = grant_group(plan_["experiment"], rw=[base], rx=rx)
+    if not acl["ok"]:
+        raise InstallError(f"experiment group {plan_['experiment']} could not be given "
+                           f"access to: {acl['failed'][:10]}")
+    return {"lute_output_dir": str(out_dir), "db": str(db), "db_created": created, "acl": acl}
 
 
 def patch_dags(plan_: dict) -> dict:
@@ -1207,7 +1398,8 @@ def patch_dags(plan_: dict) -> dict:
             raise InstallError(f"DAG not found: {p}. Write it before installing.")
         before = p.read_text()
         after, changed = patch_slurm_params(
-            before, partition=plan_["partition"], account=plan_["account"])
+            before, partition=plan_["partition"], account=plan_["account"],
+            reservation=plan_["reservation"])
         if changed == 0:
             raise InstallError(
                 f"no slurm_params lines in {p} -- the DAG is missing its resource "
@@ -1215,7 +1407,6 @@ def patch_dags(plan_: dict) -> dict:
             )
         if after != before:
             p.write_text(after)
-            os.chmod(p, 0o666)
         results[wf] = {"slurm_params_lines": changed, "modified": after != before}
     return results
 
@@ -1268,8 +1459,8 @@ def _install(args) -> int:
         plan_ = plan(
             experiment=args.experiment, hutch=args.hutch, directory=args.directory,
             workflows=args.workflow, triggers=args.trigger, partition=args.partition,
-            account=args.account, version=args.version, debug=args.debug,
-            lute_install=args.lute_install,
+            account=args.account, debug=args.debug, lute=args.lute,
+            reservation=_reservation(args),
         )
         if args.cmd == "plan":
             out(plan_)
@@ -1279,6 +1470,9 @@ def _install(args) -> int:
         if args.cmd == "dags":
             return out(patch_dags(plan_))
         if args.cmd == "envs":
+            if plan_["lute"]["kind"] != "pip":
+                raise InstallError(f"`envs` builds pip venvs; --lute {args.lute} needs none. "
+                                   f"Pass --lute pip[:<version>] to rebuild them.")
             return out(create_venvs(plan_, confirm=args.confirm))
         if args.cmd == "register":
             res = register(plan_, confirm=args.confirm)
@@ -1294,13 +1488,17 @@ def _install(args) -> int:
             steps = {
                 "workspace": setup_workspace(plan_),
                 "dags": patch_dags(plan_),
-                "envs": ({"skipped": f"using --lute-install {args.lute_install}"}
-                         if args.lute_install else create_venvs(plan_, confirm=args.confirm)),
             }
+            kind = plan_["lute"]["kind"]
+            steps["lute"] = (create_venvs(plan_, confirm=args.confirm) if kind == "pip" else
+                             clone_build(plan_, confirm=args.confirm) if kind == "clone" else
+                             {"skipped": f"--lute {args.lute} is already built"})
+            if kind == "clone":
+                steps["workspace"] = setup_workspace(plan_)   # ACLs now reach the new tree
             steps["register"] = register(plan_, confirm=args.confirm)
             out({"plan": plan_, "steps": steps})
             return OK if not steps["register"]["failed"] else UNREACHABLE
-    except (InstallError, OSError) as exc:
+    except (InstallError, LuteError, OSError) as exc:
         return fail(exc, UNREACHABLE)
     return USAGE
 
@@ -1399,16 +1597,31 @@ def _install_common(p: argparse.ArgumentParser) -> None:
                    help=f"per workflow, in order; default {DEFAULT_TRIGGER}")
     p.add_argument("--partition", default=DEFAULT_PARTITION)
     p.add_argument("--account", default=None, help="defaults to lcls:<experiment>")
-    p.add_argument("--version", "-v", default="dev", help="lute-lcls version, or 'dev'")
-    p.add_argument("--lute-install", default=None,
-                   help="built LUTE checkout to run from instead of pip venvs; skips envs")
+    _lute_args(p)
     p.add_argument("--debug", action="store_true")
+
+
+def _lute_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--lute", default=DEFAULT_LUTE,
+                   help="central[:ver] (default central:dev) | install:<dir> | "
+                        "clone:<owner/repo>@<branch> | pip[:ver]; the last two need internet")
+    p.add_argument("--lute-install", dest="lute", type=lambda d: f"install:{d}",
+                   help="same as --lute install:<dir>")
+    p.add_argument("--reservation", default=None,
+                   help="Slurm reservation; default: the one listing lcls:<experiment>, "
+                        "'none' to skip")
+
+
+def _reservation(args) -> str | None:
+    if args.reservation == "none":
+        return None
+    return args.reservation or experiment_reservation(args.experiment)
 
 
 def _render_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--template", required=True,
                    help="path to a LUTE config template; this repo vendors none")
-    p.add_argument("--context", default=None, help="JSON file of template context")
+    p.add_argument("--context", default=None, help="YAML or JSON file of template context")
     # action="extend", not the default "store": with plain nargs="*" a second
     # --set silently REPLACED the first, so `--set a=1 --set b=2` applied only
     # b=2 and dropped a=1 with no diagnostic. That is the exact silent-drop
@@ -1448,6 +1661,25 @@ def build_parser() -> argparse.ArgumentParser:
     sbatch_parser.add_argument("--submit", action="store_true")
     sbatch_parser.add_argument("--dependency", default=None)
     sbatch_parser.add_argument("--script-path", default=None)
+
+    for name, helptext in (
+        ("run-task", "submit ONE Task for a run with LUTE's submit_slurm (no DAG, no eLog)"),
+        ("run-workflow", "submit a whole DAG for a run, the same launch the eLog trigger does"),
+    ):
+        rp = sub.add_parser(name, help=helptext + "; any other --long=value goes to sbatch, "
+                            "e.g. --nodes=1 --ntasks-per-node=64 (LUTE keeps one rank)")
+        rp.add_argument("--experiment", "-e", required=True)
+        rp.add_argument("--run", "-r", required=True, type=int)
+        rp.add_argument("--config", "-c", required=True)
+        if name == "run-task":
+            rp.add_argument("--task", "-t", required=True, help="managed Task, e.g. BayFAIOptimizer2")
+        else:
+            rp.add_argument("--dag", "-W", required=True, help="path to the .dag")
+        rp.add_argument("--partition", default=DEFAULT_PARTITION)
+        rp.add_argument("--account", default=None, help="defaults to lcls:<experiment>")
+        rp.add_argument("--confirm", default=None, choices=["write"],
+                        help="submit; without it, print the command only")
+        _lute_args(rp)
 
     status_parser = sub.add_parser("status", help="sacct summary for one job")
     status_parser.add_argument("job_id")
@@ -1513,7 +1745,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """hutch-lute: submission, monitoring, pedestals, config rendering, workspace setup."""
-    args = build_parser().parse_args(argv)
+    args, extra = build_parser().parse_known_args(argv)
+    # Only the run verbs pass sbatch arguments through, and only in LUTE's --long=value form.
+    if extra and (args.cmd not in ("run-task", "run-workflow")
+                  or not all(re.match(r"^--[A-Za-z][\w-]*=.+$|^--exclusive$", a) for a in extra)):
+        build_parser().error(f"unrecognized arguments: {' '.join(extra)}")
 
     # render and the install subcommands own their own exit codes, so they are
     # dispatched before the handlers below rather than inside them.
@@ -1531,6 +1767,9 @@ def main(argv: list[str] | None = None) -> int:
                 ntasks_per_node=args.ntasks_per_node, mpi=not args.no_mpi,
             )
             if not args.submit:
+                if args.script_path:
+                    return out({"script_path": submit(text, script_path=args.script_path,
+                                                      dry_run=True)})
                 return out(text, plain=True)
             # LUTE writes in_file/phil_file while parsing the config, so their
             # per-run directory has to exist before the job starts, not when the
@@ -1541,6 +1780,12 @@ def main(argv: list[str] | None = None) -> int:
             return out({"job_id": submit(text, script_path=path,
                                          dependency=args.dependency),
                         "created_dirs": made})
+        if args.cmd in ("run-task", "run-workflow"):
+            return out(run_by_hand(
+                experiment=args.experiment, run=args.run, config=args.config, lute=args.lute,
+                task=getattr(args, "task", None), dag=getattr(args, "dag", None),
+                partition=args.partition, account=args.account,
+                reservation=_reservation(args), slurm=extra, confirm=args.confirm))
         if args.cmd == "status":
             return out(job_status(args.job_id))
         if args.cmd == "watch":

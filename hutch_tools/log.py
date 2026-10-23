@@ -13,6 +13,7 @@ from .common import (
     USAGE,
     experiment_args,
     fail,
+    grant_group,
     local_hhmm,
     log_file,
     out,
@@ -58,7 +59,8 @@ def init(hutch: str, experiment: str, *, shift_date: str, shift_start: str | Non
 
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(lines))
-    return {"created": True, "path": str(p), "shift_start": start}
+    acl = grant_group(experiment, rw=[p.parent])
+    return {"created": True, "path": str(p), "shift_start": start, "acl": acl}
 
 
 def _require(hutch: str, experiment: str):

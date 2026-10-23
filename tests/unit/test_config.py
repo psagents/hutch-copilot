@@ -238,3 +238,26 @@ def test_model_only_keys_are_not_flagged(tpl, tmp_path):
         "  {%- if tag is defined %}\n  tag = {{ tag }}\n  {%- endif %}\n", ""))
     assert "tag" not in (d / "cctbx_merge.phil").read_text()
     assert lute.build(template=tpl, context=CTX, whitelist_dir=d)["whitelist_checked"]
+
+
+DAG_TEMPLATE = """\
+!LUTE_DAG
+- !branch_daq2
+  daq2:
+    task_name: "${{ task }}"
+    slurm_params: "${{ slurm }}"
+    next: []
+"""
+
+
+def test_a_dag_template_renders_from_a_yaml_context(tmp_path):
+    """A defaults file is YAML with comments; a DAG carries LUTE's own tags."""
+    (tmp_path / "x.dag.j2").write_text(DAG_TEMPLATE)
+    (tmp_path / "ctx.yaml").write_text("# why: 64 ranks finished in 16 min\n"
+                                       "task: BayFAIOptimizer2\nslurm: --nodes=1\n")
+    out = tmp_path / "x.dag"
+    rc = lute.main(["render", "--template", str(tmp_path / "x.dag.j2"), "--no-whitelist",
+                    "--context", str(tmp_path / "ctx.yaml"), "--out", str(out)])
+    assert rc == 0
+    assert 'task_name: "BayFAIOptimizer2"' in out.read_text()
+    assert out.read_text().startswith("!LUTE_DAG")

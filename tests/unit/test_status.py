@@ -18,6 +18,7 @@ def _fake_sacct(monkeypatch, stdout: str):
         return subprocess.CompletedProcess(cmd, 0, stdout.encode(), b"")
 
     monkeypatch.setattr(lute.subprocess, "run", run)
+    monkeypatch.setattr(lute, "_on_s3df", lambda: True)
 
 
 def test_status_returns_the_output_paths(monkeypatch):

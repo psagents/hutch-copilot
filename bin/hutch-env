@@ -44,6 +44,9 @@ export HUTCH_PCDS_PYTHON="${HUTCH_PCDS_PYTHON:-/cds/group/pcds/pyps/conda/py312/
 export HUTCH_PSCONDA="${HUTCH_PSCONDA:-/sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh}"
 export HUTCH_LUTE_PY39="${HUTCH_LUTE_PY39:-/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9}"
 export HUTCH_LUTE_PY311="${HUTCH_LUTE_PY311:-/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11}"
+# Central LUTE builds, one directory per version (dev, v0.3.0, ...). The default
+# LUTE a workflow runs on: nothing to build, no internet needed from a hutch host.
+export HUTCH_LUTE_CENTRAL="${HUTCH_LUTE_CENTRAL:-/sdf/group/lcls/ds/tools/lute}"
 
 # Per-process DAQ logs. Carries a {hutch} field like the config dir below, and
 # is joined with YYYY/MM. The /cds/home/opr tree it used to name stopped being
