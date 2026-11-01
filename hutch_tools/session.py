@@ -1,4 +1,4 @@
-"""hutch-python: the device namespace, and the safety gate in front of it.
+"""hutch-py: the device namespace, and the safety gate in front of it.
 
 Two ways in. ``run`` launches the hutch's own ``{hutch}python`` wrapper on a
 staged script: ``load()`` runs before hutch_python's interactive/script branch,
@@ -464,7 +464,7 @@ def hutch_conf(hutch: str) -> dict:
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-python: ping | install | exec | run | conf."""
+_DOC = """hutch-py: ping | install | exec | run | conf."""
 
 
 def _confirm_and_timeout(p, post: bool = False) -> None:
@@ -494,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     ``--confirm`` and ``--timeout`` are accepted on both sides of the
     subcommand; the trailing one wins.
     """
-    ap, sub = parser("hutch-python", _DOC)
+    ap, sub = parser("hutch-py", _DOC)
     ap.add_argument("--hutch", required=True)
     _confirm_and_timeout(ap)
 
@@ -516,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """hutch-python: ping | install | exec | run | conf."""
+    """hutch-py: ping | install | exec | run | conf."""
     args = build_parser().parse_args(argv)
     confirm, timeout = _resolve(args)
     try:

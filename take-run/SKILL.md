@@ -78,7 +78,7 @@ reasons, the duration and the sample, and wait for explicit approval. Then re-se
 the class you were actually granted:
 
 ```bash
-bin/hutch-python --hutch "$H" --timeout 300 --confirm write run "<run command>"
+bin/hutch-py --hutch "$H" --timeout 300 --confirm write run "<run command>"
 bin/hutch-daq --hutch "$H" state        # run_number / last_run_number
 ```
 

@@ -30,7 +30,7 @@ TOOLS = {
     "happi": "hutch-happi",
     "epics": "hutch-epics",
     "lightpath": "hutch-lightpath",
-    "session": "hutch-python",
+    "session": "hutch-py",
     "data": "hutch-data",
     "skills": "hutch-skills",
     "lute": "hutch-lute",
