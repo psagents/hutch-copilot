@@ -353,12 +353,15 @@ def exec_code(
 
 #: Prepended to every staged script. The happi load sits inside safe_load(), so a
 #: db it cannot read leaves an empty namespace and rc=0 -- silently reporting
-#: nothing rather than failing. Keyed off elog, not daq: MEC/CXI/XCS omit
-#: daq_type (so lcls1) and `las` is nodaq, none of which get a daq object.
+#: nothing rather than failing. Keyed off size alone: daq is absent at MEC/CXI/XCS
+#: (lcls1) and `las` (nodaq), and elog only loads for a user with ~/.web.cfg.
 _GUARD = (
-    "assert 'elog' in globals() and len(globals()) > 50, (\n"
+    "assert len(globals()) > 50, (\n"
     "    'hutch-python loaded a near-empty namespace -- check that conf.yml db "
     "is readable by this user (the /reg/g spelling is not)')\n"
+    "if 'elog' not in globals():\n"
+    "    __import__('sys').stderr.write('warning: no elog object (needs ~/.web.cfg)"
+    " -- elog posting unavailable\\n')\n"
 )
 
 #: Printed last so the caller can see the namespace it actually got.
