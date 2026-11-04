@@ -149,7 +149,7 @@ def test_no_external_path_literal_survives_in_the_package():
 
 
 @pytest.mark.parametrize("name", [
-    "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "PCDS_PYTHON", "PSCONDA",
+    "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "ENG_TOOLS", "PCDS_PYTHON", "PSCONDA",
     "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
     "DS_ROOT", "SKILL_ROOTS", "ARCHIVER_URL",
 ])

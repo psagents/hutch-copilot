@@ -46,7 +46,7 @@ def test_ds_root_is_overridable(tmp_path, monkeypatch):
 #: Every name bin/hutch-env must declare. One that stops being declared is a
 #: path some tool resolves to nothing.
 DECLARED = [
-    "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "PCDS_PYTHON", "PSCONDA",
+    "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "ENG_TOOLS", "PCDS_PYTHON", "PSCONDA",
     "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
     "DS_ROOT", "SKILL_ROOTS",
 ]

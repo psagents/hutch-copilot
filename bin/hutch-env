@@ -37,6 +37,9 @@ export HUTCH_EPICS_BIN="${HUTCH_EPICS_BIN:-/cds/group/pcds/epics/base/R7.0.2-2.0
 # happi device database, and the hutch-python app tree beside it.
 export HUTCH_HAPPI_DB="${HUTCH_HAPPI_DB:-/cds/group/pcds/pyps/apps/hutch-python/device_config/db.json}"
 export HUTCH_PYTHON_APPS="${HUTCH_PYTHON_APPS:-/cds/group/pcds/pyps/apps/hutch-python}"
+# Per-hutch operator scripts (daqutils, get_info) that takepeds needs; on the
+# operator's PATH via .bashrc, not via {hutch}env.
+export HUTCH_ENG_TOOLS="${HUTCH_ENG_TOOLS:-/cds/group/pcds/engineering_tools}"
 
 # Interpreters. PCDS_PYTHON runs lightpath/happi; the psconda script and the two
 # LUTE interpreters are the analysis side.
