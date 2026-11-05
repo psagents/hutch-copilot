@@ -34,22 +34,28 @@ def skills(name: str | None = None) -> dict:
     """
     roots = skill_roots()
     found: dict[str, str] = {}
+    unreadable: list[str] = []
     for root in roots:
-        if not root.is_dir():
+        try:
+            if not root.is_dir():
+                continue
+            entries = sorted(root.iterdir())
+        except PermissionError:
+            # A root other accounts own (the shared opencode tree) must not hide the readable ones.
+            unreadable.append(str(root))
             continue
-        for entry in sorted(root.iterdir()):
+        for entry in entries:
             if (entry / "SKILL.md").is_file() and entry.name not in found:
                 found[entry.name] = str(root)
 
     source = "resolved:skill roots " + ", ".join(str(r) for r in roots)
+    searched = {"roots_searched": [str(r) for r in roots], "unreadable_roots": unreadable}
     if name is not None:
         return _record(
             {"name": name, "installed": name in found, "root": found.get(name)},
-            source + f" name={name}",
-            roots_searched=[str(r) for r in roots],
+            source + f" name={name}", **searched,
         )
-    return _record(found, source, count=len(found),
-                   roots_searched=[str(r) for r in roots])
+    return _record(found, source, count=len(found), **searched)
 
 
 # --------------------------------------------------------------------------

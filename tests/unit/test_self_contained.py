@@ -207,3 +207,23 @@ def test_every_declared_advisor_is_a_plausible_skill_name():
     """Catches a typo in DECLARED_ADVISORS, which no other test would."""
     for name in DECLARED_ADVISORS:
         assert re.fullmatch(r"[a-z][a-z0-9-]*", name), name
+
+
+def test_an_unreadable_root_is_reported_not_fatal(tmp_path, monkeypatch):
+    """mfx-daq: the shared opencode root exists but is drwxr-s--- to cwang31:ps-users."""
+    from hutch_tools import skills as resolvers
+
+    readable = tmp_path / "local"
+    (readable / "real").mkdir(parents=True)
+    (readable / "real" / "SKILL.md").write_text("x")
+    gate = tmp_path / "gate"
+    locked = gate / "skills"
+    locked.mkdir(parents=True)
+    gate.chmod(0o000)
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", f"{readable}:{locked}")
+    try:
+        rec = resolvers.skills()
+    finally:
+        gate.chmod(0o755)
+    assert set(rec["value"]) == {"real"}
+    assert rec["unreadable_roots"] == [str(locked)]
