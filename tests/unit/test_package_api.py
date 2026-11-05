@@ -30,11 +30,12 @@ TOOLS = {
     "happi": "hutch-happi",
     "epics": "hutch-epics",
     "lightpath": "hutch-lightpath",
-    "session": "hutch-python",
+    "session": "hutch-py",
     "data": "hutch-data",
     "skills": "hutch-skills",
     "lute": "hutch-lute",
     "log": "hutch-log",
+    "normal": "hutch-normal",
 }
 
 PKG = pathlib.Path(hutch_tools.__file__).resolve().parent

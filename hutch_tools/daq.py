@@ -7,7 +7,7 @@ not through hutch-python's bridge, which is usually not running and would make
 a reachable DAQ read as unknown.
 
 Nothing here writes. Beginning or configuring a run is a write that goes
-through ``hutch-python exec`` with an explicit confirmation.
+through ``hutch-py exec`` with an explicit confirmation.
 """
 
 from __future__ import annotations

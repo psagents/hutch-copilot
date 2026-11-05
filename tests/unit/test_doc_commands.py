@@ -32,11 +32,12 @@ BINARIES = {
     "happi": "happi",
     "epics": "epics",
     "lightpath": "lightpath",
-    "python": "session",
+    "py": "session",
     "data": "data",
     "skills": "skills",
     "lute": "lute",
     "log": "log",
+    "normal": "normal",
 }
 
 INVOCATION = re.compile(r"bin/hutch-([a-z]+)((?:[ \t]+[^\n`|#]*)?)")

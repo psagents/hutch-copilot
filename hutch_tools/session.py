@@ -1,4 +1,4 @@
-"""hutch-python: the device namespace, and the safety gate in front of it.
+"""hutch-py: the device namespace, and the safety gate in front of it.
 
 Two ways in. ``run`` launches the hutch's own ``{hutch}python`` wrapper on a
 staged script: ``load()`` runs before hutch_python's interactive/script branch,
@@ -18,7 +18,9 @@ logs and config file are ``hutch-daq``.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
+import os
 import pathlib
 import re
 import socket
@@ -52,32 +54,19 @@ SEVERITY = {READ_ONLY: 0, WRITE: 1, BEAM_CRITICAL: 2}
 # --------------------------------------------------------------------------
 # Patterns
 # --------------------------------------------------------------------------
-# Positive evidence that a snippet only reads. Everything must match one of
-# these for the snippet to be considered read-only.
-_READ_ONLY_PATTERNS = [
-    r"^\s*$",
-    r"^\s*#",
-    r"\.position\b",
-    r"\.inserted\b",
-    r"\.removed\b",
-    r"\.get\(\s*\)",
-    r"\.read\(\s*\)",
-    r"\.describe\(\s*\)",
-    r"\bdaq\.state\b",
-    r"\bdaq\.status\(\s*\)",
-    r"\bdaq\.config_info\(\s*\)",
-    r"\bget_run\(\s*\)",
-    r"\bcaget\b",
-    r"\bcamonitor\s+-n\s*1\b",
-    r"\bhappi\b",
-    r"\blightpath\b",
-    r"\bprint\(",
-    r"^\s*(import|from)\s",
-    r"^\s*(for|if|else|elif|try|except|finally|with|def|return|pass)\b",
-    r"^\s*[A-Za-z_][\w.]*\s*$",  # bare attribute read, e.g. `daq.state`
-    r"^\s*\w+\s*=\s*[^=]",  # local assignment (evaluated below on its RHS)
-    r"\bTrue\b|\bFalse\b|\bNone\b",
-]
+# Positive evidence that a snippet only reads: every call in it must be one of
+# these. Judged per call on the parsed snippet, never per line -- a line-level
+# pattern let `daq.begin_infinite(record=False)` through on `False`.
+_READ_ONLY_FUNCS = {
+    "print", "len", "str", "repr", "int", "float", "bool", "round", "abs", "min",
+    "max", "sum", "range", "enumerate", "zip", "list", "tuple", "dict", "set",
+    "sorted", "type", "isinstance", "hasattr", "getattr", "dir", "vars",
+    "globals", "locals", "input", "format", "get_run", "caget",
+}
+_READ_ONLY_METHODS = {
+    "get", "read", "describe", "status", "config_info",
+    "keys", "items", "values", "join", "split", "strip", "format",
+}
 
 # Operations that change the machine.
 _WRITE_PATTERNS = {
@@ -131,15 +120,11 @@ _BEAM_CRITICAL_DEVICES = {
 }
 
 
-def _lines(code: str) -> list[str]:
-    return [ln for ln in code.splitlines() if ln.strip()]
-
-
 def classify(code: str) -> dict:
     """Classify a snippet. Returns {class, reasons, unmatched_lines}.
 
-    Errs upward: any line that is not positively recognised as read-only makes
-    the snippet at least WRITE.
+    Errs upward: any call or attribute store not positively recognised as
+    read-only makes the snippet at least WRITE.
     """
     reasons: list[str] = []
     verdict = READ_ONLY
@@ -155,17 +140,27 @@ def classify(code: str) -> dict:
                 reasons.append(f"beam-critical target: {label}")
                 verdict = BEAM_CRITICAL
 
-    unmatched = [
-        ln
-        for ln in _lines(code)
-        if not any(re.search(p, ln) for p in _READ_ONLY_PATTERNS)
-    ]
+    try:
+        nodes = list(ast.walk(ast.parse(code)))
+    except SyntaxError as exc:
+        nodes, unmatched = [], [f"syntax error: {exc.msg}"]
+    else:
+        unmatched = []
+    for n in nodes:
+        if isinstance(n, ast.Call):
+            f = n.func
+            if not (isinstance(f, ast.Name) and (f.id in _READ_ONLY_FUNCS
+                                                 or f.id.endswith(("Error", "Exception")))
+                    or isinstance(f, ast.Attribute) and f.attr in _READ_ONLY_METHODS):
+                unmatched.append(ast.unparse(n))
+        elif isinstance(n, (ast.Attribute, ast.Subscript)) and isinstance(n.ctx, ast.Store):
+            unmatched.append(ast.unparse(n) + " = ...")
     if verdict == READ_ONLY and unmatched:
-        # Not provably read-only -> treat as a write and say which lines.
+        # Not provably read-only -> treat as a write and say which calls.
         verdict = WRITE
         reasons.append(
             "not provably read-only: "
-            + "; ".join(ln.strip()[:60] for ln in unmatched[:3])
+            + "; ".join(u[:60] for u in unmatched[:3])
         )
 
     return {"class": verdict, "reasons": reasons, "unmatched_lines": unmatched}
@@ -353,12 +348,23 @@ def exec_code(
 
 #: Prepended to every staged script. The happi load sits inside safe_load(), so a
 #: db it cannot read leaves an empty namespace and rc=0 -- silently reporting
-#: nothing rather than failing. Keyed off elog, not daq: MEC/CXI/XCS omit
-#: daq_type (so lcls1) and `las` is nodaq, none of which get a daq object.
+#: nothing rather than failing. Keyed off size alone: daq is absent at MEC/CXI/XCS
+#: (lcls1) and `las` (nodaq).
+#:
+#: hutch-python builds elog only from ~/.web.cfg, which personal accounts lack;
+#: HutchELog with no user/pw authenticates with the caller's Kerberos ticket instead.
+#: It must also land in {hutch}.db: autorun & co. `from mfx.db import elog` at call time.
 _GUARD = (
-    "assert 'elog' in globals() and len(globals()) > 50, (\n"
+    "assert len(globals()) > 50, (\n"
     "    'hutch-python loaded a near-empty namespace -- check that conf.yml db "
     "is readable by this user (the /reg/g spelling is not)')\n"
+    "if 'elog' not in globals():\n"
+    "    try:\n"
+    "        from elog import HutchELog as _HE; elog = _HE({hutch!r})\n"
+    "        __import__('sys').modules[{db!r}].elog = elog\n"
+    "    except Exception as _e:\n"
+    "        __import__('sys').stderr.write(f'warning: no elog object ({{_e}}) "
+    "-- elog posting unavailable; kinit?\\n')\n"
 )
 
 #: Printed last so the caller can see the namespace it actually got.
@@ -384,16 +390,21 @@ def run_script(
     # which sets the conda env and the PYTHONPATH that `load: mfx.beamline` and
     # `from mfx.db import elog` need. Reimplementing that here would drift.
     launcher = f"{external_path('PYTHON_APPS')}/{h}/{h}python"
-    staged = f"{_GUARD}{code}\nprint({_SIZE_MARKER!r}, len(globals()))\n"
+    guard = _GUARD.format(hutch=h.upper(), db=f"{h}.db")
+    staged = f"{guard}{code}\nprint({_SIZE_MARKER!r}, len(globals()))\n"
 
     # /dev/stdin, not a temp file: cli.py reads the script to EOF before exec, so
     # an input() prompt in the snippet raises EOFError instead of hanging here.
+    # Without it takepeds silently takes its LCLS-I branch and records nothing.
+    scripts = f"{external_path('ENG_TOOLS')}/{h}/scripts"
+    env = {**os.environ, "PATH": f"{scripts}:{os.environ.get('PATH', '')}"}
     try:
         proc = subprocess.run(
             [launcher, "/dev/stdin"],
             input=staged.encode(),
             capture_output=True,
             timeout=timeout,
+            env=env,
         )
     except OSError as exc:
         raise SessionError(f"cannot run {launcher}: {exc}") from exc
@@ -461,7 +472,7 @@ def hutch_conf(hutch: str) -> dict:
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-python: ping | install | exec | run | conf."""
+_DOC = """hutch-py: ping | install | exec | run | conf."""
 
 
 def _confirm_and_timeout(p, post: bool = False) -> None:
@@ -491,7 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     ``--confirm`` and ``--timeout`` are accepted on both sides of the
     subcommand; the trailing one wins.
     """
-    ap, sub = parser("hutch-python", _DOC)
+    ap, sub = parser("hutch-py", _DOC)
     ap.add_argument("--hutch", required=True)
     _confirm_and_timeout(ap)
 
@@ -513,7 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """hutch-python: ping | install | exec | run | conf."""
+    """hutch-py: ping | install | exec | run | conf."""
     args = build_parser().parse_args(argv)
     confirm, timeout = _resolve(args)
     try:

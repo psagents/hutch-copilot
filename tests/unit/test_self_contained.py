@@ -82,7 +82,9 @@ def _executable_source(path: pathlib.Path) -> str:
 def test_docs_reference_only_declared_advisors():
     undeclared = {}
     for p in _docs():
-        found = set(re.findall(r"@([a-z][a-z0-9-]*)", p.read_text()))
+        # Fenced code is code: `@pytest.fixture` there is a decorator, not a citation.
+        prose = re.sub(r"^```.*?^```", "", p.read_text(), flags=re.M | re.S)
+        found = set(re.findall(r"@([a-z][a-z0-9-]*)", prose))
         extra = found - DECLARED_ADVISORS
         if extra:
             undeclared[str(p.relative_to(ROOT))] = sorted(extra)

@@ -48,6 +48,32 @@ def test_unrecognised_code_is_not_read_only():
     assert any("not provably read-only" in r for r in result["reasons"])
 
 
+@pytest.mark.parametrize("code", [
+    "daq.begin_infinite(record=False)",  # 11-01: passed on the `False` pattern
+    "x = None; daq.end()",
+    "print(mfx_target.x.velocity.set_and_wait(1))",
+    "if True: os.system('takepeds')",
+    "mfx_target.x.velocity.put = 1",
+    "dev.user_setpoint.value = 3",
+    "d['k'] = 1",
+    "getattr(daq, 'begin')()",
+    "daq.state(",
+])
+def test_adversarial_snippets_are_not_read_only(code):
+    assert safety.classify(code)["class"] != safety.READ_ONLY
+
+
+@pytest.mark.parametrize("code", [
+    "raise RuntimeError('boom')",
+    "input()",
+    "import sys\nprint(sys.prefix, len(globals()))",
+    "for d in (att, yag0):\n    print(d.position, d.read())",
+    "x = daq.state\nprint(x)",
+])
+def test_plain_reads_are_not_over_gated(code):
+    assert safety.classify(code)["class"] == safety.READ_ONLY
+
+
 def test_read_only_needs_no_confirmation():
     assert safety.require_confirmation("daq.state", None)["class"] == safety.READ_ONLY
 
@@ -74,6 +100,20 @@ def test_reasons_are_quotable_in_a_confirmation_prompt():
     reasons = safety.classify("mfx_att_1.mv(0)")["reasons"]
     assert any("attenuator" in r for r in reasons)
     assert any("device move" in r for r in reasons)
+
+
+def test_run_puts_hutch_engineering_scripts_first_on_path(monkeypatch):
+    """takepeds needs daqutils/get_info from there; without it it records nothing."""
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw["env"])
+        return safety.subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setenv("HUTCH_ENG_TOOLS", "/eng")
+    monkeypatch.setattr(safety.subprocess, "run", fake_run)
+    safety.run_script("MFX", "print(1)")
+    assert seen["PATH"].startswith("/eng/mfx/scripts:")
 
 
 def test_run_refuses_before_launching_anything(monkeypatch):

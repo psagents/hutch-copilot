@@ -34,11 +34,12 @@ hutch-daq = "hutch_tools.daq:main"
 hutch-happi = "hutch_tools.happi:main"
 hutch-epics = "hutch_tools.epics:main"
 hutch-lightpath = "hutch_tools.lightpath:main"
-hutch-python = "hutch_tools.session:main"
+hutch-py = "hutch_tools.session:main"
 hutch-data = "hutch_tools.data:main"
 hutch-skills = "hutch_tools.skills:main"
 hutch-lute = "hutch_tools.lute:main"
 hutch-log = "hutch_tools.log:main"
+hutch-normal = "hutch_tools.normal:main"
 
 [tool.setuptools]
 packages = ["hutch_tools"]
