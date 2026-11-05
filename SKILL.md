@@ -110,17 +110,19 @@ Report the experiment and the loaded context back in one line, then proceed. Thr
 ### Then check the Kerberos ticket
 
 ```bash
-klist -s -c FILE:$HOME/krb5cc.ticket && klist -c FILE:$HOME/krb5cc.ticket | grep -m1 krbtgt
+T=FILE:$(getent passwd $USER | cut -d: -f6)/krb5cc.ticket
+klist -s -c $T && klist -c $T | grep -m1 krbtgt
 ```
 
-The eLog reads **that file**, not the ambient cache: registering a workflow, posting run
+The ticket lives in the account's home from passwd, not `$HOME`: a Cogito host sets `$HOME`
+to `~/.cogito/hosts/<host>`. The eLog reads **that file**, not the ambient cache: registering a workflow, posting run
 summaries and eLog lookups all need it. `-s` exits non-zero on an expired ticket too. If
 it fails, ask the operator once, in the same reply as the context line, to run this
 **in their own terminal** — not as a `!` command, which has no TTY for the password
 prompt and falls back to PKINIT:
 
 ```bash
-kinit -c FILE:$HOME/krb5cc.ticket $USER@SLAC.STANFORD.EDU
+kinit -c FILE:$(getent passwd $USER | cut -d: -f6)/krb5cc.ticket $USER@SLAC.STANFORD.EDU
 ```
 
 Then re-run the check. It is not a blocker: if they decline, proceed, and say which steps

@@ -190,7 +190,7 @@ it; a path it could not grant blocks. Paths owned by someone else are listed in
 `skipped_not_owned` — tell their owner. The hutch hosts' NFS mount has no ACL support, so
 the tool sets them over `ssh psana`. Never fix access with `777`.
 
-**`register` needs a ticket at `FILE:$HOME/krb5cc.ticket` specifically**, not the ambient
+**`register` needs a ticket at `FILE:<home from passwd>/krb5cc.ticket` specifically**, not the ambient
 cache — a fresh `kinit` in your shell does not satisfy it. The check validates expiry, so
 `ok: false` on a file that exists means the credential is stale; the error prints the
 `kinit` line to hand the operator. **They run it in their own terminal**, not as a `!`

@@ -6,6 +6,7 @@ library functions made them unusable from anything but the command line.
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
@@ -352,10 +353,17 @@ def test_the_two_ticket_checks_are_not_the_same_question(monkeypatch):
     """`have_ticket` asks whether any ticket exists; `elog_ticket` asks for one at
     FILE:$HOME/krb5cc.ticket, which is what register() sets KRB5CCNAME to. A
     ticket in the ambient cache does not satisfy registration."""
-    monkeypatch.setenv("HOME", "/nonexistent")
+    monkeypatch.setattr(lute, "real_home", lambda: "/nonexistent")
     ok, ticket = lute.elog_ticket()
     assert ok is False
-    assert ticket.startswith("FILE:/nonexistent")
+    assert ticket == "FILE:/nonexistent/krb5cc.ticket"
+
+
+def test_elog_ticket_ignores_an_overridden_home(monkeypatch):
+    """A Cogito host sets HOME to ~/.cogito/hosts/<host>; the ticket stays in the account's home."""
+    import pwd
+    monkeypatch.setenv("HOME", "/sdf/home/x/someone/.cogito/hosts/mfx-daq")
+    assert lute.elog_ticket()[1] == f"FILE:{pwd.getpwuid(os.getuid()).pw_dir}/krb5cc.ticket"
 
 
 def test_elog_ticket_asks_klist_for_validity_not_existence(monkeypatch):
