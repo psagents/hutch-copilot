@@ -11,6 +11,9 @@ import fnmatch
 #: Lightpath states that count as "in the beam".
 _IN = {"Inserted", "Blocked"}
 
+#: Lightpath states that count as unreadable.
+_UNREADABLE = {"Disconnected", "Unknown", "Error"}
+
 
 def _rule(snapshot: dict, device: str) -> dict | None:
     return next((r for r in snapshot.get("rules", [])
@@ -40,13 +43,19 @@ def diff(snapshot: dict, blocking: list[str], devices: dict[str, str],
         if kind == "ignore":
             verdict, why = "ignored", rule.get("why", "")
         elif kind == "required_in":
-            verdict, why = ("ok", "in, as required") if state in _IN \
-                           else ("blocker", f"required in, is {state}")
+            if state is None or state in _UNREADABLE:
+                verdict, why = "unknown", f"state {state}"
+            else:
+                verdict, why = ("ok", "in, as required") if state in _IN \
+                               else ("blocker", f"required in, is {state}")
         elif kind == "idle_closed":
-            closed = name in blocking
-            verdict = "blocker" if closed and taking_data \
-                      else ("expected_idle" if closed else "ok")
-            why = rule.get("why", "")
+            if state is None or state in _UNREADABLE:
+                verdict, why = "unknown", f"state {state}"
+            else:
+                closed = name in blocking
+                verdict = "blocker" if closed and taking_data \
+                          else ("expected_idle" if closed else "ok")
+                why = rule.get("why", "")
         elif kind == "min_gap":
             verdict, why = _gap(rule, pv_values)
         elif name in blocking:

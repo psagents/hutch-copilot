@@ -70,3 +70,29 @@ def test_a_device_new_or_gone_since_the_snapshot_is_a_change():
     res = normal.diff(SNAP, [], now, OPEN, taking_data=False)
     assert {"device": "valve", "was": "Removed", "now": None} in res["changed"]
     assert {"device": "newdev", "was": None, "now": "Removed"} in res["changed"]
+
+
+@pytest.mark.parametrize("device,kind,state", [
+    ("mirror", "required_in", "Disconnected"),
+    ("mirror", "required_in", "Unknown"),
+    ("stop", "idle_closed", "Disconnected"),
+    ("stop", "idle_closed", "Error"),
+])
+def test_unreadable_ruled_device_is_unknown(device, kind, state):
+    """Unreadable states (Disconnected, Unknown, Error) → unknown verdict, not blocking."""
+    snap = {
+        "beam_path": {"mirror": "Inserted", "stop": "Inserted"},
+        "rules": [
+            {"match": "mirror", "kind": "required_in"},
+            {"match": "stop", "kind": "idle_closed"},
+        ]
+    }
+    now = {**NOW, device: state}
+
+    # For idle_closed, include in blocking to test it still becomes unknown
+    blocking = [device] if device == "stop" else []
+
+    res = normal.diff(snap, blocking, now, OPEN, taking_data=True)
+    verdicts_dict = verdicts(res)
+    assert verdicts_dict[device] == "unknown"
+    assert device not in res["blocking"]
