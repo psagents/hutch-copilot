@@ -22,7 +22,7 @@ column decides what phase 3 has to expose over MCP.
 | `hutch-data xtc2` (run 157) | rc 0, 11 files | rc 0 | no |
 | `hutch-lute` | not run (no analysis today) | `--help` rc 0 | no |
 | `hutch-skills list` | **rc 4 → fixed**, see below | rc 0 | no |
-| `hutch-py run` | **not run**, see below | — | **yes** |
+| `hutch-py run` | rc 0, read-only (operator, by hand) | — | **yes** |
 
 `hutch-daq state` failing is correct behaviour: the DAQ was down, and rule 3 says report it, not
 guess. Re-run it once the operator has the DAQ back.
@@ -35,23 +35,20 @@ guess. Re-run it once the operator has the DAQ back.
   readable root. It now lists the readable roots and reports the others in `unreadable_roots`.
   On mfx-daq: rc 0, `ask-lute` found under `~/.claude/skills`.
 
-## Not checked, for the operator to run by hand
+## Checked by the operator, by hand
 
-The Claude Code permission classifier refused `hutch-py run` over ssh to mfx-daq, even the
-read-only `print(len(globals()))`. These are the remaining checks of phase 1:
+The Claude Code permission classifier refused `hutch-py run` over ssh to mfx-daq, so the operator
+ran both checks in their own terminal:
 
-```bash
-bin/hutch-py --hutch mfx run 'print(len(globals()))'                 # rc 0, ~400, ~70 s
-bin/hutch-py --hutch mfx run 'daq.begin_infinite(record=False)'      # rc 5, nothing sent
-```
+- `run 'print(len(globals()))'` → `returncode: 0`, safety `read-only`.
+- `run 'daq.begin_infinite(record=False)'` → refused as `write` ("not provably read-only"),
+  nothing sent. **The Nov 1 gate bug is fixed at the hutch.**
 
-The second is the Nov 1 gate bug. Locally, `classify()` now calls it `write` (not provably
-read-only), and calls `mfx_stopper_1.remove()` and `exec('mfx_stopper_1.remove()')`
-`beam-critical`. It still calls `raise RuntimeError(...)` read-only, which is harmless.
+`raise RuntimeError(...)` is still classed read-only, which is harmless.
 
 ## Verdict
 
-Every read-only tool works from a terminal on mfx-daq except `hutch-daq state` (DAQ down, correct)
-and `hutch-py run` (not run). Six tools need the hutch: happi, epics (caget, archiver), lightpath,
+**Phase 1 passes.** Every tool works from a terminal on mfx-daq; `hutch-daq state` reports the DAQ
+down, which is correct, and should be re-run once it is back. Six tools need the hutch: happi, epics (caget, archiver), lightpath,
 `daq state`, `hutch-py`, and `normal diff/take` through them. Everything else already works from
 S3DF, so the MCP server in phase 3 only has to wrap those six.
