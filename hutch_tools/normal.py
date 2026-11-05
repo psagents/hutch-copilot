@@ -79,17 +79,20 @@ def diff(snapshot: dict, blocking: list[str], devices: dict[str, str],
 
 def latest(hutch: str, experiment: str) -> dict:
     """This experiment's normal snapshot, else the newest one at this hutch."""
+    unreadable = []
     try:
         own = State(hutch, experiment).get_entry("normal")
         return {"snapshot": own["value"], "from": experiment, "borrowed": False,
                 "taken_at": own["value"].get("taken_at"), "unreadable": []}
-    except (MissingValue, OSError):
+    except MissingValue:
         pass
-    best, unreadable = None, []
+    except (OSError, json.JSONDecodeError) as exc:
+        unreadable.append(f"{state_file(hutch, experiment).parent}: {exc.__class__.__name__}")
+    best = None
     hutch_dir = ds_root() / hutch.lower()
     if not hutch_dir.exists():
         return {"snapshot": None, "from": None, "borrowed": False, "taken_at": None,
-                "unreadable": []}
+                "unreadable": unreadable}
     for exp_dir in sorted(hutch_dir.iterdir()):
         if not exp_dir.is_dir():
             continue
@@ -104,7 +107,10 @@ def latest(hutch: str, experiment: str) -> dict:
         except (PermissionError, json.JSONDecodeError) as exc:
             unreadable.append(f"{path.parent}: {exc.__class__.__name__}")
             continue
-        if snap and (best is None or snap["taken_at"] > best[1]["taken_at"]):
-            best = (exp, snap)
+        if isinstance(snap, dict) and "taken_at" in snap:
+            if best is None or snap["taken_at"] > best[1]["taken_at"]:
+                best = (exp, snap)
+        elif snap is not None:
+            unreadable.append(f"{path.parent}: malformed normal")
     return {"snapshot": best and best[1], "from": best and best[0], "borrowed": bool(best),
             "taken_at": best and best[1]["taken_at"], "unreadable": unreadable}

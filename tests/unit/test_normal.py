@@ -138,3 +138,26 @@ def test_unreadable_experiments_are_reported(root):
 def test_no_snapshot_anywhere_is_none_not_an_error(root):
     got = normal.latest("mfx", "mfxNEW")
     assert got["snapshot"] is None and got["from"] is None
+
+
+def test_own_snapshot_unreadable_is_reported(root):
+    _seed("mfxOther", "2026-11-01T00:00:00+00:00")
+    own_locked = root / "mfx" / "mfxOWN" / "results" / "psagents"
+    own_locked.mkdir(parents=True)
+    own_locked.chmod(0)
+    try:
+        got = normal.latest("mfx", "mfxOWN")
+    finally:
+        own_locked.chmod(0o755)
+    assert (got["from"], got["borrowed"]) == ("mfxOther", True)
+    assert any("mfxOWN" in u for u in got["unreadable"])
+
+
+def test_malformed_normal_is_reported(root):
+    _seed("mfxValid", "2026-11-01T00:00:00+00:00")
+    path = root / "mfx" / "mfxBad" / "results" / "psagents"
+    path.mkdir(parents=True)
+    (path / "mfxBad_state.json").write_text('{"normal": {"rules": []}}')
+    got = normal.latest("mfx", "mfxNEW")
+    assert (got["from"], got["borrowed"]) == ("mfxValid", True)
+    assert any("mfxBad" in u for u in got["unreadable"])
