@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import normal
+from hutch_tools import normal, state
 
 SNAP = {
     "taken_at": "2026-11-01T23:39:57+00:00",
@@ -96,3 +96,45 @@ def test_unreadable_ruled_device_is_unknown(device, kind, state):
     verdicts_dict = verdicts(res)
     assert verdicts_dict[device] == "unknown"
     assert device not in res["blocking"]
+
+
+@pytest.fixture()
+def root(tmp_path, monkeypatch):
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
+    return tmp_path
+
+
+def _seed(exp, taken_at):
+    state.State("mfx", exp).set("normal", {**SNAP, "taken_at": taken_at},
+                                source="test", kind="operator")
+
+
+def test_own_snapshot_wins(root):
+    _seed("mfxA", "2026-10-01T00:00:00+00:00")
+    _seed("mfxB", "2026-11-01T00:00:00+00:00")
+    got = normal.latest("mfx", "mfxA")
+    assert (got["from"], got["borrowed"]) == ("mfxA", False)
+
+
+def test_fallback_is_newest_by_time_not_name(root):
+    _seed("mfx999", "2026-09-01T00:00:00+00:00")
+    _seed("mfx100", "2026-11-01T00:00:00+00:00")
+    got = normal.latest("mfx", "mfxNEW")
+    assert (got["from"], got["borrowed"]) == ("mfx100", True)
+
+
+def test_unreadable_experiments_are_reported(root):
+    _seed("mfx100", "2026-11-01T00:00:00+00:00")
+    locked = root / "mfx" / "mfxLOCK" / "results" / "psagents"
+    locked.mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        got = normal.latest("mfx", "mfxNEW")
+    finally:
+        locked.chmod(0o755)
+    assert any("mfxLOCK" in u for u in got["unreadable"])
+
+
+def test_no_snapshot_anywhere_is_none_not_an_error(root):
+    got = normal.latest("mfx", "mfxNEW")
+    assert got["snapshot"] is None and got["from"] is None

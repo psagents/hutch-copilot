@@ -7,6 +7,10 @@ each experiment's state file, attributed to a person. This module only applies i
 from __future__ import annotations
 
 import fnmatch
+import json
+
+from .common import ds_root, state_file
+from .state import MissingValue, State
 
 #: Lightpath states that count as "in the beam".
 _IN = {"Inserted", "Blocked"}
@@ -71,3 +75,36 @@ def diff(snapshot: dict, blocking: list[str], devices: dict[str, str],
     return {"findings": findings,
             "blocking": [f["device"] for f in findings if f["verdict"] == "blocker"],
             "changed": changed}
+
+
+def latest(hutch: str, experiment: str) -> dict:
+    """This experiment's normal snapshot, else the newest one at this hutch."""
+    try:
+        own = State(hutch, experiment).get_entry("normal")
+        return {"snapshot": own["value"], "from": experiment, "borrowed": False,
+                "taken_at": own["value"].get("taken_at"), "unreadable": []}
+    except (MissingValue, OSError):
+        pass
+    best, unreadable = None, []
+    hutch_dir = ds_root() / hutch.lower()
+    if not hutch_dir.exists():
+        return {"snapshot": None, "from": None, "borrowed": False, "taken_at": None,
+                "unreadable": []}
+    for exp_dir in sorted(hutch_dir.iterdir()):
+        if not exp_dir.is_dir():
+            continue
+        exp = exp_dir.name
+        if exp == experiment:
+            continue
+        path = state_file(hutch, exp)
+        try:
+            snap = json.loads(path.read_text()).get("normal")
+        except FileNotFoundError:
+            continue
+        except (PermissionError, json.JSONDecodeError) as exc:
+            unreadable.append(f"{path.parent}: {exc.__class__.__name__}")
+            continue
+        if snap and (best is None or snap["taken_at"] > best[1]["taken_at"]):
+            best = (exp, snap)
+    return {"snapshot": best and best[1], "from": best and best[0], "borrowed": bool(best),
+            "taken_at": best and best[1]["taken_at"], "unreadable": unreadable}
