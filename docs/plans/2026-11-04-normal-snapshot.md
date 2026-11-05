@@ -502,7 +502,7 @@ Expected: all pass
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hutch_tools/normal.py bin/hutch-normal tests/unit/test_normal.py tests/unit/test_doc_commands.py
+git add hutch_tools/normal.py tests/unit/test_normal.py tests/unit/test_doc_commands.py bin/hutch-normal
 git commit -m "ENH bin/hutch-normal: show, diff and take the normal snapshot"
 ```
 

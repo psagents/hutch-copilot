@@ -161,3 +161,40 @@ def test_malformed_normal_is_reported(root):
     got = normal.latest("mfx", "mfxNEW")
     assert (got["from"], got["borrowed"]) == ("mfxValid", True)
     assert any("mfxBad" in u for u in got["unreadable"])
+
+
+from hutch_tools import daq, epics, lightpath
+
+
+@pytest.fixture()
+def machine(monkeypatch):
+    monkeypatch.setattr(lightpath, "beam_path", lambda hutch, **kw: {"value": {
+        "blocking": ["stop"], "devices": [{"name": k, "state": v} for k, v in NOW.items()]}})
+    monkeypatch.setattr(daq, "state", lambda hutch, **kw: {"value": {
+        "state": "running", "recording": False, "config_alias": "BEAM"}})
+    monkeypatch.setattr(epics, "caget", lambda pvs, **kw: {p: OPEN[p] for p in pvs})
+
+
+def test_take_keeps_borrowed_rules_and_records_the_operator(root, machine, capsys):
+    _seed("mfxOLD", "2026-11-01T00:00:00+00:00")
+    assert normal.main(["take", "--hutch", "mfx", "--experiment", "mfxNEW",
+                        "--source", "operator lconreux: this is normal"]) == 0
+    entry = state.State("mfx", "mfxNEW").get_entry("normal")
+    assert entry["kind"] == "operator"
+    assert entry["value"]["rules"] == SNAP["rules"]
+    assert entry["value"]["daq_idle"]["state"] == "running"
+
+
+def test_diff_reports_where_the_snapshot_came_from(root, machine, capsys):
+    import json as _j
+    _seed("mfxOLD", "2026-11-01T00:00:00+00:00")
+    assert normal.main(["diff", "--hutch", "mfx", "--experiment", "mfxNEW"]) == 0
+    res = _j.loads(capsys.readouterr().out)
+    assert res["borrowed"] and res["from"] == "mfxOLD"
+    assert res["blocking"] == []
+
+
+def test_diff_with_no_snapshot_says_so(root, machine, capsys):
+    import json as _j
+    assert normal.main(["diff", "--hutch", "mfx", "--experiment", "mfxNEW"]) == 0
+    assert _j.loads(capsys.readouterr().out)["snapshot"] is None

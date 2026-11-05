@@ -6,11 +6,16 @@ each experiment's state file, attributed to a person. This module only applies i
 
 from __future__ import annotations
 
+import argparse
 import fnmatch
+import getpass
 import json
+import pathlib
 
-from .common import ds_root, state_file
-from .state import MissingValue, State
+from . import daq, epics, lightpath
+from .common import OK, STATE_ERROR, UNREACHABLE, experiment_args, fail, out, parser, utcnow, \
+    ds_root, state_file
+from .state import MissingValue, OPERATOR, State, StateError
 
 #: Lightpath states that count as "in the beam".
 _IN = {"Inserted", "Blocked"}
@@ -114,3 +119,77 @@ def latest(hutch: str, experiment: str) -> dict:
             unreadable.append(f"{path.parent}: malformed normal")
     return {"snapshot": best and best[1], "from": best and best[0], "borrowed": bool(best),
             "taken_at": best and best[1]["taken_at"], "unreadable": unreadable}
+
+
+def rule_pvs(snapshot: dict) -> list[str]:
+    """Every PV named by this snapshot's rules."""
+    return [pv for r in snapshot.get("rules", []) for pv in r.get("pvs", {}).values()]
+
+
+def current(hutch: str) -> dict:
+    """Lightpath and DAQ readings, now."""
+    path = lightpath.beam_path(hutch)["value"]
+    return {"blocking": path["blocking"],
+            "devices": {d["name"]: d["state"] for d in path["devices"]},
+            "daq": daq.state(hutch)["value"]}
+
+
+def _judge(hutch: str, experiment: str, taking_data: bool) -> dict:
+    found = latest(hutch, experiment)
+    snap = found["snapshot"]
+    if snap is None:
+        return found
+    now = current(hutch)
+    try:
+        pvs = epics.caget(rule_pvs(snap))
+    except epics.EpicsError:
+        pvs = {}  # every min_gap rule then reports `unknown`, never `ok`
+    res = diff(snap, now["blocking"], now["devices"], pvs, taking_data=taking_data)
+    idle = snap.get("daq_idle", {})
+    res["daq_changed"] = {k: {"was": v, "now": now["daq"].get(k)}
+                          for k, v in idle.items() if now["daq"].get(k) != v}
+    return {**found, **res}
+
+
+def _take(hutch: str, experiment: str, source: str, rules_file: str | None) -> dict:
+    now = current(hutch)
+    rules = (json.loads(pathlib.Path(rules_file).read_text()) if rules_file
+             else (latest(hutch, experiment)["snapshot"] or {}).get("rules", []))
+    snap = {"taken_at": utcnow(), "taken_by": getpass.getuser(),
+            "beam_path": now["devices"],
+            "daq_idle": {k: now["daq"].get(k) for k in ("state", "recording", "config_alias")},
+            "rules": rules}
+    return State(hutch, experiment).set("normal", snap, source=source, kind=OPERATOR, ttl_s=None)
+
+
+_DOC = """hutch-normal: show | diff | take."""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct this command's parser (kept separate so it can be introspected)."""
+    ap, sub = parser("hutch-normal", _DOC)
+    experiment_args(sub.add_parser("show", help="the snapshot in force, and where it came from"))
+    d = sub.add_parser("diff", help="what differs from normal, now")
+    experiment_args(d)
+    d.add_argument("--taking-data", action="store_true",
+                   help="idle-closed devices (stoppers, picker) count as blockers")
+    t = sub.add_parser("take", help="record now as normal; operator-attributed")
+    experiment_args(t)
+    t.add_argument("--source", required=True, help="who said this is normal, and when")
+    t.add_argument("--rules", help="JSON file of rules; default: keep the snapshot in force")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    """hutch-normal: show | diff | take."""
+    args = build_parser().parse_args(argv)
+    try:
+        if args.cmd == "show":
+            return out(latest(args.hutch, args.experiment))
+        if args.cmd == "diff":
+            return out(_judge(args.hutch, args.experiment, args.taking_data))
+        return out(_take(args.hutch, args.experiment, args.source, args.rules))
+    except StateError as exc:
+        return fail(exc, STATE_ERROR)
+    except (lightpath.LightpathError, daq.DaqError, OSError) as exc:
+        return fail(exc, UNREACHABLE)

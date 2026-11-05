@@ -39,6 +39,7 @@ hutch-data = "hutch_tools.data:main"
 hutch-skills = "hutch_tools.skills:main"
 hutch-lute = "hutch_tools.lute:main"
 hutch-log = "hutch_tools.log:main"
+hutch-normal = "hutch_tools.normal:main"
 
 [tool.setuptools]
 packages = ["hutch_tools"]

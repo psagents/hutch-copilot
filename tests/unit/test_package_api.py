@@ -35,6 +35,7 @@ TOOLS = {
     "skills": "hutch-skills",
     "lute": "hutch-lute",
     "log": "hutch-log",
+    "normal": "hutch-normal",
 }
 
 PKG = pathlib.Path(hutch_tools.__file__).resolve().parent
