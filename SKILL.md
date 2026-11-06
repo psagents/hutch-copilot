@@ -39,6 +39,17 @@ Run `--help` for subcommands and flags. They work from a bare checkout with no i
 step. `pip install -e .` is optional and only adds the same commands to PATH — never
 require it.
 
+**Off the hutch, the hutch-only tools are MCP tools.** happi, Channel Access, the archiver,
+lightpath and the DAQ control port exist only on the hutch machine. A session anywhere else
+(an S3DF node, a Cogito agent container) reaches them through the `hutch-<hutch>` MCP server,
+which runs the same `bin/hutch-*` there over the user's ssh and returns the same JSON:
+`happi_list`, `happi_device`, `happi_pv`, `epics_caget`, `epics_history`, `epics_moved`,
+`lightpath_path`, `daq_state`, `normal_diff`, `data_cat`. Everything else (`hutch-state`,
+`hutch-daq logs`/`config`, `hutch-data xtc2`, `hutch-lute`, `hutch-log`, `hutch-skills`) runs
+locally as usual. If a local hutch-only tool fails rc 4 for a missing `/cds` or `caget`, call
+its MCP tool instead; if the MCP tool is not there or errors, that is rule 3 — say so, never
+substitute a value. `hutch-py` has no MCP tool yet: writes still need the hutch machine.
+
 Three rules that the tools enforce and you must not work around:
 
 1. **Every value carries provenance.** `hutch-state set` requires `--source`, and `--kind`

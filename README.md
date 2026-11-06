@@ -99,6 +99,22 @@ required advisor as absent, or omit it entirely. Revisit if they move to the org
 **Restart Claude Code afterwards** — the skill list is read once at session start, so a
 freshly linked advisor is invisible until then.
 
+### Off the hutch: `hutch-mcp`
+
+A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container
+mounts neither `/cds` nor the operator homes) reaches the hutch-only tools through
+`bin/hutch-mcp`, a stdio MCP server run on the hutch over your own ssh. Register it once per
+Claude config; for Cogito that is each host's overlay home:
+
+```bash
+HOME=~/.cogito/hosts/<host> claude mcp add -s user hutch-mfx -- \
+    ssh -T -o BatchMode=yes -J psdev mfx-daq ~/.claude/skills/hutch-copilot/bin/hutch-mcp
+HOME=~/.cogito/hosts/<host> claude mcp list      # hutch-mfx: ... ✔ Connected
+```
+
+It needs key-based ssh to the hutch (no prompt) and nothing installed there. It exposes only
+read-only tools, each a fixed argv over an existing `bin/hutch-*`.
+
 ## The tools
 
 **One tool, one backend.** The tool to call follows from which source answers the

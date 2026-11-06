@@ -38,6 +38,7 @@ BINARIES = {
     "lute": "lute",
     "log": "log",
     "normal": "normal",
+    "mcp": "mcp_server",
 }
 
 INVOCATION = re.compile(r"bin/hutch-([a-z]+)((?:[ \t]+[^\n`|#]*)?)")
