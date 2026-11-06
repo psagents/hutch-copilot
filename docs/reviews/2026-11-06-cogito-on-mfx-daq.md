@@ -43,18 +43,27 @@ Binding `/sdf/home/m/mfxopr` alone is not enough: the DAQ release named in `mfx.
 Not measured yet: `hutch-py run` (needs `/reg/g`, the pcds conda env and `engineering_tools`, all
 under the binds above, but its interpreter is a rhel9 build in a Debian container).
 
-## To do on this branch
+## Second attempt: the binds do not reach the agent
 
-1. **Launch environment for a host on a hutch machine**, owned in this repo, not in Cogito:
-   `APPTAINER_BIND=/cds,/reg/g,/sdf/home` and `HUTCH_EPICS_BIN=<pcds env>/epics/bin/linux-x86_64`.
-   `HUTCH_EPICS_BIN` is already the one override point for `caget`, so no code change.
-2. Restart the mfx-daq host with it, and re-run `/are-we-ready` in a session.
-3. `hutch-py run` inside the container, read-only, by the operator.
-4. Ask the Cogito admins whether hutch nodes should get these binds in the shared `binds` file,
-   rather than every user exporting them.
+`bin/cogito-host-hutch` (the shared `cogito-host` with `APPTAINER_BIND=/cds,/reg/g,/sdf/home`),
+given as "a launcher already on that machine", restarted the host at 09:54:58 with the binds, but
+the session still reported `cannot read DAQ config /sdf/home/m/mfxopr/daq/scripts/mfx.py`.
 
-## Verdict so far
+Claude does not run in the host's container. `cogito-agent` starts it in its own image,
+`/sdf/sw/cogito/agents/claude-code/<version>/claude-code.sif`, and before doing so **unsets every
+`APPTAINER_*` and `SINGULARITY_*` variable** (by design: the outer binds must not leak in). The agent
+container mounts exactly the published `binds` file, the real home and the session folder. There is
+no per-user setting, so no launcher or environment can add `/cds`. The launcher was removed.
 
-Phase 2 is **blocked on the container, not on hutch-copilot**: the skill, the hooks and the
-experiment rule all behaved. With three extra binds and the conda `caget`, four of the five hutch
-tools work inside the container; the fifth (`daq state`) fails the same way it does on the node.
+What does work from inside the agent's image: `ssh mfx-daq` (the real home, and its keys, are
+bound), which reaches the node and everything on it.
+
+## Conclusion
+
+Phase 2 as planned, with the agent and the tools both on mfx-daq inside Cogito, needs a change only the
+Cogito admins can make: `/cds`, `/reg/g` and `/sdf/home` in the published `binds` file. Paths that
+do not exist on a node are skipped, so S3DF nodes are unaffected.
+
+Without it, the hutch-only tools have to run on the node and be reached from the agent, which is
+phase 3. SAGE's #188 D7 already names the trial form, a stdio MCP server over the user's own
+ssh (`ssh -T <hutch> <server>`), and it works the same from a session on mfx-daq or on an iana node.

@@ -1,7 +1,0 @@
-#!/bin/sh
-# Cogito host for a hutch machine: the shared cogito-host, plus the paths its container lacks.
-# Give this file's path as "A launcher already on that machine" in Cogito's add-host dialog.
-# The rhel9 caget needs libncurses, absent from the Debian image; the pcds conda one does not.
-export APPTAINER_BIND="${APPTAINER_BIND:+$APPTAINER_BIND,}/cds,/reg/g,/sdf/home"
-export HUTCH_EPICS_BIN="${HUTCH_EPICS_BIN:-/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/epics/bin/linux-x86_64}"
-exec /sdf/sw/cogito/current/cogito-host "$@"
