@@ -42,7 +42,7 @@ require it.
 **Off the hutch, the hutch-only tools are MCP tools.** happi, Channel Access, the archiver,
 lightpath and the DAQ control port exist only on the hutch machine. A session anywhere else
 (an S3DF node, a Cogito agent container) reaches them through the `hutch-<hutch>` MCP server,
-which runs the same `bin/hutch-*` there over the user's ssh and returns the same JSON:
+which runs the same `bin/hutch-*` on the hutch and returns the same JSON:
 `happi_list`, `happi_device`, `happi_pv`, `epics_caget`, `epics_history`, `epics_moved`,
 `lightpath_path`, `daq_state`, `normal_diff`, `data_cat`. Everything else (`hutch-state`,
 `hutch-daq logs`/`config`, `hutch-data xtc2`, `hutch-lute`, `hutch-log`, `hutch-skills`) runs

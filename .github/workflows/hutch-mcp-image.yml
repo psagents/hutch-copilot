@@ -1,0 +1,54 @@
+# Build the hutch-mcp image, smoke-test it, and push it to Docker Hub.
+# Pushing needs the repository variable DOCKERHUB_IMAGE (e.g. slaclab/hutch-mcp) and the secrets
+# DOCKERHUB_USERNAME and DOCKERHUB_TOKEN; without them the image is still built and tested.
+# On the hutch:  apptainer pull hutch-mcp.sif docker://<DOCKERHUB_IMAGE>:sha-<commit>
+name: hutch-mcp image
+
+on:
+  push:
+    branches: [main, ENH/hutch-mcp-container]
+    paths: [Dockerfile, .dockerignore, server/**, hutch_tools/**, bin/**, .github/workflows/hutch-mcp-image.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'hutch-mcp' }}
+      PUSH: ${{ vars.DOCKERHUB_IMAGE != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Smoke test
+        run: |
+          docker run --rm --entrypoint python3.12 "$IMAGE:sha-$GITHUB_SHA" -c '
+          import asyncio, sys
+          sys.path.insert(0, "/opt/hutch-copilot/server")
+          import hutch_mcp
+          n = len(asyncio.run(hutch_mcp.mcp.list_tools()))
+          assert n == 10, n
+          print("hutch-mcp image OK:", n, "tools")'
+      - if: env.PUSH == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - if: env.PUSH == 'true'
+        run: docker push --all-tags "$IMAGE"

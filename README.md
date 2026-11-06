@@ -103,17 +103,26 @@ freshly linked advisor is invisible until then.
 
 A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container
 mounts neither `/cds` nor the operator homes) reaches the hutch-only tools through
-`bin/hutch-mcp`, a stdio MCP server run on the hutch over your own ssh. Register it once per
-Claude config; for Cogito that is each host's overlay home:
+`server/hutch_mcp.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
+on a Unix socket, the caller from `X-Authenticated-User`), with ten read-only tools, each a
+fixed argv over an existing `bin/hutch-*`.
+
+It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to
+Docker Hub. The image holds only Python and the MCP SDK; `server/hutch-mcp.sh` binds in what the
+tools wrap (`/cds`, `/reg/g`, `/sdf/home`, `/sdf/group`, `/sdf/data`). On the hutch:
 
 ```bash
-HOME=~/.cogito/hosts/<host> claude mcp add -s user hutch-mfx -- \
-    ssh -T -o BatchMode=yes -J psdev mfx-daq ~/.claude/skills/hutch-copilot/bin/hutch-mcp
-HOME=~/.cogito/hosts/<host> claude mcp list      # hutch-mfx: ... ✔ Connected
+apptainer pull hutch-mcp.sif docker://<image>:sha-<commit>
+server/hutch-mcp.sh hutch-mcp.sif                 # stdio, for a client over ssh
+server/hutch-mcp.sh hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
 ```
 
-It needs key-based ssh to the hutch (no prompt) and nothing installed there. It exposes only
-read-only tools, each a fixed argv over an existing `bin/hutch-*`.
+Over ssh, register it once per Claude config (for Cogito, each host's overlay home):
+
+```bash
+HOME=~/.cogito/hosts/<host> claude mcp add -s user hutch-mfx -- ssh -T -o BatchMode=yes \
+    -J psdev mfx-daq ~/.claude/skills/hutch-copilot/server/hutch-mcp.sh <path>/hutch-mcp.sif
+```
 
 ## The tools
 
