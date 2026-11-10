@@ -211,6 +211,21 @@ def _acl(argv: list[str], remote: bool) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True)
 
 
+def _unescape_getfacl(name: str) -> str:
+    r"""A ``# file:`` path as the filesystem has it.
+
+    getfacl escapes a backslash as ``\\`` and other bytes as ``\ooo`` octal, so a
+    file literally named ``\`` (smalldata_tools ships one) prints as ``\\`` and never
+    matched its own path -- the grant reported it failed and ``all`` refused. The
+    escapes are bytes, so a multi-byte name is decoded only after all of them are
+    undone; surrogateescape keeps an undecodable name equal to ``os.fsdecode``'s.
+    """
+    raw = os.fsencode(name)
+    out = re.sub(rb"\\(\\|[0-7]{3})",
+                 lambda m: b"\\" if m.group(1) == b"\\" else bytes([int(m.group(1), 8)]), raw)
+    return os.fsdecode(out)
+
+
 def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Path] = ()) -> dict:
     """Give ``group`` access to these trees (access + default ACLs), then check it took.
 
@@ -250,6 +265,6 @@ def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Pat
             for block in acls.split("\n\n"):
                 name = re.search(r"^# file: (.+)$", block, re.M)
                 if name and re.search(rf"^group:{re.escape(group)}:{want}", block, re.M):
-                    granted.add(name.group(1))
+                    granted.add(_unescape_getfacl(name.group(1)))
             failed += [p for p in owned if p not in granted]
     return {"group": group, "ok": not failed, "failed": failed, "skipped_not_owned": skipped}

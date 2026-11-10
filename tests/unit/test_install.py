@@ -596,3 +596,26 @@ def test_grant_group_sets_default_acls_and_strips_world_write(tmp_path):
     acl = subprocess.run(["getfacl", "-p", str(tmp_path / "ws/lute_output")],
                          capture_output=True, text=True).stdout
     assert f"default:group:{group}:rwx" in acl
+
+
+@pytest.mark.parametrize("printed, actual", [
+    ("/ws/plain.py", "/ws/plain.py"),
+    ("/ws/correlations/\\\\", "/ws/correlations/\\"),    # smalldata_tools ships a file named '\'
+    ("/ws/a\\040b", "/ws/a b"),
+    ("/ws/caf\\303\\251", "/ws/caf\u00e9"),                # UTF-8 bytes, decoded after unescaping
+])
+def test_unescape_getfacl(printed, actual):
+    assert paths._unescape_getfacl(printed) == actual
+
+
+def test_grant_group_accepts_a_file_named_backslash(tmp_path):
+    import grp
+    import os
+    import shutil
+    if not shutil.which("setfacl"):
+        pytest.skip("no setfacl on this host")
+    group = grp.getgrgid(os.getgid()).gr_name
+    (tmp_path / "ws/correlations").mkdir(parents=True)
+    (tmp_path / "ws/correlations/\\").touch()
+    res = paths.grant_group(group, rw=[tmp_path / "ws"])
+    assert res["ok"], res
