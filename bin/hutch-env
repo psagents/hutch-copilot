@@ -45,6 +45,9 @@ export HUTCH_ENG_TOOLS="${HUTCH_ENG_TOOLS:-/cds/group/pcds/engineering_tools}"
 # LUTE interpreters are the analysis side.
 export HUTCH_PCDS_PYTHON="${HUTCH_PCDS_PYTHON:-/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/bin/python3.12}"
 export HUTCH_PSCONDA="${HUTCH_PSCONDA:-/sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh}"
+# psana1, for LCLS-I experiments (.xtc, not .xtc2): detector names and the env a
+# LUTE Task runs in there. LUTE's submit_slurm --psana1 sources the same script.
+export HUTCH_PSCONDA1="${HUTCH_PSCONDA1:-/sdf/group/lcls/ds/ana/sw/conda1/manage/bin/psconda.sh}"
 export HUTCH_LUTE_PY39="${HUTCH_LUTE_PY39:-/sdf/group/lcls/ds/ana/sw/conda2/inst/bin/python3.9}"
 export HUTCH_LUTE_PY311="${HUTCH_LUTE_PY311:-/sdf/group/lcls/ds/ana/sw/conda2-v3/inst/bin/python3.11}"
 # Central LUTE builds, one directory per version (dev, v0.3.0, ...). The default
