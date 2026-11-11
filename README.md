@@ -183,9 +183,6 @@ The tools run directly on `{hutch}-daq`. Outstanding:
 - **LCLS-I** — `hutch-data daq|xtc|detectors` and `hutch-lute run-task` handle it
   (checked on cxi101933627). `hutch-lute peds` still checks for `.xtc2` only and will
   refuse an LCLS-I DARK run.
-- **S3DF login nodes default to Python 3.6**, and every `bin/hutch-*` needs ≥3.9:
-  run them with a psconda Python there until the shims pick one themselves.
-
 - **`hutch-lute peds`** is the last `psdev` caller and will fail until it either runs
   `makepeds` locally or hops to a host that can.
 - **`hutch-daq logs` retention** — verified live at MFX on 2026-10-12 (88 sessions in one
