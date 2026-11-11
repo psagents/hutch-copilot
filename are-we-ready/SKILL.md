@@ -14,16 +14,16 @@ Read-only readiness. You move nothing.
 Run all three, then report one verdict:
 
 ```bash
-are-we-ready/scripts/check_beam.py  --hutch "$H"
-are-we-ready/scripts/check_hutch.py --hutch "$H"
-are-we-ready/scripts/check_daq.py   --hutch "$H" --experiment "$E"
+bin/hutch-ready beam  --hutch "$H"
+bin/hutch-ready hutch --hutch "$H"
+bin/hutch-ready daq   --hutch "$H" --experiment "$E"
 ```
 
 Run all three even when the question names only one — "beam is fine" is not readiness
 if the DAQ is unallocated. A failure in one does not skip the others.
 
-`check-daq` is the only one needing a live session; the other two read Channel Access
-directly and work with nothing running.
+None needs a live hutch-python session: `daq` reads the DAQ's control port, the other two
+Channel Access.
 
 Four things the JSON does not say on its face:
 

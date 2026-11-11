@@ -33,7 +33,7 @@ DECLARED_ADVISORS = {
     "psana-daq-logs", "psana-daq-history", "psana-configdb",
 }
 
-CODE_DIRS = ("src", "bin", "are-we-ready/scripts")
+CODE_DIRS = ("src", "bin")
 
 
 def _docs():

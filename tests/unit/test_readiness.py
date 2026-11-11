@@ -1,4 +1,4 @@
-"""The three readiness verbs: check_beam, check_hutch, check_daq.
+"""The three readiness checks: hutch-ready beam, hutch, daq (hutch_copilot.readiness).
 
 Each test here pins a failure that actually happened on mfx-daq, because every
 one of them produces a plausible-looking wrong answer rather than an error:
@@ -23,7 +23,7 @@ import pytest
 from hutch_copilot.tools import daq, happi, lightpath
 from hutch_copilot.tools.epics import EpicsError
 
-import check_beam, check_daq, check_hutch
+from hutch_copilot import readiness
 
 
 def _fake_state(monkeypatch, **over):
@@ -70,7 +70,7 @@ def test_the_status_fields_match_what_getstatus_returns():
 ])
 def test_can_record_follows_the_daq_state(monkeypatch, state, expected):
     _fake_state(monkeypatch, state=state)
-    assert check_daq.check_daq("mfx")["value"]["can_record"] is expected
+    assert readiness.check_daq("mfx")["value"]["can_record"] is expected
 
 
 @pytest.mark.parametrize("state", ["", "None", "ERROR: no daq object", "frobnicated"])
@@ -81,7 +81,7 @@ def test_an_uninterpretable_state_is_unknown_not_a_no(monkeypatch, state):
     out why we cannot see it. Guessing False conflates the two.
     """
     _fake_state(monkeypatch, state=state)
-    assert check_daq.check_daq("mfx")["value"]["can_record"] is None
+    assert readiness.check_daq("mfx")["value"]["can_record"] is None
 
 
 #: A DAQ config in miniature: a live process, a commented-out alternative for
@@ -163,29 +163,29 @@ def test_an_unreadable_config_does_not_change_the_verdict(monkeypatch):
     _fake_state(monkeypatch)
     def boom(hutch):
         raise daq.DaqError("cannot read DAQ config")
-    monkeypatch.setattr(check_daq.daq, "config_summary", boom)
-    v = check_daq.check_daq("mfx")["value"]
+    monkeypatch.setattr(readiness.daq, "config_summary", boom)
+    v = readiness.check_daq("mfx")["value"]
     assert v["can_record"] is True
     assert "cannot read DAQ config" in v["config"]["error"]
 
 
 def test_check_daq_carries_the_config_summary(monkeypatch, daq_cfg):
     _fake_state(monkeypatch)
-    v = check_daq.check_daq("mfx")["value"]
+    v = readiness.check_daq("mfx")["value"]
     assert v["config"]["collect_host"] == "drp-srcf-cmp014"
     assert "content" not in v["config"], "the summary must not inline the file"
 
 
 def test_a_different_experiment_is_surfaced(monkeypatch):
     _fake_state(monkeypatch, experiment="mfxOTHER")
-    rec = check_daq.check_daq("mfx", experiment="mfx101609126")
+    rec = readiness.check_daq("mfx", experiment="mfx101609126")
     assert rec["value"]["experiment_mismatch"] == {
         "daq": "mfxOTHER", "expected": "mfx101609126"}
 
 
 def test_the_matching_experiment_raises_no_alarm(monkeypatch):
     _fake_state(monkeypatch)
-    rec = check_daq.check_daq("mfx", experiment="mfx101609126")
+    rec = readiness.check_daq("mfx", experiment="mfx101609126")
     assert "experiment_mismatch" not in rec["value"]
 
 
@@ -292,8 +292,8 @@ def happi_db(tmp_path, monkeypatch):
 
 
 def test_each_device_carries_exactly_one_disposition(happi_db, monkeypatch):
-    monkeypatch.setattr(check_hutch, "caget", lambda pvs, timeout=None: {pvs[0]: "1.25"})
-    rows = {r["name"]: r for r in check_hutch.check_hutch("mfx")["value"]}
+    monkeypatch.setattr(readiness, "caget", lambda pvs, timeout=None: {pvs[0]: "1.25"})
+    rows = {r["name"]: r for r in readiness.check_hutch("mfx")["value"]}
 
     assert set(rows) == {"m_motor", "m_composite", "m_onpath"}  # not the XPP device
     # A lightpath device defers: check_beam is authoritative for it, and a
@@ -313,8 +313,8 @@ def test_an_unreadable_record_is_not_a_missing_one(happi_db, monkeypatch):
     had a name to try. Collapsing them loses which one the operator must fix."""
     def boom(pvs, timeout=None):
         raise EpicsError("no value returned")
-    monkeypatch.setattr(check_hutch, "caget", boom)
-    rows = {r["name"]: r for r in check_hutch.check_hutch("mfx")["value"]}
+    monkeypatch.setattr(readiness, "caget", boom)
+    rows = {r["name"]: r for r in readiness.check_hutch("mfx")["value"]}
     assert "no value returned" in rows["m_motor"]["unreadable"]
     assert "unreadable" not in rows["m_composite"]
     assert rows["m_composite"]["needs_session"] is True
@@ -331,8 +331,8 @@ def test_one_bad_pv_does_not_blank_the_others(happi_db, monkeypatch):
             if pvs[0] == "X:MMS:01.RBV":
                 raise EpicsError("not found")
             return {pvs[0]: "7.0"}
-        monkeypatch.setattr(check_hutch, "caget", selective)
-        rows = {r["name"]: r for r in check_hutch.check_hutch("mfx")["value"]}
+        monkeypatch.setattr(readiness, "caget", selective)
+        rows = {r["name"]: r for r in readiness.check_hutch("mfx")["value"]}
         assert rows["m_motor2"]["value"] == "7.0"
         assert "unreadable" in rows["m_motor"]
     finally:
@@ -342,13 +342,13 @@ def test_one_bad_pv_does_not_blank_the_others(happi_db, monkeypatch):
 def test_inventory_only_does_not_touch_channel_access(happi_db, monkeypatch):
     def forbidden(*a, **kw):
         raise AssertionError("--inventory-only must not read PVs")
-    monkeypatch.setattr(check_hutch, "caget", forbidden)
-    assert check_hutch.check_hutch("mfx", inventory_only=True)["count"] == 3
+    monkeypatch.setattr(readiness, "caget", forbidden)
+    assert readiness.check_hutch("mfx", inventory_only=True)["count"] == 3
 
 
 def test_an_unknown_beamline_names_the_likely_mistake(happi_db):
     with pytest.raises(happi.HappiError, match="UPPERCASE"):
-        check_hutch.check_hutch("nosuch", inventory_only=True)
+        readiness.check_hutch("nosuch", inventory_only=True)
 
 
 # --------------------------------------------------------------------------

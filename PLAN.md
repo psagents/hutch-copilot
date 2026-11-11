@@ -58,7 +58,7 @@ Three rules the tools enforce and that must not be worked around:
    documented value.
 
 A **readiness** question composes several backends, so it is not a tool call. Those live
-with the skill that asks them: `are-we-ready/scripts/check_{beam,hutch,daq}.py`.
+one layer above the tools: `src/hutch_copilot/readiness.py`, run as `bin/hutch-ready beam|hutch|daq`.
 
 External paths are declared once, in `bin/hutch-env`, and read back by
 `common.external_path()`. `src/hutch_copilot/` holds no absolute path outside its own checkout.
@@ -311,7 +311,7 @@ grep -rnE '"/cds|"/sdf/group' src/hutch_copilot/      # expect nothing
 grep -rn "R7.0.2-2.0" bin/ src/hutch_copilot/         # expect bin/hutch-env only
 
 # readiness, against real hardware
-are-we-ready/scripts/check_hutch.py --hutch mfx
-are-we-ready/scripts/check_beam.py  --hutch mfx
-are-we-ready/scripts/check_daq.py   --hutch mfx --experiment <exp>
+bin/hutch-ready hutch --hutch mfx
+bin/hutch-ready beam  --hutch mfx
+bin/hutch-ready daq   --hutch mfx --experiment <exp>
 ```

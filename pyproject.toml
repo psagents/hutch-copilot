@@ -42,6 +42,7 @@ hutch-skills = "hutch_copilot.tools.skills:main"
 hutch-lute = "hutch_copilot.tools.lute:main"
 hutch-log = "hutch_copilot.tools.log:main"
 hutch-normal = "hutch_copilot.normal:main"
+hutch-ready = "hutch_copilot.readiness:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -49,10 +50,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
 # Makes hutch_copilot importable without an install and without a conftest sys.path
-# hack, so the suite behaves identically installed or from a checkout. The
-# readiness scripts are on it too: they own the composite checks, so
-# test_readiness.py imports them directly rather than shelling out.
-pythonpath = ["src", "are-we-ready/scripts"]
+# hack, so the suite behaves identically installed or from a checkout.
+pythonpath = ["src"]
 addopts = "-q"
 # Set the option rather than filtering the warning: pytest-asyncio emits it during
 # plugin init, before ini filters are installed, so muting it does not work anyway.
