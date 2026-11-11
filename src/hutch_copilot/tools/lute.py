@@ -84,6 +84,7 @@ from .common import (
     parser,
     results_dir,
     grant_group,
+    resolve_daq,
     skill_root,
     xtc2_files,
 )
@@ -327,6 +328,7 @@ def run_by_hand(
     task: str | None = None, dag: str | None = None,
     partition: str = DEFAULT_PARTITION, account: str | None = None,
     reservation: str | None = None, slurm: list[str] = (), confirm: str | None = None,
+    daq: str | None = None,
 ) -> dict:
     """Submit one Task (``task``) or a whole DAG (``dag``) for one run, as the eLog would.
 
@@ -334,6 +336,11 @@ def run_by_hand(
     ``submit_launch_slurm.sh launch_slurm`` for a DAG -- run from ``work_dir``,
     because Slurm writes the job log to the submit directory. Without
     ``confirm="write"`` nothing is submitted and the command is returned.
+
+    A Task gets ``--psana1`` or ``--psana2`` from ``daq`` (resolved from the run's
+    files when unset), and the ``LUTE_VIRTUAL_ENV*`` exports that
+    ``submit_launch_slurm.sh`` makes for a DAG: without them ``submit_slurm`` on a
+    venv build raises "Could not find a valid LUTE environment".
     """
     lute_ = resolve_lute(lute, pathlib.Path(config).parent)
     if lute_["kind"] not in ("central", "install") or not lute_["checks"][0]["ok"]:
@@ -349,17 +356,30 @@ def run_by_hand(
     if reservation:
         slurm_args.append(f"--reservation={reservation}")
     common = ["-c", config, "-e", experiment, "-r", str(run)]
+    q = shlex.quote
+    venv_env = ""
     if task:
-        launcher = [lute_["submit_slurm"], "--taskname", task, *common, "--psana2", *slurm_args]
+        daq = daq or resolve_daq(experiment[:3], experiment, int(run))
+        if daq not in ("lcls1", "lcls2"):
+            raise LuteError(f"no .xtc or .xtc2 for {experiment} run {int(run)}: cannot pick "
+                            f"--psana1/--psana2 -- pass --daq lcls1|lcls2")
+        psana = "--psana2" if daq == "lcls2" else "--psana1"
+        launcher = [lute_["submit_slurm"], "--taskname", task, *common, psana, *slurm_args]
+        # What submit_launch_slurm.sh exports for a DAG; empty VIRTUAL_ENV (a meson
+        # install) must stay unset, or submit_slurm silently sources nothing.
+        venv_env = ('if [ -n "${VIRTUAL_ENV:-}" ]; then export LUTE_VIRTUAL_ENV="$VIRTUAL_ENV"; '
+                    'for _a in "$(dirname "$VIRTUAL_ENV")"/lute_env_py*/bin/activate; do '
+                    '[ -f "$_a" ] || continue; _e="$(dirname "$(dirname "$_a")")"; '
+                    'export "LUTE_VIRTUAL_ENV_PY${_e##*lute_env_py}=$_e/bin/python"; done; fi && ')
     else:
         launcher = [lute_["arp"], lute_["launch"], *common, "-W", dag, *slurm_args]
-    q = shlex.quote
-    cmd = (f"source {q(PSCONDA)} && source {q(lute_['activate'])} && "
+    cmd = (f"source {q(PSCONDA)} && source {q(lute_['activate'])} && {venv_env}"
            f"export EXPERIMENT={q(experiment)} RUN_NUM={int(run)} && "
            f"cd {q(work_dir)} && {shlex.join(launcher)}")
     ticket_ok, ticket = elog_ticket()
     res = {"command": cmd, "work_dir": work_dir, "lute": lute_["spec"],
            "lute_version": lute_["version"], "submitted": False,
+           **({"daq": daq} if task else {}),
            "kerberos": "ok" if ticket_ok else
                        f"no ticket at {ticket}: the job runs, only eLog posting fails"}
     if confirm != "write":
@@ -1679,6 +1699,8 @@ def build_parser() -> argparse.ArgumentParser:
         rp.add_argument("--config", "-c", required=True)
         if name == "run-task":
             rp.add_argument("--task", "-t", required=True, help="managed Task, e.g. BayFAIOptimizer2")
+            rp.add_argument("--daq", choices=("lcls1", "lcls2"), default=None,
+                            help="--psana1 or --psana2 for the Task; default: from the run's files")
         else:
             rp.add_argument("--dag", "-W", required=True, help="path to the .dag")
         rp.add_argument("--partition", default=DEFAULT_PARTITION)
@@ -1791,7 +1813,8 @@ def main(argv: list[str] | None = None) -> int:
                 experiment=args.experiment, run=args.run, config=args.config, lute=args.lute,
                 task=getattr(args, "task", None), dag=getattr(args, "dag", None),
                 partition=args.partition, account=args.account,
-                reservation=_reservation(args), slurm=extra, confirm=args.confirm))
+                reservation=_reservation(args), slurm=extra, confirm=args.confirm,
+                daq=getattr(args, "daq", None)))
         if args.cmd == "status":
             return out(job_status(args.job_id))
         if args.cmd == "watch":

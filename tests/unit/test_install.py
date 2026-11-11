@@ -524,7 +524,7 @@ def cfg(tmp_path):
 def test_run_task_uses_submit_slurm_from_work_dir(cfg, built_lute):
     r = lute.run_by_hand(experiment="e1", run=25, config=str(cfg), task="BayFAIOptimizer2",
                          lute=f"install:{built_lute}", reservation="lcls:onshift",
-                         slurm=["--ntasks-per-node=64"])
+                         slurm=["--ntasks-per-node=64"], daq="lcls2")
     cmd = r["command"]
     assert r["submitted"] is False
     assert f"install/bin/activate_installation" in cmd
@@ -545,8 +545,67 @@ def test_run_by_hand_submits_through_slurm_and_reads_the_job_id(cfg, built_lute,
     monkeypatch.setattr(lute, "_slurm", lambda argv, **k: seen.append(argv) or
                         "Using TCP\nSubmitted batch job 41716793\n")
     r = lute.run_by_hand(experiment="e1", run=25, config=str(cfg), task="T",
-                         lute=f"install:{built_lute}", confirm="write")
+                         lute=f"install:{built_lute}", confirm="write", daq="lcls2")
     assert r["job_id"] == "41716793" and seen[0][:2] == ["bash", "-lc"]
+
+
+def _landed(tmp_path, monkeypatch, suffix, run=25):
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path / "ds"))
+    d = tmp_path / "ds/cxi/cxi1/xtc"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"cxi1-r{run:04d}-s00-c00{suffix}").write_bytes(b"x")
+
+
+@pytest.mark.parametrize("suffix, flag", [(".xtc", "--psana1"), (".xtc2", "--psana2")])
+def test_run_task_picks_psana_from_the_runs_files(cfg, central, tmp_path, monkeypatch,
+                                                  suffix, flag):
+    """--psana2 was hard-coded: an LCLS-I Task ran in the psana2 environment."""
+    _landed(tmp_path, monkeypatch, suffix)
+    r = lute.run_by_hand(experiment="cxi1", run=25, config=str(cfg), task="SmallDataProducer")
+    assert flag in r["command"] and r["daq"] == ("lcls1" if suffix == ".xtc" else "lcls2")
+
+
+def test_run_task_refuses_to_guess_psana_without_data(cfg, central, tmp_path, monkeypatch):
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path / "ds"))
+    with pytest.raises(lute.LuteError, match="--daq lcls1"):
+        lute.run_by_hand(experiment="cxi1", run=25, config=str(cfg), task="SmallDataProducer")
+
+
+def test_run_task_exports_the_lute_venv_like_submit_launch_slurm(cfg, central):
+    """submit_slurm on a venv build needs LUTE_VIRTUAL_ENV, which only
+    submit_launch_slurm.sh exported: run-task failed with "Could not find a
+    valid LUTE environment" against the central build (cxi101933627)."""
+    r = lute.run_by_hand(experiment="e1", run=4, config=str(cfg), task="T", daq="lcls1")
+    cmd = r["command"]
+    act = cmd.index(f"source {central}/activate")
+    exp = cmd.index('export LUTE_VIRTUAL_ENV="$VIRTUAL_ENV"')
+    assert act < exp < cmd.index("submit_slurm --taskname T")
+    assert "LUTE_VIRTUAL_ENV_PY" in cmd
+
+
+def test_run_task_venv_exports_run_in_bash(cfg, central, tmp_path):
+    """The export snippet must be valid bash and set one var per lute_env_py*."""
+    import subprocess
+    r = lute.run_by_hand(experiment="e1", run=4, config=str(cfg), task="T", daq="lcls1")
+    snippet = r["command"].split(" && ", 2)[2].split("export EXPERIMENT")[0]
+    top = central.parent.parent
+    (top / "lute_env_py311/bin").mkdir(parents=True)
+    (top / "lute_env_py311/bin/activate").write_text("")
+    env = {"VIRTUAL_ENV": str(central.parent), "PATH": "/usr/bin:/bin"}
+    outp = subprocess.run(["bash", "-c", snippet + " env"], capture_output=True, text=True,
+                          env=env).stdout
+    assert f"LUTE_VIRTUAL_ENV={central.parent}" in outp
+    assert f"LUTE_VIRTUAL_ENV_PY39={central.parent}/bin/python" in outp
+    assert f"LUTE_VIRTUAL_ENV_PY311={top}/lute_env_py311/bin/python" in outp
+    unset = subprocess.run(["bash", "-c", snippet + " env"], capture_output=True, text=True,
+                           env={"PATH": "/usr/bin:/bin"}).stdout
+    assert "LUTE_VIRTUAL_ENV" not in unset
+
+
+def test_run_workflow_needs_no_daq(cfg, central, tmp_path, monkeypatch):
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path / "ds"))
+    r = lute.run_by_hand(experiment="cxi1", run=4, config=str(cfg), dag="/w/smd.dag")
+    assert "--psana" not in r["command"] and "daq" not in r
 
 
 def test_run_by_hand_refuses_an_unbuilt_lute(cfg, tmp_path):
@@ -604,3 +663,26 @@ def test_grant_group_sets_default_acls_and_strips_world_write(tmp_path):
     acl = subprocess.run(["getfacl", "-p", str(tmp_path / "ws/lute_output")],
                          capture_output=True, text=True).stdout
     assert f"default:group:{group}:rwx" in acl
+
+
+@pytest.mark.parametrize("printed, actual", [
+    ("/ws/plain.py", "/ws/plain.py"),
+    ("/ws/correlations/\\\\", "/ws/correlations/\\"),    # smalldata_tools ships a file named '\'
+    ("/ws/a\\040b", "/ws/a b"),
+    ("/ws/caf\\303\\251", "/ws/caf\u00e9"),                # UTF-8 bytes, decoded after unescaping
+])
+def test_unescape_getfacl(printed, actual):
+    assert paths._unescape_getfacl(printed) == actual
+
+
+def test_grant_group_accepts_a_file_named_backslash(tmp_path):
+    import grp
+    import os
+    import shutil
+    if not shutil.which("setfacl"):
+        pytest.skip("no setfacl on this host")
+    group = grp.getgrgid(os.getgid()).gr_name
+    (tmp_path / "ws/correlations").mkdir(parents=True)
+    (tmp_path / "ws/correlations/\\").touch()
+    res = paths.grant_group(group, rw=[tmp_path / "ws"])
+    assert res["ok"], res

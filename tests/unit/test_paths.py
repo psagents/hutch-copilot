@@ -163,3 +163,68 @@ IndexCCTBXXFEL:
 
 
 
+
+
+def _xtc_dir(tmp_path, monkeypatch, exp="e1"):
+    monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
+    d = tmp_path / "cxi" / exp / "xtc"
+    (d / "smalldata").mkdir(parents=True)
+    return d
+
+
+def test_lcls1_xtc_counts_as_landed_and_resolves_lcls1(tmp_path, monkeypatch):
+    """cxi101933627 (LCLS-I) wrote .xtc; counting .xtc2 only reported it absent."""
+    d = _xtc_dir(tmp_path, monkeypatch)
+    (d / "e1-r0073-s00-c00.xtc").write_bytes(b"x")
+    (d / "smalldata/e1-r0073-s00-c00.smd.xtc").write_bytes(b"x")   # not a data file here
+    (d / "e1-r0073-s00-c00.xtc.inprogress").write_bytes(b"x")      # still being written
+    assert [p.name for p in paths.xtc_files("cxi", "e1", 73)] == ["e1-r0073-s00-c00.xtc"]
+    assert paths.xtc2_files("cxi", "e1", 73) == []                  # unchanged: lcls2 only
+    assert paths.resolve_daq("cxi", "e1", 73) == "lcls1"
+    assert paths.resolve_daq("cxi", "e1") == "lcls1"
+
+
+def test_resolve_daq_prefers_xtc2_and_is_none_without_data(tmp_path, monkeypatch):
+    d = _xtc_dir(tmp_path, monkeypatch)
+    assert paths.resolve_daq("cxi", "e1") is None and paths.resolve_daq("cxi", "e1", 1) is None
+    (d / "e1-r0001-s000-c000.xtc").write_bytes(b"x")
+    (d / "e1-r0002-s000-c000.xtc2").write_bytes(b"x")
+    assert paths.resolve_daq("cxi", "e1") == "lcls2"
+    assert paths.resolve_daq("cxi", "e1", 1) == "lcls1"
+    assert paths.resolve_daq("cxi", "nope") is None
+
+
+def test_hutch_data_daq_and_xtc_report_lcls1(tmp_path, monkeypatch):
+    from hutch_copilot.tools import data
+    d = _xtc_dir(tmp_path, monkeypatch)
+    (d / "e1-r0073-s00-c00.xtc").write_bytes(b"x" * 10)
+    rec = data.daq("cxi", "e1")
+    assert rec["value"] == "lcls1" and rec["source"].startswith("resolved:")
+    v = data.xtc("cxi", "e1", 73)["value"]
+    assert v["present"] and v["count"] == 1 and v["daq"] == "lcls1"
+    assert data.xtc2 is data.xtc                         # old verb, same answer
+    none = data.daq("cxi", "e2")
+    assert none["value"] is None and "never assume" in none["note"]
+
+
+def test_detectors_uses_psana1_for_lcls1(tmp_path, monkeypatch):
+    import subprocess
+    from hutch_copilot.tools import data
+    d = _xtc_dir(tmp_path, monkeypatch, exp="cxi101")
+    (d / "cxi101-r0094-s00-c00.xtc").write_bytes(b"x")
+    seen = []
+
+    def fake(argv, **k):
+        seen.append(argv[-1])
+        return subprocess.CompletedProcess(argv, 0, b'HUTCHLIB_JSON:["epix100_1", "evr1"]\n', b"")
+    monkeypatch.setattr(data.subprocess, "run", fake)
+    rec = data.detectors("cxi101", 94)
+    assert rec["value"] == ["epix100_1", "evr1"] and rec["daq"] == "lcls1"
+    assert "conda1" in seen[0] and "DetNames" in seen[0] and "psana1" in rec["source"]
+
+
+def test_detectors_refuses_without_data(tmp_path, monkeypatch):
+    from hutch_copilot.tools import data
+    _xtc_dir(tmp_path, monkeypatch, exp="cxi102")
+    with pytest.raises(data.DataError, match="--daq lcls1"):
+        data.detectors("cxi102", 1)

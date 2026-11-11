@@ -127,7 +127,7 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-lightpath` | the beam path to a hutch, and what blocks it |
 | `hutch-py` | the hutch-python device namespace — via the CLI (`run`), or a live session (`exec`, deprecated) — and the safety gate in front of both |
 | `hutch-daq` | the DAQ — state (via its control port, no session needed), logs, config. Read-only |
-| `hutch-data` | what landed on disk — psana2 detectors, XTC2, PDB cells, `/cds` files |
+| `hutch-data` | what landed on disk — `daq` (LCLS-I or LCLS-II), psana1/psana2 detectors, XTC/XTC2, PDB cells, `/cds` files |
 | `hutch-skills` | which skills are installed, and where |
 | `hutch-lute` | LUTE: jobs (`run-task`, `run-workflow`), pedestals, config rendering, workspace setup. Slurm calls go over `ssh psana` when the local cluster is not S3DF |
 | `hutch-log` | the beamtime log — events, for humans |
@@ -195,6 +195,9 @@ Any interpreter with pytest will do — the package is stdlib-only — but the b
 
 The tools run directly on `{hutch}-daq`. Outstanding:
 
+- **LCLS-I** — `hutch-data daq|xtc|detectors` and `hutch-lute run-task` handle it
+  (checked on cxi101933627). `hutch-lute peds` still checks for `.xtc2` only and will
+  refuse an LCLS-I DARK run.
 - **`hutch-lute peds`** is the last `psdev` caller and will fail until it either runs
   `makepeds` locally or hops to a host that can.
 - **`hutch-daq logs` retention** — verified live at MFX on 2026-10-12 (88 sessions in one

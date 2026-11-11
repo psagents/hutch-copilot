@@ -188,6 +188,49 @@ def xtc2_files(hutch: str, experiment: str, run: int) -> list[pathlib.Path]:
     return sorted(p for p in d.glob(f"*r{int(run):04d}*") if p.suffix == ".xtc2")
 
 
+#: The DAQ generation each XTC suffix means. Both land in ``xtc/``.
+DAQ_BY_SUFFIX = {".xtc2": "lcls2", ".xtc": "lcls1"}
+
+#: psconda script per DAQ generation, by external_path name.
+PSCONDA_BY_DAQ = {"lcls2": "PSCONDA", "lcls1": "PSCONDA1"}
+
+
+def xtc_files(hutch: str, experiment: str, run: int) -> list[pathlib.Path]:
+    """XTC files for one run, LCLS-I (``.xtc``) or LCLS-II (``.xtc2``).
+
+    ``xtc2_files`` counts LCLS-II only, so an LCLS-I run that has landed reads as
+    absent there. Use this for "has the run landed" whenever ``daq`` is not known
+    to be ``lcls2``. Subdirectories (``smalldata/*.smd.xtc``) are not data files.
+    """
+    d = xtc2_dir(hutch, experiment)
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.glob(f"*r{int(run):04d}*") if p.suffix in DAQ_BY_SUFFIX)
+
+
+def resolve_daq(hutch: str, experiment: str, run: int | None = None) -> str | None:
+    """``lcls2`` or ``lcls1`` from the files the DAQ wrote, or None if none yet.
+
+    One run's files when ``run`` is given, else the first data file in ``xtc/``.
+    Any ``.xtc2`` wins over ``.xtc``. None is "no data yet": ask, never assume.
+    """
+    if run is not None:
+        found = {DAQ_BY_SUFFIX[p.suffix] for p in xtc_files(hutch, experiment, run)}
+        return "lcls2" if "lcls2" in found else ("lcls1" if found else None)
+    d = xtc2_dir(hutch, experiment)
+    if not d.is_dir():
+        return None
+    seen = None
+    with os.scandir(d) as it:
+        for entry in it:
+            daq = DAQ_BY_SUFFIX.get(pathlib.Path(entry.name).suffix)
+            if daq and entry.is_file():
+                if daq == "lcls2":
+                    return daq
+                seen = daq
+    return seen
+
+
 def skill_root() -> pathlib.Path:
     """Install directory of this skill, resolved from this file's location.
 
@@ -209,6 +252,21 @@ def _acl(argv: list[str], remote: bool) -> subprocess.CompletedProcess:
     if remote:
         argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "psana", shlex.join(argv)]
     return subprocess.run(argv, capture_output=True)
+
+
+def _unescape_getfacl(name: str) -> str:
+    r"""A ``# file:`` path as the filesystem has it.
+
+    getfacl escapes a backslash as ``\\`` and other bytes as ``\ooo`` octal, so a
+    file literally named ``\`` (smalldata_tools ships one) prints as ``\\`` and never
+    matched its own path -- the grant reported it failed and ``all`` refused. The
+    escapes are bytes, so a multi-byte name is decoded only after all of them are
+    undone; surrogateescape keeps an undecodable name equal to ``os.fsdecode``'s.
+    """
+    raw = os.fsencode(name)
+    out = re.sub(rb"\\(\\|[0-7]{3})",
+                 lambda m: b"\\" if m.group(1) == b"\\" else bytes([int(m.group(1), 8)]), raw)
+    return os.fsdecode(out)
 
 
 def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Path] = ()) -> dict:
@@ -250,6 +308,6 @@ def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Pat
             for block in acls.split("\n\n"):
                 name = re.search(r"^# file: (.+)$", block, re.M)
                 if name and re.search(rf"^group:{re.escape(group)}:{want}", block, re.M):
-                    granted.add(name.group(1))
+                    granted.add(_unescape_getfacl(name.group(1)))
             failed += [p for p in owned if p not in granted]
     return {"group": group, "ok": not failed, "failed": failed, "skipped_not_owned": skipped}

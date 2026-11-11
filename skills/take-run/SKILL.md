@@ -116,7 +116,7 @@ Record the time the run command returned — `watch` needs it next.
 ## 4. Verify and watch — mandatory, do not skip
 
 ```bash
-bin/hutch-data xtc2 --hutch "$H" --experiment "$E" --run {run}
+bin/hutch-data xtc --hutch "$H" --experiment "$E" --run {run}
 bin/hutch-lute watch --user "${H}opr" --since "$RUN_END_ISO" --timeout 90
 bin/hutch-lute status "$JOB_ID"
 ```
