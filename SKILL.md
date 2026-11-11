@@ -55,6 +55,7 @@ a Cogito container — never as a local `bin/hutch-*`:
 | `daq_state` | the DAQ's own state, off its control port |
 | `normal_diff` | the current state against the operator's normal snapshot |
 | `data_cat` | a file under `/cds` |
+| `hutch_py_run` | python in a fresh hutch-python load (`take-run`); a write asks the operator itself |
 
 Leave `hutch` out: it defaults to the server's own. Locally, run only what works from
 anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
@@ -62,8 +63,8 @@ anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
 
 If the server is not configured or a tool errors, that is rule 3: say which, and stop
 there. Never rebuild an answer from other reads, or from the tools' source — a verdict
-you assembled yourself is a guess with the tool's name on it. `hutch-py` has no MCP tool
-yet: writes still need a session on the hutch machine.
+you assembled yourself is a guess with the tool's name on it. A write goes through
+`hutch_py_run`, which asks the operator directly: you never approve one yourself.
 
 Three rules that the tools enforce and you must not work around:
 

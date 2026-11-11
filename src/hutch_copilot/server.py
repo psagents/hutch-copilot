@@ -2,7 +2,8 @@
 
 stdio by default (a client over ssh); streamable HTTP on the Unix socket ``MCP_UDS`` when
 ``MCP_TRANSPORT=streamable-http``, for the SAGE tunnel, as epics-mcp does. Every tool runs an
-existing ``bin/hutch-*`` with a fixed argv and returns its JSON; none of them writes.
+existing ``bin/hutch-*`` with a fixed argv and returns its JSON. Only ``hutch_py_run`` can write,
+and only once the operator has typed the action class into an MCP elicitation form.
 """
 
 from __future__ import annotations
@@ -14,9 +15,12 @@ import pathlib
 import subprocess
 import sys
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import BaseModel
+
+from .tools import session
 
 BIN = pathlib.Path(__file__).resolve().parents[2] / "bin"
 #: lightpath settles for ~40 s; anything far past that is hung.
@@ -25,9 +29,10 @@ LOG = logging.getLogger("hutch-mcp")
 
 mcp = FastMCP(
     "hutch-mcp",
-    instructions="Read-only hutch tools (happi, Channel Access, archiver, lightpath, DAQ state, "
-                 "and the three readiness checks over them) that only the hutch machine can reach. "
-                 "Each returns the hutch-copilot tool's JSON. `hutch` defaults to this server's own.",
+    instructions="Hutch tools (happi, Channel Access, archiver, lightpath, DAQ state, the three "
+                 "readiness checks over them, and hutch_py_run) that only the hutch machine can "
+                 "reach. Each returns the hutch-copilot tool's JSON. `hutch` defaults to this "
+                 "server's own. hutch_py_run asks the operator directly before any write.",
     # Only agentgateway's certificate reaches the socket (ghostunnel), and it sends its own Host.
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
@@ -43,17 +48,18 @@ def _user() -> str:
     return request.headers.get("x-authenticated-user", "?")
 
 
-def _run(binary: str, *args: str | None) -> str:
+def _run(binary: str, *args: str | None, timeout: int = T_TOOL) -> str:
     argv = [a for a in args if a is not None]
     for a in argv:
         if a.startswith("-") and a not in _FLAGS:
             raise ToolError(f"{a!r} looks like a flag, not a value")
     LOG.info("user=%s tool=%s argv=%s", _user(), binary, argv)
     try:
-        p = subprocess.run([sys.executable, str(BIN / binary), *argv],
-                           capture_output=True, text=True, timeout=T_TOOL)
+        # stdin is the MCP pipe: a child must never inherit it.
+        p = subprocess.run([sys.executable, str(BIN / binary), *argv], stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise ToolError(f"{binary} timed out after {T_TOOL} s") from None
+        raise ToolError(f"{binary} timed out after {timeout} s") from None
     text = p.stdout.strip() or p.stderr.strip()
     if p.returncode:
         raise ToolError(f"rc {p.returncode}\n{text}")
@@ -61,7 +67,8 @@ def _run(binary: str, *args: str | None) -> str:
 
 
 #: The only dash-led argv entries a tool may send; any argument value starting with "-" is refused.
-_FLAGS = {"--hutch", "--suffix", "--from", "--to", "--experiment", "--taking-data", "--settle-s"}
+_FLAGS = {"--hutch", "--suffix", "--from", "--to", "--experiment", "--taking-data", "--settle-s",
+          "--confirm", "--timeout"}
 
 
 def _opt(flag: str, value: str | None) -> tuple[str | None, str | None]:
@@ -152,6 +159,45 @@ def ready_hutch(hutch: str | None = None) -> str:
 def ready_daq(experiment: str | None = None, hutch: str | None = None) -> str:
     """Readiness: can the DAQ record? Its state plus a `can_record` verdict (null means unknown)."""
     return _run("hutch-ready", "daq", "--hutch", _hutch(hutch), *_opt("--experiment", experiment))
+
+
+class _Approval(BaseModel):
+    confirm: str
+
+
+@mcp.tool()
+async def hutch_py_run(code: str, ctx: Context, timeout_s: int = 300,
+                       hutch: str | None = None) -> str:
+    """Run python in a fresh hutch-python load on the hutch (hutch-py run).
+
+    Read-only snippets run at once. Anything else is shown to the operator, who must type its
+    action class (write, beam-critical) to approve: you cannot approve it, only show it first.
+    """
+    h = _hutch(hutch)
+    verdict = session.classify(code)
+    confirm = None
+    if verdict["class"] != session.READ_ONLY:
+        # Over HTTP the server runs as whoever started it, so a write would run as them.
+        if not _user().startswith("stdio:"):
+            raise ToolError("writes are refused over HTTP until a per-user policy exists; "
+                            "use a stdio session over your own ssh")
+        params = ctx.session.client_params
+        if not (params and params.capabilities.elicitation):
+            raise ToolError("this client cannot ask the operator (no MCP elicitation); nothing ran")
+        cls = verdict["class"]
+        answer = await ctx.elicit(
+            f"hutch-py on {h}, as {_user()}: a {cls} operation.\n"
+            f"why: {'; '.join(verdict['reasons'])}\n\n{code}\n\n"
+            f"Type {cls!r} to run it, or decline.", schema=_Approval)
+        if answer.action != "accept":
+            raise ToolError(f"the operator did not approve ({answer.action}); nothing ran")
+        confirm = answer.data.confirm.strip().lower()
+        if confirm not in session.SEVERITY:
+            raise ToolError(f"approval {confirm!r} is not an action class; nothing ran")
+    LOG.info("user=%s hutch_py_run class=%s confirm=%s", _user(), verdict["class"], confirm)
+    # hutch-py's own gate still decides: a confirmation weaker than the class is refused (rc 5).
+    return _run("hutch-py", "--hutch", h, "--timeout", str(timeout_s),
+                *_opt("--confirm", confirm), "run", code, timeout=timeout_s + 60)
 
 
 @mcp.tool()

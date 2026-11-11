@@ -104,8 +104,10 @@ freshly linked advisor is invisible until then.
 A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container
 mounts neither `/cds` nor the operator homes) reaches the hutch-only tools through
 `src/hutch_copilot/server.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
-on a Unix socket, the caller from `X-Authenticated-User`), with thirteen read-only tools, each a
-fixed argv over an existing `bin/hutch-*`.
+on a Unix socket, the caller from `X-Authenticated-User`), with fourteen tools, each a
+fixed argv over an existing `bin/hutch-*`. Only `hutch_py_run` can write: the operator must
+type the action class into an MCP elicitation form, the model cannot, and over HTTP it
+refuses writes until a per-user policy exists.
 
 It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to
 Docker Hub. The image holds only Python and the MCP SDK; `bin/hutch-mcp` binds in what the

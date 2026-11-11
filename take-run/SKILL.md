@@ -24,9 +24,6 @@ bin/hutch-state audit --hutch "$H" --experiment "$E"    # everything known, with
 
 and `daq_state()` on the `hutch-<hutch>` MCP server.
 
-**The run itself is a write, and `hutch-py` has no MCP tool yet: it needs Claude running
-directly on the hutch machine** — not off it, and not in a Cogito container there, which
-cannot see `/cds`. Anywhere else, stop here and say so; do not look for another way in.
 
 `MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
 the age. A detector name recorded last shift will tell you it is old rather than looking
@@ -77,21 +74,23 @@ sending; do not translate this table.
 
 ## 3. Confirm — this is a write
 
-Run the command **without `--confirm`** first: it prints the classification and refuses
-(rc 5) without transmitting anything. Show the operator the command, the class and its
-reasons, the duration and the sample, and wait for explicit approval. Then re-send with
-the class you were actually granted:
+Tell the operator the command, the duration and the sample first, then send it:
 
-```bash
-bin/hutch-py --hutch "$H" --timeout 300 --confirm write run "<run command>"
+```
+hutch_py_run(code="<run command>")
 ```
 
-then `daq_state()` for `run_number` / `last_run_number`.
+**You cannot approve it.** The server classifies the snippet and, for a write, shows the
+operator a form with the class, its reasons and the code; it runs only if they type the
+class (`write`, `beam-critical`) and accept. A decline, a cancel, or a client that cannot
+show the form is an error and nothing ran — report it, never retry to wear them down.
+Then `daq_state()` for `run_number` / `last_run_number`.
 
 `run` launches a fresh device load and needs no live session. It pays that load on
 every call (tens of seconds), so batch a multi-step sequence into one snippet rather
-than issuing several. Exit code **1** means the snippet itself raised — the traceback
-is in `error`; **4** means the launcher or hutch could not be reached at all.
+than issuing several. `rc 1` means the snippet itself raised — the traceback is in
+`error`; `rc 4` means the launcher or hutch could not be reached; `rc 5` means the
+class typed was weaker than the snippet's.
 
 The run number comes from the DAQ, not from `get_run()`. `get_run()` is an HTTP GET
 against the elog (`mfx/macros.py:619-622`) despite its docstring claiming otherwise, so
@@ -99,7 +98,7 @@ it lags the DAQ and needs off-hutch HTTPS. `daq_state` already reports
 `run_number` and `last_run_number` from `DaqControl.getStatus()`.
 
 **`DARK` is two writes, and the second is gated.** `takepeds()` records through
-`run`; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
+`hutch_py_run`; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
 operator separately from the run itself:
 
 ```bash

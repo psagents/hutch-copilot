@@ -21,11 +21,11 @@ def _fake_run(monkeypatch, rc=0, stdout='{"value": 1}'):
     return seen
 
 
-def test_exposes_only_the_read_only_hutch_tools():
+def test_exposes_exactly_these_tools():
     names = {t.name for t in asyncio.run(hutch_mcp.mcp.list_tools())}
     assert names == {"happi_list", "happi_device", "happi_pv", "epics_caget", "epics_history",
                      "epics_moved", "lightpath_path", "daq_state", "normal_diff", "data_cat",
-                     "ready_beam", "ready_hutch", "ready_daq"}
+                     "ready_beam", "ready_hutch", "ready_daq", "hutch_py_run"}
 
 
 def test_schemas_come_from_the_signatures():
@@ -78,6 +78,15 @@ def test_no_hutch_anywhere_is_refused(monkeypatch):
     assert seen == []
 
 
+def test_no_tool_inherits_the_mcp_pipe_as_stdin(monkeypatch):
+    """stdin is the protocol stream; inherited, it hung hutch-py run past its 300 s timeout."""
+    kws = []
+    monkeypatch.setattr(hutch_mcp.subprocess, "run", lambda argv, **kw: kws.append(kw) or
+                        subprocess.CompletedProcess(argv, 0, "{}", ""))
+    hutch_mcp.daq_state("mfx")
+    assert kws[0]["stdin"] is subprocess.DEVNULL
+
+
 def test_a_failing_tool_raises_with_its_rc(monkeypatch):
     _fake_run(monkeypatch, rc=4, stdout='{"error": "DaqError"}')
     with pytest.raises(ToolError, match="^rc 4"):
@@ -94,3 +103,65 @@ def test_a_value_that_looks_like_a_flag_is_refused(monkeypatch):
 def test_the_caller_outside_a_request_is_the_stdio_account(monkeypatch):
     monkeypatch.setenv("LOGNAME", "someone")
     assert hutch_mcp._user() == "stdio:someone"
+
+
+class _Ctx:
+    """A client: ``elicitation`` is whether it advertised the capability; ``answer`` its reply."""
+
+    def __init__(self, answer=None, typed="write", elicitation=True):
+        caps = type("Caps", (), {"elicitation": object() if elicitation else None})()
+        self.session = type("S", (), {"client_params": type("P", (), {"capabilities": caps})()})()
+        self.asked = []
+        self._answer, self._typed = answer, typed
+
+    async def elicit(self, message, schema):
+        self.asked.append(message)
+        return type("R", (), {"action": self._answer, "data": schema(confirm=self._typed)})()
+
+
+def _py_run(code, ctx, monkeypatch):
+    seen = _fake_run(monkeypatch)
+    return seen, asyncio.run(hutch_mcp.hutch_py_run(code, ctx, hutch="mfx"))
+
+
+def test_a_read_only_snippet_runs_without_asking(monkeypatch):
+    ctx = _Ctx()
+    seen, _ = _py_run("print(mfx_dg1.position)", ctx, monkeypatch)
+    assert ctx.asked == []
+    assert seen == [["--hutch", "mfx", "--timeout", "300", "run", "print(mfx_dg1.position)"]]
+
+
+def test_a_write_runs_only_with_the_class_the_operator_typed(monkeypatch):
+    ctx = _Ctx("accept", typed=" Write ")
+    seen, _ = _py_run("mfx_dg1.mv(3)", ctx, monkeypatch)
+    assert "mfx_dg1.mv(3)" in ctx.asked[0] and "'write'" in ctx.asked[0]
+    assert seen == [["--hutch", "mfx", "--timeout", "300", "--confirm", "write", "run",
+                     "mfx_dg1.mv(3)"]]
+
+
+@pytest.mark.parametrize("ctx,why", [
+    (_Ctx("decline"), "did not approve"),
+    (_Ctx("cancel"), "did not approve"),
+    (_Ctx("accept", typed="yes"), "not an action class"),
+    (_Ctx("accept", elicitation=False), "cannot ask the operator"),
+])
+def test_a_write_without_a_typed_approval_never_runs(monkeypatch, ctx, why):
+    seen = _fake_run(monkeypatch)
+    with pytest.raises(ToolError, match=why):
+        asyncio.run(hutch_mcp.hutch_py_run("mfx_dg1.mv(3)", ctx, hutch="mfx"))
+    assert seen == []
+
+
+def test_a_write_over_http_is_refused_before_asking(monkeypatch):
+    seen = _fake_run(monkeypatch)
+    monkeypatch.setattr(hutch_mcp, "_user", lambda: "ytl@slac.stanford.edu")
+    ctx = _Ctx("accept")
+    with pytest.raises(ToolError, match="over HTTP"):
+        asyncio.run(hutch_mcp.hutch_py_run("mfx_dg1.mv(3)", ctx, hutch="mfx"))
+    assert seen == [] and ctx.asked == []
+
+
+def test_the_model_cannot_pass_a_confirmation():
+    """confirm comes only from the operator's form; it is not in the tool's schema."""
+    tools = {t.name: t for t in asyncio.run(hutch_mcp.mcp.list_tools())}
+    assert set(tools["hutch_py_run"].inputSchema["properties"]) == {"code", "timeout_s", "hutch"}

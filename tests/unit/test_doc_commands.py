@@ -142,7 +142,7 @@ def test_documented_invocation_matches_the_cli(source, suffix, argv):
     )
 
 
-MCP_NAME = re.compile(r"\b(?:happi|epics|lightpath|daq|normal|data|ready)_[a-z_]+")
+MCP_NAME = re.compile(r"\b(?:happi|epics|lightpath|daq|normal|data|ready|hutch_py)_[a-z_]+")
 
 
 def test_every_mcp_tool_a_skill_names_exists():
@@ -150,7 +150,7 @@ def test_every_mcp_tool_a_skill_names_exists():
     import ast
 
     tree = ast.parse((SKILL / "src" / "hutch_copilot" / "server.py").read_text())
-    served = {f.name for f in tree.body if isinstance(f, ast.FunctionDef)
+    served = {f.name for f in tree.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
               and any(ast.unparse(d) == "mcp.tool()" for d in f.decorator_list)}
     named = {(md.relative_to(SKILL).as_posix(), n) for md in SKILL.rglob("SKILL.md")
              if ".git" not in md.parts for n in MCP_NAME.findall(md.read_text())}
