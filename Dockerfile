@@ -2,7 +2,8 @@
 # Rocky 9, not Debian: the /cds caget and pcds envs are rhel9 builds (Debian lacks their libncurses).
 FROM rockylinux/rockylinux:9
 
-RUN dnf -y install python3.12 python3.12-pip && dnf clean all
+# which and python3-ldap: the hutch's own startup scripts (EpicsHostArch, netconfig) call them.
+RUN dnf -y install python3.12 python3.12-pip which python3-ldap && dnf clean all
 
 COPY . /opt/hutch-copilot
 # Editable, so the server finds bin/hutch-* beside src/ in the checkout rather than in site-packages.
