@@ -104,7 +104,7 @@ freshly linked advisor is invisible until then.
 A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container
 mounts neither `/cds` nor the operator homes) reaches the hutch-only tools through
 `src/hutch_copilot/server.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
-on a Unix socket, the caller from `X-Authenticated-User`), with ten read-only tools, each a
+on a Unix socket, the caller from `X-Authenticated-User`), with thirteen read-only tools, each a
 fixed argv over an existing `bin/hutch-*`.
 
 It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to

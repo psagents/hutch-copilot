@@ -39,16 +39,31 @@ Run `--help` for subcommands and flags. They work from a bare checkout with no i
 step. `pip install -e .` is optional and only adds the same commands to PATH — never
 require it.
 
-**Off the hutch, the hutch-only tools are MCP tools.** happi, Channel Access, the archiver,
-lightpath and the DAQ control port exist only on the hutch machine. A session anywhere else
-(an S3DF node, a Cogito agent container) reaches them through the `hutch-<hutch>` MCP server,
-which runs the same `bin/hutch-*` on the hutch and returns the same JSON:
-`happi_list`, `happi_device`, `happi_pv`, `epics_caget`, `epics_history`, `epics_moved`,
-`lightpath_path`, `daq_state`, `normal_diff`, `data_cat`. Everything else (`hutch-state`,
-`hutch-daq logs`/`config`, `hutch-data xtc2`, `hutch-lute`, `hutch-log`, `hutch-skills`) runs
-locally as usual. If a local hutch-only tool fails rc 4 for a missing `/cds` or `caget`, call
-its MCP tool instead; if the MCP tool is not there or errors, that is rule 3 — say so, never
-substitute a value. `hutch-py` has no MCP tool yet: writes still need the hutch machine.
+**What only the hutch can read goes through MCP — always, wherever this session runs.**
+happi, Channel Access, the archiver, lightpath, the DAQ control port, and the readiness
+checks over them exist only on the hutch machine. Call them on the `hutch-<hutch>` MCP
+server (`mcp__hutch-<hutch>__<tool>`), on the hutch itself as much as on an S3DF node or in
+a Cogito container — never as a local `bin/hutch-*`:
+
+| MCP tool | Answers |
+|---|---|
+| `ready_beam`, `ready_hutch`, `ready_daq` | the three readiness checks, verdict included (`are-we-ready`) |
+| `happi_list`, `happi_device`, `happi_pv` | the device database |
+| `epics_caget` | live PV values (a list: one call for many PVs) |
+| `epics_history`, `epics_moved` | the archiver |
+| `lightpath_path` | the beam path and its blockers |
+| `daq_state` | the DAQ's own state, off its control port |
+| `normal_diff` | the current state against the operator's normal snapshot |
+| `data_cat` | a file under `/cds` |
+
+Leave `hutch` out: it defaults to the server's own. Locally, run only what works from
+anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
+`hutch-daq logs`/`config`, `hutch-data xtc2`/`detectors`, `hutch-normal show`.
+
+If the server is not configured or a tool errors, that is rule 3: say which, and stop
+there. Never rebuild an answer from other reads, or from the tools' source — a verdict
+you assembled yourself is a guess with the tool's name on it. `hutch-py` has no MCP tool
+yet: writes still need a session on the hutch machine.
 
 Three rules that the tools enforce and you must not work around:
 
@@ -65,23 +80,22 @@ Three rules that the tools enforce and you must not work around:
 `python -u` and never through `tail`, and anything over a minute runs in the background.
 An unbounded probe reads every jungfrau/epix stream just to count codes.
 
-Resolve, don't recall: device lists and PV prefixes come from `hutch-happi`, detector
-aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq`. This skill
+Resolve, don't recall: device lists and PV prefixes come from happi (`happi_list`,
+`happi_pv`), detector aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq config`. This skill
 deliberately ships no tables of them.
 
 **"Did this move overnight?" is not a `caget` question.** `caget` reads now. For what
 changed between two times, ask the archiver — and ask it for `.MSTA`, not `.RBV`:
 
-```bash
-bin/hutch-epics moved MFX:DG1:PIC:01 --from 2026-10-02T18:00
+```
+epics_moved(pv="MFX:DG1:PIC:01", start="2026-10-02T18:00")
 ```
 
 `.RBV` is archived with a deadband, so a move smaller than it leaves no sample and reads
 as "did not move"; `moved` reads `.MSTA` instead, which is archived on change, and
 discards IOC reconnects that would otherwise look like motion. `moved: null` means no
-usable sample — unknown, never a confident no. Use `history <pv>` for the raw series.
-The archiver is on the hutch network only; off-hutch both fail rc=4 rather than
-returning an empty series.
+usable sample — unknown, never a confident no. Use `epics_history` for the raw series.
+An unreachable archiver is an error, never an empty series.
 
 Two rules about the experiment state file, which every sub-skill reads and writes:
 

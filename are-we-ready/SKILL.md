@@ -11,19 +11,23 @@ description: >
 
 Read-only readiness. You move nothing.
 
-Run all three, then report one verdict:
+Make exactly these three calls on the `hutch-<hutch>` MCP server, in parallel, then report
+one verdict:
 
-```bash
-bin/hutch-ready beam  --hutch "$H"
-bin/hutch-ready hutch --hutch "$H"
-bin/hutch-ready daq   --hutch "$H" --experiment "$E"
+```
+ready_beam()
+ready_hutch()
+ready_daq(experiment="$E")
 ```
 
-Run all three even when the question names only one — "beam is fine" is not readiness
-if the DAQ is unallocated. A failure in one does not skip the others.
+Nothing else: no local `bin/hutch-*`, no raw `caget`s, no reading the tools' source. The
+verdict is in their JSON. Call all three even when the question names only one — "beam is
+fine" is not readiness if the DAQ is unallocated. One erroring does not skip the others: it
+is that check's answer (rule 3), and the report says so. If the server itself is missing,
+stop and say so; there is nothing to fall back on.
 
-None needs a live hutch-python session: `daq` reads the DAQ's control port, the other two
-Channel Access.
+None needs a live hutch-python session: `ready_daq` reads the DAQ's control port, the other
+two Channel Access.
 
 Four things the JSON does not say on its face:
 
@@ -31,22 +35,33 @@ Four things the JSON does not say on its face:
   is blocked by consequence, so list length is not severity.
 - **Unknown is not OUT.** `unreadable`, `needs_session` and `can_record: null` mean the
   value was not read. Never report one as a confident no, and say which.
-- **`settled: false` means undetermined, not a fault.** Re-run with a longer
-  `--settle-s` before reporting anything — passing an unsettled read on as a fault
-  looks machine-wide.
+- **`settled: false` means undetermined, not a fault.** Call `ready_beam(settle_s=30)`
+  before reporting anything — passing an unsettled read on as a fault looks machine-wide.
 - **`experiment_mismatch` outranks a green DAQ.** It means the DAQ has a different
   experiment open than the one the operator named, and it deliberately does not change
   `can_record`. So this is the one case where every signal reads ready and the data still
   lands in the wrong experiment — usually a session left over from the previous shift.
   Report it with the impediment, never as a footnote.
 
-Anything else unexpected: investigate with the tools before reporting it, and say what
-you checked. For a `needs_session` device, read it in-session rather than guessing a PV
-suffix.
+Anything else unexpected: investigate with the MCP tools before reporting it, and say what
+you checked. For a `needs_session` device, say it was not read; never guess a PV suffix.
 
-Report by consequence — impediment first, then blockers, then what is unknown, then
-the DAQ. Name the one thing to act on. This is a point-in-time snapshot; cross-check
-with the operator before anything moves.
+Report by consequence, in this shape and this order:
+
+```
+**Ready: yes | no | unknown** — $H, $E, <retrieved_at>
+Act on:   <impediment, or the DAQ fault, or "nothing">
+Beam:     <impediment> at z=<z>; <n> blocked downstream by consequence | clear | unsettled
+Hutch:    <n> devices: <n> read, <n> on the lightpath, <n> unknown (<names>)
+DAQ:      <state>, can_record <true|false|unknown>, config <alias>, experiment <exp>
+Unknown:  <every value not read, and why — or "none">
+```
+
+`no` when any check is a confident no: a settled blocker, `can_record: false`, or an
+`experiment_mismatch` (which goes on the `Act on` line). `yes` only when beam is clear and
+`can_record: true`. Anything else — an error, unsettled, `can_record: null` — is `unknown`,
+never `yes`. This is a point-in-time snapshot; cross-check with the operator before
+anything moves.
 
 **Write nothing from an unsettled or unknown result.** If `settled` was false or
 `can_record` was null there is no resolved value, and recording one launders a non-answer

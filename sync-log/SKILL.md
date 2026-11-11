@@ -79,7 +79,7 @@ Anything *resolved* during the turn, with provenance that is not optional:
 
 ```bash
 bin/hutch-state set last_run_number 43 --hutch $H --experiment $E \
-    --source "hutch-daq state --hutch mfx" --kind resolved
+    --source "daq_state on hutch-mfx" --kind resolved
 ```
 
 `--kind` follows the rule in the parent `SKILL.md` without exception:

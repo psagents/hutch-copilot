@@ -61,7 +61,7 @@ def _run(binary: str, *args: str | None) -> str:
 
 
 #: The only dash-led argv entries a tool may send; any argument value starting with "-" is refused.
-_FLAGS = {"--hutch", "--suffix", "--from", "--to", "--experiment", "--taking-data"}
+_FLAGS = {"--hutch", "--suffix", "--from", "--to", "--experiment", "--taking-data", "--settle-s"}
 
 
 def _opt(flag: str, value: str | None) -> tuple[str | None, str | None]:
@@ -132,9 +132,14 @@ def normal_diff(experiment: str, taking_data: bool = False, hutch: str | None = 
 
 
 @mcp.tool()
-def ready_beam(hutch: str | None = None) -> str:
-    """Readiness: is beam reaching the hutch, and what blocks it? `impediment` is the one to act on."""
-    return _run("hutch-ready", "beam", "--hutch", _hutch(hutch))
+def ready_beam(settle_s: float | None = None, hutch: str | None = None) -> str:
+    """Readiness: is beam reaching the hutch, and what blocks it? `impediment` is the one to act on.
+
+    `settled: false` means Channel Access had not connected yet: call again with a longer
+    settle_s (default 10 s) before reporting anything as blocked.
+    """
+    return _run("hutch-ready", "beam", "--hutch", _hutch(hutch),
+                *_opt("--settle-s", None if settle_s is None else str(settle_s)))
 
 
 @mcp.tool()

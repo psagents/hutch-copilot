@@ -42,7 +42,8 @@ def test_argv_follows_each_cli(monkeypatch):
     hutch_mcp.epics_caget(["A:B", "C:D"])
     hutch_mcp.normal_diff("mfx1", taking_data=True, hutch="mfx")
     hutch_mcp.normal_diff("mfx1", hutch="mfx")
-    hutch_mcp.ready_beam("mfx")
+    hutch_mcp.ready_beam(hutch="mfx")
+    hutch_mcp.ready_beam(30, hutch="mfx")
     hutch_mcp.ready_hutch("mfx")
     hutch_mcp.ready_daq("mfx1", hutch="mfx")
     hutch_mcp.ready_daq(hutch="mfx")
@@ -54,6 +55,7 @@ def test_argv_follows_each_cli(monkeypatch):
         ["diff", "--hutch", "mfx", "--experiment", "mfx1", "--taking-data"],
         ["diff", "--hutch", "mfx", "--experiment", "mfx1"],
         ["beam", "--hutch", "mfx"],
+        ["beam", "--hutch", "mfx", "--settle-s", "30"],
         ["hutch", "--hutch", "mfx"],
         ["daq", "--hutch", "mfx", "--experiment", "mfx1"],
         ["daq", "--hutch", "mfx"],

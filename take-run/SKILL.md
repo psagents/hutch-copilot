@@ -20,8 +20,13 @@ This file owns the gate, the confirmation, and the verdict on what came back.
 
 ```bash
 bin/hutch-state audit --hutch "$H" --experiment "$E"    # everything known, with age
-bin/hutch-daq --hutch "$H" state
 ```
+
+and `daq_state()` on the `hutch-<hutch>` MCP server.
+
+**The run itself is a write, and `hutch-py` has no MCP tool yet: it needs Claude running
+directly on the hutch machine** — not off it, and not in a Cogito container there, which
+cannot see `/cds`. Anywhere else, stop here and say so; do not look for another way in.
 
 `MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
 the age. A detector name recorded last shift will tell you it is old rather than looking
@@ -79,8 +84,9 @@ the class you were actually granted:
 
 ```bash
 bin/hutch-py --hutch "$H" --timeout 300 --confirm write run "<run command>"
-bin/hutch-daq --hutch "$H" state        # run_number / last_run_number
 ```
+
+then `daq_state()` for `run_number` / `last_run_number`.
 
 `run` launches a fresh device load and needs no live session. It pays that load on
 every call (tens of seconds), so batch a multi-step sequence into one snippet rather
@@ -89,7 +95,7 @@ is in `error`; **4** means the launcher or hutch could not be reached at all.
 
 The run number comes from the DAQ, not from `get_run()`. `get_run()` is an HTTP GET
 against the elog (`mfx/macros.py:619-622`) despite its docstring claiming otherwise, so
-it lags the DAQ and needs off-hutch HTTPS. `hutch-daq state` already reports
+it lags the DAQ and needs off-hutch HTTPS. `daq_state` already reports
 `run_number` and `last_run_number` from `DaqControl.getStatus()`.
 
 **`DARK` is two writes, and the second is gated.** `takepeds()` records through
@@ -133,7 +139,7 @@ on the strength of the command having returned.
 
 ```bash
 bin/hutch-state set --hutch "$H" --experiment "$E" last_run_number {run} \
-    --source "hutch-daq state run_number after autorun" --kind resolved
+    --source "daq_state run_number after autorun" --kind resolved
 bin/hutch-state set --hutch "$H" --experiment "$E" last_run_tag "{run_type}" \
     --source "run_type confirmed with operator" --kind operator
 ```
