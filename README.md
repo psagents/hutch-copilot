@@ -10,60 +10,39 @@ judgment — what to ask the operator, when to confirm, how to sequence a shift.
 
 ## Installing
 
-Run it on a `{hutch}-daq` machine — `mfx-daq`, `rix-daq`, and so on. That is the
-design target, not a preference: `/cds`, the DAQ log tree, the pcds environments and
-Channel Access are all native there.
-
-Claude Code only finds a skill inside a directory it scans, so the checkout has to be
-one of:
-
-| launched as | put it at |
-|---|---|
-| `claude` | `~/.claude/skills/hutch-copilot` |
-| `claude-lcls` (sets `CLAUDE_CONFIG_DIR`) | `~/.claude-lcls/skills/hutch-copilot` |
-
-A checkout anywhere else is invisible to the `Skill` tool no matter how correct the
-code is — the symptom is `Unknown skill: hutch-copilot`, with `SKILL.md` readable by
-hand. To serve both from one checkout, symlink the second — to **your** checkout, never another user's:
-
 ```bash
-ln -s ~/.claude/skills/hutch-copilot ~/.claude-lcls/skills/hutch-copilot
+git clone https://github.com/psagents/hutch-copilot.git ~/.claude/skills/hutch-copilot
+~/.claude/skills/hutch-copilot/bin/hutch-setup --hutch mfx --sif <image path on the hutch>
 ```
 
-Each procedure is a skill of its own, so it is a real `/command`. Claude Code does not look
-inside a skill for more skills, so link each one beside the checkout, in every skills
-directory you use:
+`hutch-setup` is idempotent; run it again after a pull, and `--check` reports what it would
+change without changing anything. For every Claude config on the account — `claude-lcls`
+(`$CLAUDE_CONFIG_DIR`), plain `claude` (`~/.claude`) and each Cogito host overlay — it:
 
-```bash
-ln -s ~/.claude/skills/hutch-copilot/skills/* ~/.claude/skills/
-ln -s ~/.claude/skills/hutch-copilot/skills/* ~/.claude-lcls/skills/
-```
+- **links the skills**: the checkout as `hutch-copilot`, and each `skills/<name>` beside it,
+  so `/are-we-ready` and the rest are real commands. Claude Code only finds a skill in a
+  directory it scans, and never inside another skill. A link that is not this checkout's —
+  another user's copy — is reported and left alone.
+- **installs the hooks**: `SessionStart` and `Stop` pointing at **this** checkout's `bin/`,
+  replacing any that point at another checkout. Other keys are kept; the old file is saved
+  as `settings.json.bak-<time>`.
+- **registers `hutch-<hutch>`**, the MCP server everything hutch-only goes through: local
+  (`bin/hutch-mcp <sif>`) for a plain session on the hutch itself, over your own ssh from
+  anywhere else, and always over ssh from Cogito, whose container has neither apptainer nor
+  `/cds`. Then checks that it connects.
+- **checks what it cannot do for you**: a Kerberos ticket (it prints the `kinit` line; run it
+  in your own terminal), key-based ssh to the hutch, the image at `--sif`, and the advisors
+  (`scripts/fetch-advisors.sh` installs them).
 
-Then put the tools on PATH. No install step, each `bin/hutch-*` finds the package itself:
-
-```bash
-source bin/hutch-env     # sets PATH and $HUTCH, finds caget
-```
-
-At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
-every session start. Off-hutch it stays silent, by design.
-
-Logging is ambient via a second hook. Register both from **your own** checkout:
-
-```bash
-scripts/install-hooks.py                        # ~/.claude-lcls (or $CLAUDE_CONFIG_DIR)
-scripts/install-hooks.py --config-dir ~/.claude # for plain `claude`
-scripts/install-hooks.py --check                # report only
-```
-
-It adds `SessionStart`/`Stop` if missing, and replaces any that point at another
-checkout — never copy hook lines from someone else's `settings.json`: their path is
-baked in, and your session then runs their copy of the skill and hooks. Other keys are
-kept; the old file is saved as `settings.json.bak-<time>`.
+It also records the hutch in `~/.config/hutch-copilot/hutch`. At a hutch,
+`bin/hutch-session-start` asks the operator for the experiment at every session start;
+anywhere else it only tells the model that the hutch is reachable through `hutch-<hutch>`,
+and says nothing to the operator. The tools need no install step: each `bin/hutch-*` finds
+the package itself, and `source bin/hutch-env` puts them on PATH.
 
 `hutch-stop` blocks the turn once when it ended having touched the experiment, so
 `sync-log` records it while the context is still live. It spawns nothing, writes nothing,
-and exits silently off-hutch, inside this checkout (developing the copilot is not
+and exits silently where no hutch is set up, inside this checkout (developing the copilot is not
 operating the hutch), with no experiment established, or on any malformed input.
 Four things stop it looping: `stop_hook_active`, the harness's own
 `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (default 8), the advancing `sync_log.last_uuid`
@@ -128,10 +107,10 @@ bin/hutch-mcp hutch-mcp.sif                 # stdio, for a client over ssh
 bin/hutch-mcp hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
 ```
 
-Over ssh, register it once per Claude config (for Cogito, each host's overlay home):
+`bin/hutch-setup` registers it in every Claude config (see Installing); by hand, for one:
 
 ```bash
-HOME=~/.cogito/hosts/<host> claude mcp add -s user hutch-mfx -- ssh -T -o BatchMode=yes \
+claude mcp add -s user hutch-mfx -- ssh -T -o BatchMode=yes \
     -J psdev mfx-daq ~/.claude/skills/hutch-copilot/bin/hutch-mcp <path>/hutch-mcp.sif
 ```
 

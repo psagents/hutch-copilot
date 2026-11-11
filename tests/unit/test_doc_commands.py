@@ -38,6 +38,7 @@ BINARIES = {
     "log": "tools.log",
     "normal": "normal",
     "ready": "readiness",
+    "setup": "install",
 }
 
 INVOCATION = re.compile(r"bin/hutch-([a-z]+)((?:[ \t]+[^\n`|#]*)?)")

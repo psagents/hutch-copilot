@@ -37,6 +37,7 @@ TOOLS = {
     "tools.log": "hutch-log",
     "normal": "hutch-normal",
     "readiness": "hutch-ready",
+    "install": "hutch-setup",
 }
 
 PKG = pathlib.Path(hutch_copilot.__file__).resolve().parent

@@ -43,6 +43,7 @@ hutch-lute = "hutch_copilot.tools.lute:main"
 hutch-log = "hutch_copilot.tools.log:main"
 hutch-normal = "hutch_copilot.normal:main"
 hutch-ready = "hutch_copilot.readiness:main"
+hutch-setup = "hutch_copilot.install:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

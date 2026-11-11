@@ -30,9 +30,14 @@ def fake_host(tmp_path):
     (shim / "hostname").write_text('#!/bin/bash\nprintf "%s\\n" "$FAKE_HOST"\n')
     (shim / "hostname").chmod(0o755)
 
-    def run(payload: dict, host: str = "mfx-daq") -> subprocess.CompletedProcess:
+    def run(payload: dict, host: str = "mfx-daq",
+            configured: str | None = None) -> subprocess.CompletedProcess:
         import os
-        env = {**os.environ, "FAKE_HOST": host,
+        hutch_file = tmp_path / "hutch"
+        if configured:
+            hutch_file.write_text(configured + "\n")
+        # Never the account's own ~/.config/hutch-copilot/hutch: the result must not depend on it.
+        env = {**os.environ, "FAKE_HOST": host, "HUTCH_SETUP_FILE": str(hutch_file),
                "PATH": f"{shim}:{os.environ['PATH']}"}
         return subprocess.run([str(STOP)], input=json.dumps(payload),
                               capture_output=True, text=True, env=env)
@@ -109,6 +114,12 @@ def test_off_hutch_the_hook_stays_silent(fake_host, transcript):
     for host in ("s3dflogin", "psana101", "someones-laptop", ""):
         res = fake_host(_payload(transcript), host=host)
         assert (res.returncode, res.stdout.strip()) == (0, ""), host
+
+
+def test_off_hutch_a_hutch_set_up_by_hutch_setup_still_syncs(fake_host, transcript):
+    """Cogito on S3DF reaches the hutch through hutch-<h>; its turns are hutch work too."""
+    out = json.loads(fake_host(_payload(transcript), host="sdfiana025", configured="mfx").stdout)
+    assert out["decision"] == "block" and "Hutch is mfx" in out["reason"]
 
 
 def test_a_transcript_with_no_experiment_is_never_guessed(fake_host, tmp_path):

@@ -96,6 +96,18 @@ def test_the_hook_is_silent_off_hutch():
         assert res.returncode == 0, f"{host} exited {res.returncode}"
 
 
+def test_off_hutch_a_configured_hutch_tells_the_model_and_asks_nobody(tmp_path):
+    (tmp_path / "hutch").write_text("mfx\n")
+    (tmp_path / "hostname").write_text("#!/bin/bash\necho sdfiana025\n")
+    (tmp_path / "hostname").chmod(0o755)
+    res = subprocess.run([str(HOOK)], capture_output=True, text=True,
+                         env={"PATH": f"{tmp_path}:/usr/bin:/bin",
+                              "HUTCH_SETUP_FILE": str(tmp_path / "hutch")})
+    out = json.loads(res.stdout)
+    assert "systemMessage" not in out
+    assert "hutch-mfx MCP server" in out["hookSpecificOutput"]["additionalContext"]
+
+
 def test_the_hook_names_the_hutch_on_a_hutch_host():
     for host, hutch in [("mfx-daq", "mfx"), ("rix-daq", "rix"), ("tmo-control", "tmo")]:
         out = _hook_on(host).stdout

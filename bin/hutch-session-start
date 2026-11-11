@@ -1,19 +1,24 @@
 #!/bin/bash
-# SessionStart hook: announce the hutch context, but only at a hutch.
-#
-# Silence off-hutch is the whole point. On S3DF or a laptop the tools cannot
-# reach /cds, Channel Access or the DAQ logs, so injecting hutch context there
-# would be misleading rather than merely noisy.
+# SessionStart hook: announce the hutch context. At a hutch, ask for the experiment; off it,
+# only tell the model, and only when bin/hutch-setup configured a hutch. Asking the operator in
+# every S3DF session would be noise, so off-hutch nothing is shown to them.
 set -u
 
 host="$(hostname -s 2>/dev/null)" || exit 0
+repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)" || exit 0
 
 case "$host" in
     *-daq|*-control) hutch="${host%-*}" ;;
-    *) exit 0 ;;
+    *)
+        # The passwd home, not $HOME: a Cogito host sets $HOME to its overlay.
+        hutch="$(cat "${HUTCH_SETUP_FILE:-$(getent passwd "${USER:-}" | cut -d: -f6)/.config/hutch-copilot/hutch}" 2>/dev/null)"
+        [ -n "$hutch" ] || exit 0
+        jq -n --arg ctx "hutch-copilot is set up for ${hutch^^} here ($host, off the hutch): \
+everything only the hutch can read goes through the hutch-$hutch MCP server, and the tools \
+are in $repo/bin. If this session turns to hutch work, ask which experiment first." \
+            '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
+        exit 0 ;;
 esac
-
-repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)" || exit 0
 
 context="$(cat <<EOF
 HUTCH CONTEXT: $host (hutch=$hutch)
