@@ -7,7 +7,9 @@ set -eu
 sif=$1
 sock=${2-}
 binds=/cds,/reg/g,/sdf/home,/sdf/group,/sdf/data
-envs=""
+# The server's default hutch, from this machine's name (hutch-env's rule), unless HUTCH is set.
+hutch=${HUTCH:-$(bash -c '. "$1" >/dev/null 2>&1; hutch_from_hostname' _ "$(dirname -- "$0")/hutch-env" || true)}
+envs=${hutch:+--env HUTCH=$hutch}
 for v in $(env | sed -n 's/^\(EPICS_\(CA\|PVA\)_[A-Z_]*\)=.*/\1/p'); do envs="$envs --env $v=$(printenv "$v")"; done
 if [ -n "$sock" ]; then
     rm -f "$sock"

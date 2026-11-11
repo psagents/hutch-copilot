@@ -25,8 +25,9 @@ LOG = logging.getLogger("hutch-mcp")
 
 mcp = FastMCP(
     "hutch-mcp",
-    instructions="Read-only hutch tools (happi, Channel Access, archiver, lightpath, DAQ state) "
-                 "that only the hutch machine can reach. Each returns the hutch-copilot tool's JSON.",
+    instructions="Read-only hutch tools (happi, Channel Access, archiver, lightpath, DAQ state, "
+                 "and the three readiness checks over them) that only the hutch machine can reach. "
+                 "Each returns the hutch-copilot tool's JSON. `hutch` defaults to this server's own.",
     # Only agentgateway's certificate reaches the socket (ghostunnel), and it sends its own Host.
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
@@ -67,22 +68,30 @@ def _opt(flag: str, value: str | None) -> tuple[str | None, str | None]:
     return (flag, value) if value else (None, None)
 
 
+def _hutch(hutch: str | None) -> str:
+    """The hutch asked for, else this server's own: one server serves one hutch."""
+    hutch = hutch or os.environ.get("HUTCH")
+    if not hutch:
+        raise ToolError("no hutch: pass one, or start the server with HUTCH set (bin/hutch-mcp does)")
+    return hutch
+
+
 @mcp.tool()
-def happi_list(hutch: str) -> str:
+def happi_list(hutch: str | None = None) -> str:
     """Every device happi records for this hutch, with its PV prefix."""
-    return _run("hutch-happi", "list", "--hutch", hutch)
+    return _run("hutch-happi", "list", "--hutch", _hutch(hutch))
 
 
 @mcp.tool()
-def happi_device(hutch: str, name: str) -> str:
+def happi_device(name: str, hutch: str | None = None) -> str:
     """One happi device entry by name."""
-    return _run("hutch-happi", "device", "--hutch", hutch, name)
+    return _run("hutch-happi", "device", "--hutch", _hutch(hutch), name)
 
 
 @mcp.tool()
-def happi_pv(hutch: str, name: str, suffix: str | None = None) -> str:
+def happi_pv(name: str, suffix: str | None = None, hutch: str | None = None) -> str:
     """The PV prefix of a happi device, optionally with a suffix such as :RBV appended."""
-    return _run("hutch-happi", "pv", "--hutch", hutch, name, *_opt("--suffix", suffix))
+    return _run("hutch-happi", "pv", "--hutch", _hutch(hutch), name, *_opt("--suffix", suffix))
 
 
 @mcp.tool()
@@ -104,22 +113,40 @@ def epics_moved(pv: str, start: str, end: str | None = None) -> str:
 
 
 @mcp.tool()
-def lightpath_path(hutch: str) -> str:
+def lightpath_path(hutch: str | None = None) -> str:
     """The beam path to the hutch and every device blocking it. Takes ~40 s."""
-    return _run("hutch-lightpath", "path", "--hutch", hutch)
+    return _run("hutch-lightpath", "path", "--hutch", _hutch(hutch))
 
 
 @mcp.tool()
-def daq_state(hutch: str) -> str:
+def daq_state(hutch: str | None = None) -> str:
     """The DAQ's own state (transition, recording, config alias, experiment), off its control port."""
-    return _run("hutch-daq", "--hutch", hutch, "state")
+    return _run("hutch-daq", "--hutch", _hutch(hutch), "state")
 
 
 @mcp.tool()
-def normal_diff(hutch: str, experiment: str, taking_data: bool = False) -> str:
+def normal_diff(experiment: str, taking_data: bool = False, hutch: str | None = None) -> str:
     """Judge the current beam path and DAQ against the operator's normal snapshot."""
-    return _run("hutch-normal", "diff", "--hutch", hutch, "--experiment", experiment,
+    return _run("hutch-normal", "diff", "--hutch", _hutch(hutch), "--experiment", experiment,
                 "--taking-data" if taking_data else None)
+
+
+@mcp.tool()
+def ready_beam(hutch: str | None = None) -> str:
+    """Readiness: is beam reaching the hutch, and what blocks it? `impediment` is the one to act on."""
+    return _run("hutch-ready", "beam", "--hutch", _hutch(hutch))
+
+
+@mcp.tool()
+def ready_hutch(hutch: str | None = None) -> str:
+    """Readiness: are the hutch's own devices placed? happi inventory plus a live readback each."""
+    return _run("hutch-ready", "hutch", "--hutch", _hutch(hutch))
+
+
+@mcp.tool()
+def ready_daq(experiment: str | None = None, hutch: str | None = None) -> str:
+    """Readiness: can the DAQ record? Its state plus a `can_record` verdict (null means unknown)."""
+    return _run("hutch-ready", "daq", "--hutch", _hutch(hutch), *_opt("--experiment", experiment))
 
 
 @mcp.tool()
