@@ -6,7 +6,7 @@ collection, and reading back what the analysis produced.
 Two halves. The **skills** (`SKILL.md` and the four sub-skill directories — `take-run`,
 `are-we-ready`, `setup-analysis`, `assess-analysis`) carry
 judgment — what to ask the operator, when to confirm, how to sequence a shift. The
-**tools** (`hutch_tools/`) carry mechanism.
+**tools** (`src/hutch_copilot/`) carry mechanism.
 
 ## Installing
 
@@ -103,25 +103,25 @@ freshly linked advisor is invisible until then.
 
 A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container
 mounts neither `/cds` nor the operator homes) reaches the hutch-only tools through
-`server/hutch_mcp.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
+`src/hutch_copilot/server.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
 on a Unix socket, the caller from `X-Authenticated-User`), with ten read-only tools, each a
 fixed argv over an existing `bin/hutch-*`.
 
 It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to
-Docker Hub. The image holds only Python and the MCP SDK; `server/hutch-mcp.sh` binds in what the
+Docker Hub. The image holds only Python and the MCP SDK; `bin/hutch-mcp` binds in what the
 tools wrap (`/cds`, `/reg/g`, `/sdf/home`, `/sdf/group`, `/sdf/data`). On the hutch:
 
 ```bash
 apptainer pull hutch-mcp.sif docker://<image>:sha-<commit>
-server/hutch-mcp.sh hutch-mcp.sif                 # stdio, for a client over ssh
-server/hutch-mcp.sh hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
+bin/hutch-mcp hutch-mcp.sif                 # stdio, for a client over ssh
+bin/hutch-mcp hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
 ```
 
 Over ssh, register it once per Claude config (for Cogito, each host's overlay home):
 
 ```bash
 HOME=~/.cogito/hosts/<host> claude mcp add -s user hutch-mfx -- ssh -T -o BatchMode=yes \
-    -J psdev mfx-daq ~/.claude/skills/hutch-copilot/server/hutch-mcp.sh <path>/hutch-mcp.sif
+    -J psdev mfx-daq ~/.claude/skills/hutch-copilot/bin/hutch-mcp <path>/hutch-mcp.sif
 ```
 
 ## The tools
@@ -170,7 +170,7 @@ a sentence an agent can talk itself out of.
 
 ## The safety gate
 
-`hutch_tools/daq.py` classifies every snippet before transmitting: `read-only`,
+`src/hutch_copilot/tools/session.py` classifies every snippet before transmitting: `read-only`,
 `write`, or `beam-critical`. Unrecognised code is classified as `write`, never
 read-only.
 

@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from hutch_tools import common as paths
+from hutch_copilot.tools import common as paths
 
 ROOT = paths.skill_root()
 
@@ -33,7 +33,7 @@ DECLARED_ADVISORS = {
     "psana-daq-logs", "psana-daq-history", "psana-configdb",
 }
 
-CODE_DIRS = ("hutch_tools", "bin", "are-we-ready/scripts")
+CODE_DIRS = ("src", "bin", "are-we-ready/scripts")
 
 
 def _docs():
@@ -146,7 +146,7 @@ def test_no_code_path_hardcodes_a_home_directory():
 
 
 def test_skills_resolver_finds_skills_across_multiple_roots(tmp_path, monkeypatch):
-    from hutch_tools import skills as resolvers
+    from hutch_copilot.tools import skills as resolvers
 
     a, b = tmp_path / "local", tmp_path / "shared"
     for root, names in ((a, ["ask-lute", "hutch-copilot"]), (b, ["elog-copilot", "xpm-seq"])):
@@ -162,7 +162,7 @@ def test_skills_resolver_finds_skills_across_multiple_roots(tmp_path, monkeypatc
 
 
 def test_a_directory_without_skill_md_is_not_a_skill(tmp_path, monkeypatch):
-    from hutch_tools import skills as resolvers
+    from hutch_copilot.tools import skills as resolvers
 
     (tmp_path / "not-a-skill").mkdir()
     (tmp_path / "real").mkdir()
@@ -173,7 +173,7 @@ def test_a_directory_without_skill_md_is_not_a_skill(tmp_path, monkeypatch):
 
 def test_earlier_roots_win(tmp_path, monkeypatch):
     """Local overrides shared, matching how the skill loader resolves names."""
-    from hutch_tools import skills as resolvers
+    from hutch_copilot.tools import skills as resolvers
 
     a, b = tmp_path / "local", tmp_path / "shared"
     for root in (a, b):
@@ -185,7 +185,7 @@ def test_earlier_roots_win(tmp_path, monkeypatch):
 
 def test_querying_one_skill_reports_the_roots_it_searched(tmp_path, monkeypatch):
     """The distinction that was missed: 'not installed' vs 'looked in the wrong place'."""
-    from hutch_tools import skills as resolvers
+    from hutch_copilot.tools import skills as resolvers
 
     monkeypatch.setenv("HUTCH_SKILL_ROOTS", str(tmp_path))
     rec = resolvers.skills("elog-copilot")
@@ -195,7 +195,7 @@ def test_querying_one_skill_reports_the_roots_it_searched(tmp_path, monkeypatch)
 
 
 def test_a_missing_root_is_skipped_not_fatal(tmp_path, monkeypatch):
-    from hutch_tools import skills as resolvers
+    from hutch_copilot.tools import skills as resolvers
 
     (tmp_path / "real").mkdir()
     (tmp_path / "real" / "SKILL.md").write_text("x")
@@ -211,7 +211,7 @@ def test_every_declared_advisor_is_a_plausible_skill_name():
 
 def test_an_unreadable_root_is_reported_not_fatal(tmp_path, monkeypatch):
     """mfx-daq: the shared opencode root exists but is drwxr-s--- to cwang31:ps-users."""
-    from hutch_tools import skills as resolvers
+    from hutch_copilot.tools import skills as resolvers
 
     readable = tmp_path / "local"
     (readable / "real").mkdir(parents=True)

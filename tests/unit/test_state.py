@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from hutch_tools import common as paths, state
+from hutch_copilot.tools import common as paths, state
 
 
 @pytest.fixture()

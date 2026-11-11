@@ -11,7 +11,7 @@ import pathlib
 
 import pytest
 
-from hutch_tools import common as paths, lute
+from hutch_copilot.tools import common as paths, lute
 
 
 # --------------------------------------------------------------------------
@@ -110,7 +110,7 @@ def test_missing_ticket_is_not_blocking_for_the_local_steps(workspace):
 
 def test_all_refuses_before_mutating_when_preconditions_fail(workspace, monkeypatch):
     # Routed through hutch-lute since M1.b; there is no hutch-install binary.
-    from hutch_tools import lute
+    from hutch_copilot.tools import lute
     rc = lute.main(["all", "-e", "e1", "--hutch", "mfx", "-W", "absent_wf",
                     "--confirm", "write"])
     assert rc != 0
@@ -574,7 +574,7 @@ def test_off_s3df_slurm_goes_over_ssh_to_psana(monkeypatch):
 
 
 def test_unreachable_psana_raises_instead_of_reporting_no_job(monkeypatch):
-    from hutch_tools.session import BridgeUnavailable
+    from hutch_copilot.tools.session import BridgeUnavailable
 
     def down(*a, **k):
         raise BridgeUnavailable("ssh to psana timed out")

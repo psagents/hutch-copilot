@@ -1,19 +1,3 @@
 #!/bin/sh
-# Run hutch-mcp from its image on a hutch machine.
-#   hutch-mcp.sh <sif>            stdio, for a client over ssh
-#   hutch-mcp.sh <sif> <socket>   streamable HTTP on <socket>, for the SAGE tunnel: start it before run.sh
-# --cleanenv as in the tunnel's run.sh, so only EPICS_CA_*/EPICS_PVA_* pass through.
-set -eu
-sif=$1
-sock=${2-}
-binds=/cds,/reg/g,/sdf/home,/sdf/group,/sdf/data
-envs=""
-for v in $(env | sed -n 's/^\(EPICS_\(CA\|PVA\)_[A-Z_]*\)=.*/\1/p'); do envs="$envs --env $v=$(printenv "$v")"; done
-if [ -n "$sock" ]; then
-    rm -f "$sock"
-    # shellcheck disable=SC2086
-    exec apptainer run --cleanenv --bind "$binds,$(dirname -- "$sock")" $envs \
-        --env MCP_TRANSPORT=streamable-http --env "MCP_UDS=$sock" "$sif"
-fi
-# shellcheck disable=SC2086
-exec apptainer run --cleanenv --bind "$binds" $envs "$sif"
+# Moved to bin/hutch-mcp; kept for the hutch-<h> registrations until bin/hutch-setup re-registers them.
+exec "$(dirname -- "$0")/../bin/hutch-mcp" "$@"

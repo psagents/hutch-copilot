@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import daq
+from hutch_copilot.tools import daq
 
 #: Verbatim from a live mfx read. Nine positional fields, no names.
 LIVE_STATUS = ("reset", "reset", "BEAM", False, {}, False, "mfx101937027", 0, 93)

@@ -7,7 +7,7 @@ name: hutch-mcp image
 on:
   push:
     branches: [main, ENH/hutch-mcp-container]
-    paths: [Dockerfile, .dockerignore, server/**, hutch_tools/**, bin/**, .github/workflows/hutch-mcp-image.yml]
+    paths: [Dockerfile, .dockerignore, pyproject.toml, src/**, bin/**, .github/workflows/hutch-mcp-image.yml]
   workflow_dispatch:
 
 permissions:
@@ -39,10 +39,9 @@ jobs:
       - name: Smoke test
         run: |
           docker run --rm --entrypoint python3.12 "$IMAGE:sha-$GITHUB_SHA" -c '
-          import asyncio, sys
-          sys.path.insert(0, "/opt/hutch-copilot/server")
-          import hutch_mcp
-          n = len(asyncio.run(hutch_mcp.mcp.list_tools()))
+          import asyncio
+          from hutch_copilot import server
+          n = len(asyncio.run(server.mcp.list_tools()))
           assert n == 10, n
           print("hutch-mcp image OK:", n, "tools")'
       - if: env.PUSH == 'true'

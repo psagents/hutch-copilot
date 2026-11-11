@@ -14,10 +14,10 @@ import argparse
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "src"))
 
-from hutch_tools import lightpath
-from hutch_tools.common import UNREACHABLE, fail, out
+from hutch_copilot.tools import lightpath
+from hutch_copilot.tools.common import UNREACHABLE, fail, out
 
 
 def main(argv: list[str] | None = None) -> int:

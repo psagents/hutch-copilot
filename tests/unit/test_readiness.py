@@ -20,8 +20,8 @@ import re
 
 import pytest
 
-from hutch_tools import daq, happi, lightpath
-from hutch_tools.epics import EpicsError
+from hutch_copilot.tools import daq, happi, lightpath
+from hutch_copilot.tools.epics import EpicsError
 
 import check_beam, check_daq, check_hutch
 

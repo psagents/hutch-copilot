@@ -17,10 +17,10 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "src"))
 
-from hutch_tools import daq
-from hutch_tools.common import UNREACHABLE, fail, out, utcnow
+from hutch_copilot.tools import daq
+from hutch_copilot.tools.common import UNREACHABLE, fail, out, utcnow
 
 
 def check_daq(hutch: str, *, experiment: str | None = None,

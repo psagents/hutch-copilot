@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import common as _cli
-from hutch_tools import session as daq
+from hutch_copilot.tools import common as _cli
+from hutch_copilot.tools import session as daq
 
 
 @pytest.fixture

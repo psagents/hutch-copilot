@@ -13,11 +13,11 @@ import argparse
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "src"))
 
-from hutch_tools import happi
-from hutch_tools.common import UNREACHABLE, fail, out, utcnow
-from hutch_tools.epics import T_QUERY, EpicsError, caget
+from hutch_copilot.tools import happi
+from hutch_copilot.tools.common import UNREACHABLE, fail, out, utcnow
+from hutch_copilot.tools.epics import T_QUERY, EpicsError, caget
 
 
 def check_hutch(hutch: str, *, inventory_only: bool = False,

@@ -4,7 +4,7 @@
 # Not executable and has no shebang on purpose -- a subshell that exported
 # these would exit and take them with it.
 #
-# PYTHONPATH is deliberately NOT set: every bin/hutch-* inserts the repo root
+# PYTHONPATH is deliberately NOT set: every bin/hutch-* inserts <repo>/src
 # on sys.path itself, so the tools already work from a bare checkout and an
 # export here would only be a second way to get it wrong.
 #

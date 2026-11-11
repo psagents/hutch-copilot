@@ -61,7 +61,7 @@ A **readiness** question composes several backends, so it is not a tool call. Th
 with the skill that asks them: `are-we-ready/scripts/check_{beam,hutch,daq}.py`.
 
 External paths are declared once, in `bin/hutch-env`, and read back by
-`common.external_path()`. `hutch_tools/` holds no absolute path outside its own checkout.
+`common.external_path()`. `src/hutch_copilot/` holds no absolute path outside its own checkout.
 
 ---
 
@@ -164,9 +164,9 @@ fails on any surviving doc reference.
 `lute.py:87-88` and `daq.py` both depend on them for the `makepeds` hop, and
 `test_peds.py`/`test_daq_cli.py` patch them. Move them to `common.py`, renaming
 `BridgeUnavailable` to `RemoteError`. Rename `session.py` → `python.py` in the same
-commit (it is the only `bin/hutch-X` ↔ `hutch_tools/X` mismatch left), updating
+commit (it is the only `bin/hutch-X` ↔ `tools/X` mismatch left), updating
 `pyproject.toml:37`, `bin/hutch-python`, `lute.py:87-88`, and the misleading
-`from hutch_tools import session as daq` alias in `test_daq_cli.py:22`.
+`from hutch_copilot.tools import session as daq` alias in `test_daq_cli.py:22`.
 
 ### Q1b — the per-hutch run vocabulary
 
@@ -307,8 +307,8 @@ for b in state happi epics lightpath python daq data skills lute log; do
 done
 
 # one declaration per external path, and none in the package
-grep -rnE '"/cds|"/sdf/group' hutch_tools/      # expect nothing
-grep -rn "R7.0.2-2.0" bin/ hutch_tools/         # expect bin/hutch-env only
+grep -rnE '"/cds|"/sdf/group' src/hutch_copilot/      # expect nothing
+grep -rn "R7.0.2-2.0" bin/ src/hutch_copilot/         # expect bin/hutch-env only
 
 # readiness, against real hardware
 are-we-ready/scripts/check_hutch.py --hutch mfx

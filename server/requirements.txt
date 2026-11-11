@@ -1,3 +1,0 @@
-# The MCP SDK (it brings uvicorn and starlette), and requests, which hutch-epics history/moved import.
-mcp==1.30.0
-requests==2.32.5

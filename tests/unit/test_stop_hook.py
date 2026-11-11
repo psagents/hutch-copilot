@@ -17,7 +17,7 @@ import subprocess
 
 import pytest
 
-from hutch_tools.common import script
+from hutch_copilot.tools.common import script
 
 STOP = script("bin", "hutch-stop")
 

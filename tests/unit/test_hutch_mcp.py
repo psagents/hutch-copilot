@@ -1,16 +1,14 @@
-"""server/hutch_mcp.py: the MCP server that fronts the hutch-only tools. Needs the MCP SDK."""
+"""hutch_copilot.server: the MCP server that fronts the hutch-only tools. Needs the MCP SDK."""
 
 import asyncio
-import pathlib
 import subprocess
-import sys
 
 import pytest
 
 pytest.importorskip("mcp")
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
-import hutch_mcp  # noqa: E402
 from mcp.server.fastmcp.exceptions import ToolError  # noqa: E402
+
+from hutch_copilot import server as hutch_mcp  # noqa: E402
 
 
 def _fake_run(monkeypatch, rc=0, stdout='{"value": 1}'):

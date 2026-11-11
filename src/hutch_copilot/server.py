@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 
-BIN = pathlib.Path(__file__).resolve().parent.parent / "bin"
+BIN = pathlib.Path(__file__).resolve().parents[2] / "bin"
 #: lightpath settles for ~40 s; anything far past that is hung.
 T_TOOL = 300
 LOG = logging.getLogger("hutch-mcp")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import common as paths, lute
+from hutch_copilot.tools import common as paths, lute
 
 
 # --------------------------------------------------------------------------
@@ -156,7 +156,7 @@ def test_unknown_detector_has_no_fallback(tmp_path, monkeypatch):
 
 
 def test_xtc2_resolver_reports_absence_without_guessing(tmp_path, monkeypatch):
-    from hutch_tools import data as resolvers
+    from hutch_copilot.tools import data as resolvers
     monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     rec = resolvers.xtc2("mfx", "e1", 43)
     assert rec["value"]["present"] is False
@@ -165,7 +165,7 @@ def test_xtc2_resolver_reports_absence_without_guessing(tmp_path, monkeypatch):
 
 
 def test_xtc2_resolver_counts_and_sizes(tmp_path, monkeypatch):
-    from hutch_tools import data as resolvers
+    from hutch_copilot.tools import data as resolvers
     monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     # Built through the resolver's own path function, not a literal, so a wrong
     # directory name cannot be asserted true by both sides at once -- this test
@@ -183,7 +183,7 @@ def test_xtc2_resolver_counts_and_sizes(tmp_path, monkeypatch):
 
 def test_the_resolver_and_the_peds_guard_agree(tmp_path, monkeypatch):
     """Both read paths.xtc2_files, so 'the data has landed' has one definition."""
-    from hutch_tools import data as resolvers
+    from hutch_copilot.tools import data as resolvers
     monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     d = paths.xtc2_dir("mfx", "e1")
     d.mkdir(parents=True)

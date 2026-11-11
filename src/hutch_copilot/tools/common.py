@@ -111,7 +111,7 @@ def external_path(name: str) -> str:
         return env
     # Resolved from this file rather than via script(), which is defined below
     # and would be a forward reference at import time.
-    env_file = pathlib.Path(__file__).resolve().parent.parent / "bin" / "hutch-env"
+    env_file = skill_root() / "bin" / "hutch-env"
     try:
         text = env_file.read_text(errors="replace")
     except OSError as exc:
@@ -194,7 +194,7 @@ def skill_root() -> pathlib.Path:
     Never hardcode it -- a literal home directory breaks the skill for every
     user but its author.
     """
-    return pathlib.Path(__file__).resolve().parent.parent
+    return pathlib.Path(__file__).resolve().parents[3]
 
 
 def script(*parts: str) -> pathlib.Path:

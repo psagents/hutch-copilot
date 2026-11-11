@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from hutch_tools.common import script
+from hutch_copilot.tools.common import script
 
 ENV = script("bin", "hutch-env")
 
@@ -134,11 +134,11 @@ def test_no_external_path_literal_survives_in_the_package():
     and which copy wins depends on the code path that host takes. With one
     declaration and Python reading it, drift is not possible.
     """
-    from hutch_tools import common as paths
+    from hutch_copilot.tools import common as paths
 
     offenders = {}
     pattern = re.compile(r'"(/cds/[^"]+|/sdf/(?:group|data)/[^"]+)"')
-    for py in sorted((paths.skill_root() / "hutch_tools").glob("*.py")):
+    for py in sorted((paths.skill_root() / "src" / "hutch_copilot").rglob("*.py")):
         hits = set(pattern.findall(py.read_text(errors="replace")))
         if hits:
             offenders[py.name] = sorted(hits)
@@ -155,7 +155,7 @@ def test_no_external_path_literal_survives_in_the_package():
 ])
 def test_bash_and_python_agree_on_every_external_path(name):
     """Sourcing hutch-env and calling external_path() must give one answer."""
-    from hutch_tools import common as paths
+    from hutch_copilot.tools import common as paths
 
     from_bash = _sh(f'echo "$HUTCH_{name}"').stdout.strip()
     assert from_bash, f"hutch-env did not export HUTCH_{name}"

@@ -12,31 +12,30 @@ and flag *names* are, which is where drift actually happens.
 
 from __future__ import annotations
 
-import pathlib
 import re
 
 import pytest
 
-import hutch_tools
+from hutch_copilot.tools.common import skill_root
 
-SKILL = pathlib.Path(hutch_tools.__file__).resolve().parent.parent
+SKILL = skill_root()
 
-#: binary suffix -> module that owns it.
+#: binary suffix -> module, under hutch_copilot, that owns it.
 #: MUST list every bin/hutch-*; test_every_binary_is_covered enforces that.
 #: `log` and `install` were missing for their whole existence, so 13 documented
 #: invocations were skipped by the `suffix not in BINARIES` guard below -- a
 #: drift check with a silent hole is the bug class this repo exists to remove.
 BINARIES = {
-    "state": "state",
-    "daq": "daq",
-    "happi": "happi",
-    "epics": "epics",
-    "lightpath": "lightpath",
-    "py": "session",
-    "data": "data",
-    "skills": "skills",
-    "lute": "lute",
-    "log": "log",
+    "state": "tools.state",
+    "daq": "tools.daq",
+    "happi": "tools.happi",
+    "epics": "tools.epics",
+    "lightpath": "tools.lightpath",
+    "py": "tools.session",
+    "data": "tools.data",
+    "skills": "tools.skills",
+    "lute": "tools.lute",
+    "log": "tools.log",
     "normal": "normal",
 }
 
@@ -48,7 +47,7 @@ def _parsers():
 
     out = {}
     for suffix, module in BINARIES.items():
-        mod = importlib.import_module(f"hutch_tools.{module}")
+        mod = importlib.import_module(f"hutch_copilot.{module}")
         out[suffix] = mod.build_parser()
     return out
 
@@ -93,8 +92,9 @@ def test_markdown_contains_invocations_to_check():
 #: Not argparse CLIs, so there is no parser to check a documented invocation
 #: against. `env` is sourced into a shell rather than run; `session-start` and `stop`
 #: are hooks the harness calls with no arguments, the latter reading JSON on stdin.
-#: test_env.py covers the first two, test_stop_hook.py the third.
-NOT_CLIS = {"env", "session-start", "stop"}
+#: test_env.py covers the first two, test_stop_hook.py the third. `mcp` is the
+#: apptainer launcher for the server image, a shell script taking a sif path.
+NOT_CLIS = {"env", "session-start", "stop", "mcp"}
 
 
 def test_every_binary_is_covered():

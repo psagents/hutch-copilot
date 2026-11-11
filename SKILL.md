@@ -16,9 +16,9 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 
 ---
 
-## Tool Layer (`hutch-tools`) — read this before any procedure below
+## Tool Layer (`bin/hutch-*`) — read this before any procedure below
 
-Mechanism lives in `hutch-tools`, not in prose. **Never guess** — call the tool.
+Mechanism lives in the tools (`bin/hutch-*`, code in `src/hutch_copilot/`), not in prose. **Never guess** — call the tool.
 They all print JSON, one module owns one tool, and **one tool owns one backend** —
 so the tool to call follows from which source answers the question.
 

@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-from hutch_tools import lute
+from hutch_copilot.tools import lute
 
 TEMPLATE = """\
 %YAML 1.3

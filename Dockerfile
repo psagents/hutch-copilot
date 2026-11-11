@@ -4,10 +4,9 @@ FROM rockylinux/rockylinux:9
 
 RUN dnf -y install python3.12 python3.12-pip && dnf clean all
 
-COPY server/requirements.txt /tmp/requirements.txt
-RUN python3.12 -m pip install --no-cache-dir -r /tmp/requirements.txt
-
 COPY . /opt/hutch-copilot
+# Editable, so the server finds bin/hutch-* beside src/ in the checkout rather than in site-packages.
+RUN python3.12 -m pip install --no-cache-dir -e '/opt/hutch-copilot[server]'
 
 ENV MCP_TRANSPORT=stdio
-ENTRYPOINT ["python3.12", "/opt/hutch-copilot/server/hutch_mcp.py"]
+ENTRYPOINT ["python3.12", "-m", "hutch_copilot.server"]

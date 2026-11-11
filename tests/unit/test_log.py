@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from hutch_tools import common as paths, log
+from hutch_copilot.tools import common as paths, log
 
 
 @pytest.fixture()
@@ -131,7 +131,7 @@ def _writer(args):
     """
     root, text = args
     os.environ["HUTCH_DS_ROOT"] = str(root)
-    from hutch_tools import log as lg
+    from hutch_copilot.tools import log as lg
     lg.append("mfx", "e1", text, at="12:00")
 
 
