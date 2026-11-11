@@ -48,9 +48,9 @@ submit; this is a hard rule, not a preference.
 
 | Blocker | How you know |
 |---|---|
-| config does not render | `hutch-lute render` fails, or the contract's `validate` exits non-zero |
+| config does not render | `hutch-lute render` fails, the contract's `validate` exits non-zero, or its `smoke` run fails (§3b) |
 | the named DAG is absent, or the LUTE it runs on is not built | `hutch-lute plan` → non-empty `blocking` |
-| no XTC2 on disk | `hutch-data xtc2` |
+| no XTC on disk | `hutch-data xtc` (counts `.xtc` and `.xtc2`; `xtc2` is an alias) |
 | no valid ticket, *and* this config needs one | `hutch-lute kerberos --yaml <cfg>` |
 
 A contract `context` variable marked *blocker: ask* is a "config does not render" case:
@@ -137,6 +137,38 @@ override. `=__DELETE__` removes a key.
 Then run the contract's `validate`, if any, on `<config_path>`, and put each contract
 DAG at `lute_output/<workflow>.dag` — render a `.dag.j2` with the same `--context` and
 `--no-whitelist`, copy a `.dag`.
+
+---
+
+## 3b. Smoke run — when the contract has `smoke`
+
+`validate` reads the config; only running it shows what the config *does*. A smoke run
+is the same config on a few events, written to scratch, before anything is registered:
+
+```bash
+# the contract's smoke context on top of the same render: few events, scratch output
+bin/hutch-lute render --template <contract template> --whitelist-dir <...> \
+    --set-context <same as §3> <contract smoke context> --out <lute_output>/<hutch>_lute_smoke.yaml
+bin/hutch-lute run-task -e "$E" -r <run> -c <lute_output>/<hutch>_lute_smoke.yaml \
+    -t <the contract's first Task> --nodes=1 --ntasks-per-node=16 --confirm write
+bin/hutch-lute status "$JOB_ID"
+# then the contract's parse on the smoke job's .out and output
+```
+
+- **The run is the operator's**, named as one with signal on the detector — never the
+  newest run by default. A quiet run reads as a threshold problem and is not one.
+- **`run-task` picks `--psana1`/`--psana2` from the run's files** (or `--daq`); an
+  LCLS-I experiment needs nothing extra.
+- **Its output never goes to the experiment's real output directory.** The smoke
+  context points it at scratch. If it does not, fix the context, do not submit.
+- **A smoke Task that fails is a blocker** — "config does not render", in the table
+  above. Its log names the failure; fix the config and repeat. Everything else it
+  reports is a fact for the operator, shown once beside the plan in §4: they decide
+  whether to register, as with any other unreviewed value.
+
+It costs a minute or two. On cxi101933627 it found, before anything was registered,
+a config that did not import (`detnames` unset on LCLS-I) and droplet thresholds in the
+wrong units (zero droplets on every event, no error anywhere).
 
 ---
 

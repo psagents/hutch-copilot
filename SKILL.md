@@ -30,7 +30,7 @@ so the tool to call follows from which source answers the question.
 | `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
 | `bin/hutch-py` | The hutch-python device namespace — via the CLI (`run`), or a live session (`exec`, deprecated) — and the safety gate in front of both |
 | `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
-| `bin/hutch-data` | What landed on disk: psana2 detectors, XTC2, PDB cells, `/cds` files |
+| `bin/hutch-data` | What landed on disk: the DAQ generation (`daq`), psana1/psana2 detectors, XTC/XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |
 | `bin/hutch-lute` | LUTE: which LUTE (`--lute`), workspace setup, registration, running a Task or a whole DAG by hand, monitoring, pedestals |
 | `bin/hutch-log` | the beamtime log |
@@ -106,6 +106,18 @@ Report the experiment and the loaded context back in one line, then proceed. Thr
 - **The experiment is `operator`, never `resolved`**, if you write it. The operator's
   answer is intent. The DAQ's `experiment` signal is the separate, resolved reading, and
   the two disagreeing is a finding — see `are-we-ready`.
+
+### Then resolve the DAQ generation
+
+```bash
+bin/hutch-data daq --hutch $H --experiment $E
+```
+
+`lcls2` (`.xtc2` on disk) or `lcls1` (`.xtc` only). Every analysis sub-skill branches on
+it — producer Task, psana environment, detector names, config template — and the
+LCLS-I and LCLS-II paths differ almost everywhere. Record it `--kind resolved` with the
+source the tool prints. `null` means no run has landed yet: ask the operator, never
+assume LCLS-II.
 
 ### Then check the Kerberos ticket
 
