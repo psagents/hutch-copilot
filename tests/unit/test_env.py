@@ -137,7 +137,8 @@ def test_no_external_path_literal_survives_in_the_package():
     from hutch_copilot.tools import common as paths
 
     offenders = {}
-    pattern = re.compile(r'"(/cds/[^"]+|/sdf/(?:group|data)/[^"]+)"')
+    # Anywhere inside a string, not only at its start: "source /cds/.../py39env.sh" hid here.
+    pattern = re.compile(r'"[^"\n]*?(/cds/[^"\s]+|/sdf/(?:group|data)/[^"\s]+)')
     for py in sorted((paths.skill_root() / "src" / "hutch_copilot").rglob("*.py")):
         hits = set(pattern.findall(py.read_text(errors="replace")))
         if hits:
@@ -151,7 +152,7 @@ def test_no_external_path_literal_survives_in_the_package():
 @pytest.mark.parametrize("name", [
     "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "ENG_TOOLS", "PCDS_PYTHON", "PSCONDA",
     "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
-    "DS_ROOT", "SKILL_ROOTS", "ARCHIVER_URL",
+    "DS_ROOT", "SKILL_ROOTS", "ARCHIVER_URL", "PCDS_PY39ENV",
 ])
 def test_bash_and_python_agree_on_every_external_path(name):
     """Sourcing hutch-env and calling external_path() must give one answer."""

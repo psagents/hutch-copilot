@@ -48,7 +48,7 @@ def test_ds_root_is_overridable(tmp_path, monkeypatch):
 DECLARED = [
     "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "ENG_TOOLS", "PCDS_PYTHON", "PSCONDA",
     "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
-    "DS_ROOT", "SKILL_ROOTS",
+    "DS_ROOT", "SKILL_ROOTS", "PCDS_PY39ENV",
 ]
 
 

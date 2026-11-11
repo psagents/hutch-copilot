@@ -463,7 +463,7 @@ PEDS_FALLBACKS = {
 }
 
 #: Environment the fallback tools need on psdev.
-PEDS_ENV = "source /cds/group/pcds/pyps/conda/py39env.sh"
+PEDS_ENV = f"source {external_path('PCDS_PY39ENV')}"
 
 #: makepeds takes minutes on a full DARK run, so the remote command gets its own
 #: budget -- but the connection still has to fail fast on an unreachable psdev.
@@ -536,7 +536,7 @@ def deploy_pedestals(
     results = []
     for cmd in commands:
         try:
-            stdout = ssh("psdev", cmd, timeout=30, run_timeout=PEDS_RUN_TIMEOUT, jump=None)
+            stdout = ssh("psdev", cmd, timeout=30, run_timeout=PEDS_RUN_TIMEOUT)
         except BridgeUnavailable as exc:
             results.append({"command": cmd, "returncode": exc.returncode or 255,
                             "stdout": exc.stdout[-2000:], "stderr": exc.stderr[-2000:]})

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
-from hutch_copilot.tools import common as paths, lute
+from hutch_copilot.tools import common as paths, lute, session
 
 
 # --------------------------------------------------------------------------
@@ -26,6 +28,8 @@ def test_present_xtc2_gets_past_the_guard(tmp_path, monkeypatch):
     calls = []
 
     def fake_ssh(host, cmd, **kw):
+        # Bind against the real transport: a **kw fake accepted jump=None, which _ssh does not.
+        inspect.signature(session._ssh).bind(host, cmd, **kw)
         calls.append((host, cmd))
         return "deployed"
 
