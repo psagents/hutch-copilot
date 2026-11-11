@@ -5,7 +5,12 @@ description: >
   starts from -- state, the config that actually launched, the log sessions --
   and hands them to the @psana-daq advisor, which owns the diagnosis. Holds no
   diagnostic knowledge of its own. Read-only.
+  Triggers on: /debug-daq, the DAQ is broken, DAQ won't start, we're losing data,
+  high deadtime, damage events, why did the run fail, what happened last night.
 ---
+
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
 
 # /debug-daq
 

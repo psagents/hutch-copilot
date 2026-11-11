@@ -157,19 +157,20 @@ recorded in state.
 
 ---
 
-## Command Dispatch
+## The procedures
 
-Route based on the user's slash command or closest natural-language intent. Read the
-sub-skill rather than working from memory of it.
+Each is its own skill, so `/are-we-ready` and the rest are real commands, and a question
+that matches one loads it. Its rules are the ones above; follow the skill, not your memory
+of it.
 
-| Command / Intent | Action |
+| Command | For |
 |---|---|
-| `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
-| `/are-we-ready` or "are we ready", "is beam blocked", "beam path status" | Read `are-we-ready/SKILL.md` |
-| `/debug-daq` or "the DAQ is broken", "DAQ won't start", "we're losing data", "high deadtime", "damage events", "why did the run fail", "what happened last night" | Read `debug-daq/SKILL.md` |
-| `/setup-analysis` or "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready", "submit the analysis" | Read `setup-analysis/SKILL.md`. |
-| `/assess-analysis` or "how does the data look", "assess the run", "is the dataset good", "what did the analysis say" | Read `assess-analysis/SKILL.md` |
-| `/sync-log` or "log that", "update the log", "write it down", or a Stop-hook request to sync | Read `sync-log/SKILL.md` |
+| `/are-we-ready` | one readiness verdict: beam, the hutch's devices, the DAQ |
+| `/take-run` | a DARK, GEOM or DATA run, gated and confirmed |
+| `/debug-daq` | the readings a DAQ diagnosis starts from, handed to `@psana-daq` |
+| `/setup-analysis` | a LUTE workflow, up to registration or a job id |
+| `/assess-analysis` | a submitted LUTE job: what it produced, and the one knob to turn |
+| `/sync-log` | the beamtime log and state file, from this turn |
 
 ---
 

@@ -10,6 +10,9 @@ description: >
   take a data run.
 ---
 
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
+
 # /take-run — Start a DAQ Run
 
 This file owns the gate, the confirmation, and the verdict on what came back.

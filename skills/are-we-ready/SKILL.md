@@ -5,7 +5,12 @@ description: >
   check-beam (is beam reaching the hutch, and what blocks it), check-hutch
   (are the hutch's own devices placed), check-daq (is the DAQ able to record).
   Analyzes all three and reports one verdict. All checks are read-only.
+  Triggers on: /are-we-ready, are we ready, is beam blocked, beam path status,
+  can we take data.
 ---
+
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
 
 # /are-we-ready
 

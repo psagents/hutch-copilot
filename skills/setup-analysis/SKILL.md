@@ -9,6 +9,9 @@ description: >
   patch the DAG, is LUTE ready, submit the analysis, analyze data.
 ---
 
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
+
 # setup-analysis
 
 You own everything up to **a registered workflow, or a job id**. You stop there.

@@ -10,7 +10,7 @@ from hutch_copilot.tools import common as paths
 
 
 def test_skill_root_is_self_resolving():
-    # SKILL.md and are-we-ready/SKILL.md hardcoded
+    # SKILL.md and skills/are-we-ready/SKILL.md hardcoded
     # /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot in three places, which
     # broke the bridge setup and both readiness checks for every other user.
     root = paths.skill_root()

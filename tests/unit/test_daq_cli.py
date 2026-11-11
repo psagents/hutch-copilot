@@ -50,7 +50,7 @@ def test_beam_critical_understated_as_write_is_refused(no_bridge, capsys):
 
 
 def test_confirm_is_accepted_before_the_subcommand_too(no_bridge):
-    """take-run/SKILL.md documents the leading form; it died with
+    """skills/take-run/SKILL.md documents the leading form; it died with
     `invalid choice: '300'` while --confirm/--timeout were subcommand-only."""
     rc = daq.main(["--hutch", "mfx", "--timeout", "300", "--confirm", "write",
                    "exec", "mfx_stopper_1.remove()"])

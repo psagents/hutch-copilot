@@ -72,7 +72,7 @@ def test_a_turn_that_touched_the_experiment_is_asked_to_sync(fake_host, transcri
     assert res.returncode == 0
     out = json.loads(res.stdout)
     assert out["decision"] == "block"
-    assert "sync-log/SKILL.md" in out["reason"]
+    assert "skills/sync-log/SKILL.md" in out["reason"]
     assert "mfx101609126" in out["reason"]
     assert "mfx101609126" in out["systemMessage"]
 

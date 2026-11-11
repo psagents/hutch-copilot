@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stop hook: ask the agent to sync the beamtime log, when the turn earned it.
 #
-# Decides *whether to ask*, never what to log -- that judgment is sync-log/SKILL.md,
+# Decides *whether to ask*, never what to log -- that judgment is skills/sync-log/SKILL.md,
 # and it runs in the session that still has the context. This hook spawns nothing.
 #
 # Every failure path is `exit 0` with no output. A bookkeeping hook that can wedge a
@@ -59,7 +59,7 @@ printf '%s' "$(field .last_assistant_message)" | grep -qE "$touched" || exit 0
 
 reason="Before this turn ends, sync the beamtime log for $experiment.
 
-Read $repo/sync-log/SKILL.md and follow it: record what this turn established in
+Read $repo/skills/sync-log/SKILL.md and follow it: record what this turn established in
 the beamtime log (events) and the state file (facts, with provenance), then advance
 the watermark. Hutch is $hutch, experiment is $experiment.
 

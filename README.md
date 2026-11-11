@@ -3,8 +3,8 @@
 A Claude Code skill for running an LCLS/LCLS-II experiment: beam readiness, data
 collection, and reading back what the analysis produced.
 
-Two halves. The **skills** (`SKILL.md` and the four sub-skill directories — `take-run`,
-`are-we-ready`, `setup-analysis`, `assess-analysis`) carry
+Two halves. The **skills** (`SKILL.md`, and one per procedure under `skills/` — `/are-we-ready`,
+`/take-run`, `/debug-daq`, `/setup-analysis`, `/assess-analysis`, `/sync-log`) carry
 judgment — what to ask the operator, when to confirm, how to sequence a shift. The
 **tools** (`src/hutch_copilot/`) carry mechanism.
 
@@ -28,6 +28,15 @@ hand. To serve both from one checkout, symlink the second — to **your** checko
 
 ```bash
 ln -s ~/.claude/skills/hutch-copilot ~/.claude-lcls/skills/hutch-copilot
+```
+
+Each procedure is a skill of its own, so it is a real `/command`. Claude Code does not look
+inside a skill for more skills, so link each one beside the checkout, in every skills
+directory you use:
+
+```bash
+ln -s ~/.claude/skills/hutch-copilot/skills/* ~/.claude/skills/
+ln -s ~/.claude/skills/hutch-copilot/skills/* ~/.claude-lcls/skills/
 ```
 
 Then put the tools on PATH. No install step, each `bin/hutch-*` finds the package itself:
