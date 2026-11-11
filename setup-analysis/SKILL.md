@@ -27,7 +27,7 @@ sub-skill's **setup contract**:
 | `dags` | a `.dag.j2` rendered (`hutch-lute render --no-whitelist`, same context), a `.dag` copied, to `lute_output/<workflow>.dag`; `--workflow` and `--trigger` in order |
 | `lute` | `--lute` (§4): `release` → `central:<ver>`; `source` → `install:` or `clone:` |
 | `validate` | run on the rendered config; non-zero = the config does not render |
-| `resolve` | `daq` → `hutch-data daq` (already resolved up front); `detnames` → `hutch-data detectors`; `unit_cell` → `hutch-data cell <pdb_file>`; `run_dirs` → created by `hutch-lute sbatch --submit` (`ensure_run_dirs`) |
+| `resolve` | `daq` → `hutch-data daq` (already resolved up front); `detnames` → `hutch-data detectors`, and check every detector variable against it; `unit_cell` → `hutch-data cell <pdb_file>`; `run_dirs` → created by `hutch-lute sbatch --submit` (`ensure_run_dirs`) |
 | `smoke` | §3b, before §4 |
 | `unreviewed` | shown to the operator verbatim |
 | `parse` | recorded for `assess-analysis` (§5) |
