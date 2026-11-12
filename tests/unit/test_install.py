@@ -266,7 +266,10 @@ def test_account_defaults_to_the_experiment(tmp_path, monkeypatch):
     assert lute.plan(experiment="e1", hutch="mfx", workflows=[])["account"] == "lcls:e1"
 
 
-def test_payload_shape(workspace):
+def test_payload_shape(workspace, tmp_path, monkeypatch):
+    # The venv layout the central build has, so the test does not need S3DF's.
+    monkeypatch.setenv("HUTCH_LUTE_CENTRAL", str(tmp_path / "central"))
+    (tmp_path / "central/dev/lute_env_py39/bin").mkdir(parents=True)
     p = lute.plan(experiment="e1", hutch="mfx", workflows=["sfx_cctbx"],
                      triggers=["MANUAL"])
     payload = p["elog_payloads"][0]
