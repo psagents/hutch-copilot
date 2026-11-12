@@ -16,7 +16,7 @@ esac
 [ -n "$hutch" ] || exit 0
 
 . "$repo/bin/hutch-env" >/dev/null 2>&1    # HUTCH_HAPPI_DB, declared once there
-if [ -r "${HUTCH_HAPPI_DB:-}" ]; then
+if [ -n "$on_hutch" ] && [ -r "${HUTCH_HAPPI_DB:-}" ]; then   # /cds alone is not the hutch: psdev has it too
     mode="MODE: local -- the hutch's own files are readable here. Run the hutch-only tools as
 bin/hutch-* (the local column of hutch-copilot's table); use no MCP tool for them."
 else

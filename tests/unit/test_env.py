@@ -113,6 +113,7 @@ def _hook_mode(tmp_path, host: str, happi_readable: bool) -> dict:
     ("mfx-daq", True, "MODE: local", True),       # Claude on the hutch machine
     ("mfx-daq", False, "MODE: mcp", True),        # Cogito's container on the hutch machine
     ("sdfiana025", False, "MODE: mcp", False),    # Cogito or claude on S3DF
+    ("psdev", True, "MODE: mcp", False),          # /cds is mounted, but this is not the hutch
 ])
 def test_the_hook_says_how_the_hutch_is_reached(tmp_path, host, readable, mode, asks):
     out = _hook_mode(tmp_path, host, readable)
