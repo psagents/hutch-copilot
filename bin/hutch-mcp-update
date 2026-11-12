@@ -1,0 +1,40 @@
+#!/bin/sh
+# Keep the SAGE tunnel's hutch-mcp on the newest image from GHCR; for cron, every 15 min and @reboot.
+#   hutch-mcp-update <socket>   pull :main if its digest is new, then (re)start the server on <socket>
+# ~/hutch-mcp.sif links to the image in use, so ssh (stdio) clients take it up on their next start.
+set -eu
+sock=$1
+repo=psagents/hutch-copilot
+export https_proxy=${https_proxy:-http://psproxy:3128}   # the hutch reaches GHCR only through it
+dir=$(dirname -- "$sock")
+pidf=$dir/hutch-mcp.pid
+token=$(curl -sf "https://ghcr.io/token?scope=repository:$repo:pull" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+# The workflow pushes one platform, so :main is a plain OCI manifest; GHCR 404s the index type.
+digest=$(curl -sfI -H "Authorization: Bearer $token" -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+    "https://ghcr.io/v2/$repo/manifests/main" | tr -d '\r' | sed -n 's/^docker-content-digest: *sha256://Ip')
+[ -n "$digest" ] || { echo "$(date -Is) no digest for $repo:main" >&2; exit 1; }
+sif=$HOME/hutch-mcp-$(echo "$digest" | cut -c1-12).sif
+old=$(readlink "$HOME/hutch-mcp.sif" || true)
+pid=$(cat "$pidf" 2>/dev/null || true)
+# The title check, not kill -0 alone: after a reboot the pid file's number may be someone else's.
+running() { [ -n "$pid" ] && ps -p "$pid" -o args= 2>/dev/null | grep -q hutch-mcp; }
+
+if [ ! -f "$sif" ]; then
+    apptainer pull -q "$sif.part" "docker://ghcr.io/$repo@sha256:$digest"
+    mv "$sif.part" "$sif"
+    ln -sfn "$sif" "$HOME/hutch-mcp.sif"
+    echo "$(date -Is) pulled $sif"
+elif running; then
+    exit 0
+fi
+if running; then
+    kill "$pid"
+    # Let it exit first, so two servers never hold <socket> at once.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do running || break; sleep 1; done
+fi
+nohup "$(dirname -- "$0")/hutch-mcp" "$sif" "$sock" >> "$dir/hutch-mcp.log" 2>&1 &
+echo $! > "$pidf"
+echo "$(date -Is) started hutch-mcp $! on $sock"
+# Running stdio clients keep the old image open; removing its path does not stop them.
+[ -n "$old" ] && [ "$old" != "$sif" ] && rm -f "$old"
+exit 0

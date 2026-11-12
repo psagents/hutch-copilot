@@ -120,6 +120,14 @@ bin/hutch-mcp hutch-mcp.sif                 # stdio, for a client over ssh
 bin/hutch-mcp hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
 ```
 
+Or let cron keep the tunnel's server on the newest `:main`, and bring both back after a reboot
+(`crontab -e` on the hutch, `D` spelled out):
+
+```
+*/15 * * * * $HOME/.claude/skills/hutch-copilot/bin/hutch-mcp-update $D/mcp.sock >> $D/update.log 2>&1
+@reboot sleep 30; $HOME/.claude/skills/hutch-copilot/bin/hutch-mcp-update $D/mcp.sock >> $D/update.log 2>&1; $D/run.sh >> $D/run.log 2>&1
+```
+
 `bin/hutch-setup` registers it in every Claude config (see Installing); by hand, for one:
 
 ```bash

@@ -95,8 +95,9 @@ def test_markdown_contains_invocations_to_check():
 #: against. `env` is sourced into a shell rather than run; `session-start` and `stop`
 #: are hooks the harness calls with no arguments, the latter reading JSON on stdin.
 #: test_env.py covers the first two, test_stop_hook.py the third. `mcp` is the
-#: apptainer launcher for the server image, a shell script taking a sif path.
-NOT_CLIS = {"env", "session-start", "stop", "mcp"}
+#: apptainer launcher for the server image, a shell script taking a sif path; `mcp-update`
+#: is its cron wrapper, taking a socket path.
+NOT_CLIS = {"env", "session-start", "stop", "mcp", "mcp-update"}
 
 
 def test_every_binary_is_covered():
