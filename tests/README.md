@@ -10,7 +10,7 @@ pytest` fails with `No module named pytest` and looks like a broken checkout rat
 missing dependency. Any psana env under `conda2/inst/envs/` ships pytest; `ps_20260504` is the
 one these tests are verified against.
 
-`pyproject.toml` sets `pythonpath = ["."]`, so `hutch_tools` imports from the checkout with no
+`pyproject.toml` sets `pythonpath = ["src"]`, so `hutch_copilot` imports from the checkout with no
 install step and there is no `conftest.py`. `pip install -e .` stays optional, by design.
 
 ## Conventions
@@ -20,7 +20,7 @@ install step and there is no `conftest.py`. `pip install -e .` stays optional, b
   directly. That is why every module keeps `build_parser()` separate from `main()`.
 - **Filesystem fixtures go through `monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))`** —
   and paths under it are built with the `paths.*` helpers (`paths` is the tests' alias for
-  `hutch_tools.common`) rather than written as literals. A literal lets a test assert the
+  `hutch_copilot.tools.common`) rather than written as literals. A literal lets a test assert the
   same wrong directory the code produces: both agree and neither matches the filesystem.
 
   `setenv`, not `setattr`: every external path is declared in `bin/hutch-env` and read per

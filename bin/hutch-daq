@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """hutch-daq entry point. Works from a checkout with no install step."""
 import pathlib, sys
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from hutch_tools.daq import main
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+from hutch_copilot.tools.daq import main
 raise SystemExit(main())

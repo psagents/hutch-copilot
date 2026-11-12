@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stop hook: ask the agent to sync the beamtime log, when the turn earned it.
 #
-# Decides *whether to ask*, never what to log -- that judgment is sync-log/SKILL.md,
+# Decides *whether to ask*, never what to log -- that judgment is skills/sync-log/SKILL.md,
 # and it runs in the session that still has the context. This hook spawns nothing.
 #
 # Every failure path is `exit 0` with no output. A bookkeeping hook that can wedge a
@@ -23,12 +23,12 @@ field() { printf '%s' "$payload" | jq -r "${1} // empty" 2>/dev/null; }
 # (sync-log writes it). Guard 4 is that this script calls no tool and spawns no agent.
 [ "$(field .stop_hook_active)" = "true" ] && exit 0
 
-# Same narrow guard as bin/hutch-session-start, for the same reason: off-hutch the
-# tools cannot reach /cds, so asking for a log entry there is noise, not bookkeeping.
+# At a hutch, or wherever bin/hutch-setup configured one (the hutch-<h> MCP server reaches it).
 host="$(hostname -s 2>/dev/null)" || exit 0
 case "$host" in
     *-daq|*-control) hutch="${host%-*}" ;;
-    *) exit 0 ;;
+    *) hutch="$(cat "${HUTCH_SETUP_FILE:-$(getent passwd "${USER:-}" | cut -d: -f6)/.config/hutch-copilot/hutch}" 2>/dev/null)"
+       [ -n "$hutch" ] || exit 0 ;;
 esac
 
 repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)" || exit 0
@@ -54,12 +54,12 @@ experiment="$(grep -oE -- '--experiment[ =]+[a-z]+[0-9]+' "$transcript" 2>/dev/n
 # Did this turn touch the experiment at all? Deliberately coarse: a filter, not
 # judgment. last_assistant_message is in the payload, so the common case needs no
 # transcript read at all.
-touched='hutch-(state|daq|data|lute|log|epics|happi|lightpath|python)|\brun [0-9]+'
+touched='hutch-(state|daq|data|lute|log|epics|happi|lightpath|python|ready)|ready_|daq_state|hutch_py_run|\brun [0-9]+'
 printf '%s' "$(field .last_assistant_message)" | grep -qE "$touched" || exit 0
 
 reason="Before this turn ends, sync the beamtime log for $experiment.
 
-Read $repo/sync-log/SKILL.md and follow it: record what this turn established in
+Read $repo/skills/sync-log/SKILL.md and follow it: record what this turn established in
 the beamtime log (events) and the state file (facts, with provenance), then advance
 the watermark. Hutch is $hutch, experiment is $experiment.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """hutch-lute entry point. Works from a checkout with no install step."""
 import pathlib, sys
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from hutch_tools.lute import main
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+from hutch_copilot.tools.lute import main
 raise SystemExit(main())

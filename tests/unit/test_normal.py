@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import normal, state
+from hutch_copilot import normal
+from hutch_copilot.tools import state
 
 SNAP = {
     "taken_at": "2026-11-01T23:39:57+00:00",
@@ -163,7 +164,7 @@ def test_malformed_normal_is_reported(root):
     assert any("mfxBad" in u for u in got["unreadable"])
 
 
-from hutch_tools import daq, epics, lightpath
+from hutch_copilot.tools import daq, epics, lightpath
 
 
 @pytest.fixture()

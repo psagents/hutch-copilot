@@ -6,11 +6,12 @@ library functions made them unusable from anything but the command line.
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import pytest
 
-from hutch_tools import common as paths, lute
+from hutch_copilot.tools import common as paths, lute
 
 
 # --------------------------------------------------------------------------
@@ -109,7 +110,7 @@ def test_missing_ticket_is_not_blocking_for_the_local_steps(workspace):
 
 def test_all_refuses_before_mutating_when_preconditions_fail(workspace, monkeypatch):
     # Routed through hutch-lute since M1.b; there is no hutch-install binary.
-    from hutch_tools import lute
+    from hutch_copilot.tools import lute
     rc = lute.main(["all", "-e", "e1", "--hutch", "mfx", "-W", "absent_wf",
                     "--confirm", "write"])
     assert rc != 0
@@ -352,10 +353,17 @@ def test_the_two_ticket_checks_are_not_the_same_question(monkeypatch):
     """`have_ticket` asks whether any ticket exists; `elog_ticket` asks for one at
     FILE:$HOME/krb5cc.ticket, which is what register() sets KRB5CCNAME to. A
     ticket in the ambient cache does not satisfy registration."""
-    monkeypatch.setenv("HOME", "/nonexistent")
+    monkeypatch.setattr(lute, "real_home", lambda: "/nonexistent")
     ok, ticket = lute.elog_ticket()
     assert ok is False
-    assert ticket.startswith("FILE:/nonexistent")
+    assert ticket == "FILE:/nonexistent/krb5cc.ticket"
+
+
+def test_elog_ticket_ignores_an_overridden_home(monkeypatch):
+    """A Cogito host sets HOME to ~/.cogito/hosts/<host>; the ticket stays in the account's home."""
+    import pwd
+    monkeypatch.setenv("HOME", "/sdf/home/x/someone/.cogito/hosts/mfx-daq")
+    assert lute.elog_ticket()[1] == f"FILE:{pwd.getpwuid(os.getuid()).pw_dir}/krb5cc.ticket"
 
 
 def test_elog_ticket_asks_klist_for_validity_not_existence(monkeypatch):
@@ -625,7 +633,7 @@ def test_off_s3df_slurm_goes_over_ssh_to_psana(monkeypatch):
 
 
 def test_unreachable_psana_raises_instead_of_reporting_no_job(monkeypatch):
-    from hutch_tools.session import BridgeUnavailable
+    from hutch_copilot.tools.session import BridgeUnavailable
 
     def down(*a, **k):
         raise BridgeUnavailable("ssh to psana timed out")

@@ -9,6 +9,9 @@ description: >
   analysis work, what did the analysis say.
 ---
 
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
+
 # /assess-analysis - LUTE analysis assessment
 
 You own everything **after a job id exists**: watching it, reading its output, and the

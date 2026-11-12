@@ -16,9 +16,9 @@ collection, and automated analysis setup — acting as an expert co-pilot at the
 
 ---
 
-## Tool Layer (`hutch-tools`) — read this before any procedure below
+## Tool Layer (`bin/hutch-*`) — read this before any procedure below
 
-Mechanism lives in `hutch-tools`, not in prose. **Never guess** — call the tool.
+Mechanism lives in the tools (`bin/hutch-*`, code in `src/hutch_copilot/`), not in prose. **Never guess** — call the tool.
 They all print JSON, one module owns one tool, and **one tool owns one backend** —
 so the tool to call follows from which source answers the question.
 
@@ -39,6 +39,46 @@ Run `--help` for subcommands and flags. They work from a bare checkout with no i
 step. `pip install -e .` is optional and only adds the same commands to PATH — never
 require it.
 
+**What only the hutch can read is reached one of two ways, and the session start says which.**
+happi, Channel Access, the archiver, lightpath, the DAQ control port, and the readiness
+checks over them exist only on the hutch machine. The SessionStart hook prints `MODE: local`
+or `MODE: mcp`:
+
+- **`MODE: local`**: Claude runs directly on the hutch machine (`/cds` is readable). Run the
+  `bin/hutch-*` in the *local* column. Use no MCP tool for these, even one that is connected.
+- **`MODE: mcp`**: anywhere else, a Cogito session included, even one on the hutch machine,
+  whose container has no `/cds`. Call the tool in the *MCP* column. Through SAGE it is named
+  `mcp__sdf-mcp__hutch<hutch>_<tool>`, for example `mcp__sdf-mcp__hutchmfx_ready_beam`; on a
+  directly registered server, `mcp__hutch-<hutch>__<tool>`. Never run the local column here:
+  it fails with rc 4 and proves nothing.
+- **No `MODE:` line**: the hook did not run. Check once with `test -r /cds/group/pcds` on a
+  `*-daq` host. Readable means local, anything else means mcp. Never try local first and fall
+  back on rc 4.
+
+| Answers | local | MCP |
+|---|---|---|
+| the three readiness checks, verdict included (`are-we-ready`) | `bin/hutch-ready beam\|hutch\|daq --hutch "$H"` | `ready_beam`, `ready_hutch`, `ready_daq` |
+| the device database | `bin/hutch-happi list\|device\|pv --hutch "$H"` | `happi_list`, `happi_device`, `happi_pv` |
+| live PV values | `bin/hutch-epics caget <pv>...` | `epics_caget` (a list: one call for many PVs) |
+| the archiver | `bin/hutch-epics history\|moved <pv> --from <t>` | `epics_history`, `epics_moved` |
+| the beam path and its blockers | `bin/hutch-lightpath path --hutch "$H"` | `lightpath_path` |
+| the DAQ's own state, off its control port | `bin/hutch-daq --hutch "$H" state` | `daq_state` |
+| the current state against the operator's normal snapshot | `bin/hutch-normal diff --hutch "$H" --experiment "$E"` | `normal_diff` |
+| a file under `/cds` | `bin/hutch-data cat <path>` | `data_cat` |
+| python in a fresh hutch-python load (`take-run`) | `bin/hutch-py --hutch "$H" … run "<code>"` | `hutch_py_run` |
+
+Over MCP, leave `hutch` out: it defaults to the server's own. In both modes, run locally what
+works from anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
+`hutch-daq logs`/`config`, `hutch-data xtc2`/`detectors`, `hutch-normal show`.
+
+If a tool is not there, will not load, or errors, that is rule 3: say which, and stop there.
+Loading a tool that still is not callable once is enough; do not load it again. Never rebuild
+an answer from other reads, or from the tools' source: a verdict you assembled yourself is a
+guess with the tool's name on it. **A write is never yours to approve.** Locally, `bin/hutch-py`
+refuses until the operator has approved the class you then pass as `--confirm`. Over MCP,
+`hutch_py_run` asks the operator itself, and refuses writes over SAGE until a per-user policy
+exists.
+
 Three rules that the tools enforce and you must not work around:
 
 1. **Every value carries provenance.** `hutch-state set` requires `--source`, and `--kind`
@@ -54,23 +94,22 @@ Three rules that the tools enforce and you must not work around:
 `python -u` and never through `tail`, and anything over a minute runs in the background.
 An unbounded probe reads every jungfrau/epix stream just to count codes.
 
-Resolve, don't recall: device lists and PV prefixes come from `hutch-happi`, detector
-aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq`. This skill
+Resolve, don't recall: device lists and PV prefixes come from happi (`happi_list`,
+`happi_pv`), detector aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq config`. This skill
 deliberately ships no tables of them.
 
 **"Did this move overnight?" is not a `caget` question.** `caget` reads now. For what
 changed between two times, ask the archiver — and ask it for `.MSTA`, not `.RBV`:
 
-```bash
-bin/hutch-epics moved MFX:DG1:PIC:01 --from 2026-10-02T18:00
+```
+epics_moved(pv="MFX:DG1:PIC:01", start="2026-10-02T18:00")
 ```
 
 `.RBV` is archived with a deadband, so a move smaller than it leaves no sample and reads
 as "did not move"; `moved` reads `.MSTA` instead, which is archived on change, and
 discards IOC reconnects that would otherwise look like motion. `moved: null` means no
-usable sample — unknown, never a confident no. Use `history <pv>` for the raw series.
-The archiver is on the hutch network only; off-hutch both fail rc=4 rather than
-returning an empty series.
+usable sample — unknown, never a confident no. Use `epics_history` for the raw series.
+An unreachable archiver is an error, never an empty series.
 
 Two rules about the experiment state file, which every sub-skill reads and writes:
 
@@ -122,17 +161,19 @@ assume LCLS-II.
 ### Then check the Kerberos ticket
 
 ```bash
-klist -s -c FILE:$HOME/krb5cc.ticket && klist -c FILE:$HOME/krb5cc.ticket | grep -m1 krbtgt
+T=FILE:$(getent passwd $USER | cut -d: -f6)/krb5cc.ticket
+klist -s -c $T && klist -c $T | grep -m1 krbtgt
 ```
 
-The eLog reads **that file**, not the ambient cache: registering a workflow, posting run
+The ticket lives in the account's home from passwd, not `$HOME`: a Cogito host sets `$HOME`
+to `~/.cogito/hosts/<host>`. The eLog reads **that file**, not the ambient cache: registering a workflow, posting run
 summaries and eLog lookups all need it. `-s` exits non-zero on an expired ticket too. If
 it fails, ask the operator once, in the same reply as the context line, to run this
 **in their own terminal** — not as a `!` command, which has no TTY for the password
 prompt and falls back to PKINIT:
 
 ```bash
-kinit -c FILE:$HOME/krb5cc.ticket $USER@SLAC.STANFORD.EDU
+kinit -c FILE:$(getent passwd $USER | cut -d: -f6)/krb5cc.ticket $USER@SLAC.STANFORD.EDU
 ```
 
 Then re-run the check. It is not a blocker: if they decline, proceed, and say which steps
@@ -141,19 +182,20 @@ recorded in state.
 
 ---
 
-## Command Dispatch
+## The procedures
 
-Route based on the user's slash command or closest natural-language intent. Read the
-sub-skill rather than working from memory of it.
+Each is its own skill, so `/are-we-ready` and the rest are real commands, and a question
+that matches one loads it. Its rules are the ones above; follow the skill, not your memory
+of it.
 
-| Command / Intent | Action |
+| Command | For |
 |---|---|
-| `/take-run` or "take a run", "start collecting", "begin run", "take a dark run", "take a pedestal run", "take a geometry run", "take a data run" | Read `take-run/SKILL.md` |
-| `/are-we-ready` or "are we ready", "is beam blocked", "beam path status" | Read `are-we-ready/SKILL.md` |
-| `/debug-daq` or "the DAQ is broken", "DAQ won't start", "we're losing data", "high deadtime", "damage events", "why did the run fail", "what happened last night" | Read `debug-daq/SKILL.md` |
-| `/setup-analysis` or "set up LUTE", "configure analysis", "render the config", "register the workflow", "is LUTE ready", "submit the analysis" | Read `setup-analysis/SKILL.md`. |
-| `/assess-analysis` or "how does the data look", "assess the run", "is the dataset good", "what did the analysis say" | Read `assess-analysis/SKILL.md` |
-| `/sync-log` or "log that", "update the log", "write it down", or a Stop-hook request to sync | Read `sync-log/SKILL.md` |
+| `/are-we-ready` | one readiness verdict: beam, the hutch's devices, the DAQ |
+| `/take-run` | a DARK, GEOM or DATA run, gated and confirmed |
+| `/debug-daq` | the readings a DAQ diagnosis starts from, handed to `@psana-daq` |
+| `/setup-analysis` | a LUTE workflow, up to registration or a job id |
+| `/assess-analysis` | a submitted LUTE job: what it produced, and the one knob to turn |
+| `/sync-log` | the beamtime log and state file, from this turn |
 
 ---
 

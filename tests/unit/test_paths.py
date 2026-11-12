@@ -6,15 +6,15 @@ import pathlib
 
 import pytest
 
-from hutch_tools import common as paths
+from hutch_copilot.tools import common as paths
 
 
 def test_skill_root_is_self_resolving():
-    # SKILL.md and are-we-ready/SKILL.md hardcoded
+    # SKILL.md and skills/are-we-ready/SKILL.md hardcoded
     # /sdf/home/f/fpoitevi/.claude/skills/hutch-copilot in three places, which
     # broke the bridge setup and both readiness checks for every other user.
     root = paths.skill_root()
-    assert (root / "hutch_tools" / "common.py").exists()
+    assert (root / "src" / "hutch_copilot" / "tools" / "common.py").exists()
     assert (root / "SKILL.md").exists()
 
 
@@ -48,7 +48,7 @@ def test_ds_root_is_overridable(tmp_path, monkeypatch):
 DECLARED = [
     "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "ENG_TOOLS", "PCDS_PYTHON", "PSCONDA",
     "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
-    "DS_ROOT", "SKILL_ROOTS",
+    "DS_ROOT", "SKILL_ROOTS", "PCDS_PY39ENV",
 ]
 
 
@@ -136,7 +136,7 @@ def test_cell_string_matches_the_format_in_production_use(tmp_path):
     rendered YAML, so '90.0' vs '90' is the difference between passing and a
     spurious failure. setup-cctbx-pipeline's read_cryst1 emitted str(float); match that.
     """
-    from hutch_tools import data as resolvers
+    from hutch_copilot.tools import data as resolvers
     pdb = tmp_path / "x.pdb"
     pdb.write_text(
         "CRYST1   77.050   77.050   37.210  90.00  90.00  90.00 P 43 21 2     8\n"
@@ -195,7 +195,7 @@ def test_resolve_daq_prefers_xtc2_and_is_none_without_data(tmp_path, monkeypatch
 
 
 def test_hutch_data_daq_and_xtc_report_lcls1(tmp_path, monkeypatch):
-    from hutch_tools import data
+    from hutch_copilot.tools import data
     d = _xtc_dir(tmp_path, monkeypatch)
     (d / "e1-r0073-s00-c00.xtc").write_bytes(b"x" * 10)
     rec = data.daq("cxi", "e1")
@@ -209,7 +209,7 @@ def test_hutch_data_daq_and_xtc_report_lcls1(tmp_path, monkeypatch):
 
 def test_detectors_uses_psana1_for_lcls1(tmp_path, monkeypatch):
     import subprocess
-    from hutch_tools import data
+    from hutch_copilot.tools import data
     d = _xtc_dir(tmp_path, monkeypatch, exp="cxi101")
     (d / "cxi101-r0094-s00-c00.xtc").write_bytes(b"x")
     seen = []
@@ -224,7 +224,7 @@ def test_detectors_uses_psana1_for_lcls1(tmp_path, monkeypatch):
 
 
 def test_detectors_refuses_without_data(tmp_path, monkeypatch):
-    from hutch_tools import data
+    from hutch_copilot.tools import data
     _xtc_dir(tmp_path, monkeypatch, exp="cxi102")
     with pytest.raises(data.DataError, match="--daq lcls1"):
         data.detectors("cxi102", 1)

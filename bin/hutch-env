@@ -4,7 +4,7 @@
 # Not executable and has no shebang on purpose -- a subshell that exported
 # these would exit and take them with it.
 #
-# PYTHONPATH is deliberately NOT set: every bin/hutch-* inserts the repo root
+# PYTHONPATH is deliberately NOT set: every bin/hutch-* inserts <repo>/src
 # on sys.path itself, so the tools already work from a bare checkout and an
 # export here would only be a second way to get it wrong.
 #
@@ -44,6 +44,8 @@ export HUTCH_ENG_TOOLS="${HUTCH_ENG_TOOLS:-/cds/group/pcds/engineering_tools}"
 # Interpreters. PCDS_PYTHON runs lightpath/happi; the psconda script and the two
 # LUTE interpreters are the analysis side.
 export HUTCH_PCDS_PYTHON="${HUTCH_PCDS_PYTHON:-/cds/group/pcds/pyps/conda/py312/envs/pcds-6.1.0/bin/python3.12}"
+# Sourced on psdev before the pedestal fallback tools (hutch-lute peds --fallback).
+export HUTCH_PCDS_PY39ENV="${HUTCH_PCDS_PY39ENV:-/cds/group/pcds/pyps/conda/py39env.sh}"
 export HUTCH_PSCONDA="${HUTCH_PSCONDA:-/sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh}"
 # psana1, for LCLS-I experiments (.xtc, not .xtc2): detector names and the env a
 # LUTE Task runs in there. LUTE's submit_slurm --psana1 sources the same script.

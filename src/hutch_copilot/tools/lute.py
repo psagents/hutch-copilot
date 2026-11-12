@@ -65,6 +65,7 @@ import functools
 import json
 import os
 import pathlib
+import pwd
 import re
 import shlex
 import shutil
@@ -482,7 +483,7 @@ PEDS_FALLBACKS = {
 }
 
 #: Environment the fallback tools need on psdev.
-PEDS_ENV = "source /cds/group/pcds/pyps/conda/py39env.sh"
+PEDS_ENV = f"source {external_path('PCDS_PY39ENV')}"
 
 #: makepeds takes minutes on a full DARK run, so the remote command gets its own
 #: budget -- but the connection still has to fail fast on an unreachable psdev.
@@ -555,7 +556,7 @@ def deploy_pedestals(
     results = []
     for cmd in commands:
         try:
-            stdout = ssh("psdev", cmd, timeout=30, run_timeout=PEDS_RUN_TIMEOUT, jump=None)
+            stdout = ssh("psdev", cmd, timeout=30, run_timeout=PEDS_RUN_TIMEOUT)
         except BridgeUnavailable as exc:
             results.append({"command": cmd, "returncode": exc.returncode or 255,
                             "stdout": exc.stdout[-2000:], "stderr": exc.stderr[-2000:]})
@@ -1239,14 +1240,19 @@ def elog_payload(
     }
 
 
+def real_home() -> str:
+    """The account's home from passwd, not $HOME, which a Cogito host points at ~/.cogito/hosts/<host>."""
+    return pwd.getpwuid(os.getuid()).pw_dir
+
+
 def elog_ticket() -> tuple[bool, str]:
     """Is there a usable Kerberos ticket at the path the eLog path expects?
 
     Distinct from ``have_ticket()``, which asks the ambient cache whether *any*
-    ticket exists. eLog registration needs one at ``FILE:$HOME/krb5cc.ticket``
+    ticket exists. eLog registration needs one at ``FILE:~/krb5cc.ticket``
     specifically, because that is what it sets KRB5CCNAME to.
     """
-    ticket = f"FILE:{os.environ.get('HOME', '')}/krb5cc.ticket"
+    ticket = f"FILE:{real_home()}/krb5cc.ticket"
     try:
         # -s, not plain -c: `klist -c` exits 0 on an expired ticket as long as the
         # cache file exists; -s exits non-zero unless a ticket is still valid.

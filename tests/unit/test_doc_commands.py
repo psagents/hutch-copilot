@@ -12,32 +12,33 @@ and flag *names* are, which is where drift actually happens.
 
 from __future__ import annotations
 
-import pathlib
 import re
 
 import pytest
 
-import hutch_tools
+from hutch_copilot.tools.common import skill_root
 
-SKILL = pathlib.Path(hutch_tools.__file__).resolve().parent.parent
+SKILL = skill_root()
 
-#: binary suffix -> module that owns it.
+#: binary suffix -> module, under hutch_copilot, that owns it.
 #: MUST list every bin/hutch-*; test_every_binary_is_covered enforces that.
 #: `log` and `install` were missing for their whole existence, so 13 documented
 #: invocations were skipped by the `suffix not in BINARIES` guard below -- a
 #: drift check with a silent hole is the bug class this repo exists to remove.
 BINARIES = {
-    "state": "state",
-    "daq": "daq",
-    "happi": "happi",
-    "epics": "epics",
-    "lightpath": "lightpath",
-    "py": "session",
-    "data": "data",
-    "skills": "skills",
-    "lute": "lute",
-    "log": "log",
+    "state": "tools.state",
+    "daq": "tools.daq",
+    "happi": "tools.happi",
+    "epics": "tools.epics",
+    "lightpath": "tools.lightpath",
+    "py": "tools.session",
+    "data": "tools.data",
+    "skills": "tools.skills",
+    "lute": "tools.lute",
+    "log": "tools.log",
     "normal": "normal",
+    "ready": "readiness",
+    "setup": "install",
 }
 
 INVOCATION = re.compile(r"bin/hutch-([a-z]+)((?:[ \t]+[^\n`|#]*)?)")
@@ -48,7 +49,7 @@ def _parsers():
 
     out = {}
     for suffix, module in BINARIES.items():
-        mod = importlib.import_module(f"hutch_tools.{module}")
+        mod = importlib.import_module(f"hutch_copilot.{module}")
         out[suffix] = mod.build_parser()
     return out
 
@@ -93,8 +94,9 @@ def test_markdown_contains_invocations_to_check():
 #: Not argparse CLIs, so there is no parser to check a documented invocation
 #: against. `env` is sourced into a shell rather than run; `session-start` and `stop`
 #: are hooks the harness calls with no arguments, the latter reading JSON on stdin.
-#: test_env.py covers the first two, test_stop_hook.py the third.
-NOT_CLIS = {"env", "session-start", "stop"}
+#: test_env.py covers the first two, test_stop_hook.py the third. `mcp` is the
+#: apptainer launcher for the server image, a shell script taking a sif path.
+NOT_CLIS = {"env", "session-start", "stop", "mcp"}
 
 
 def test_every_binary_is_covered():
@@ -139,3 +141,19 @@ def test_documented_invocation_matches_the_cli(source, suffix, argv):
         f"{source}: `hutch-{suffix} {' '.join(argv)}` uses {unknown}, "
         f"not in {sorted(known)}"
     )
+
+
+MCP_NAME = re.compile(r"\b(?:happi|epics|lightpath|daq|normal|data|ready|hutch_py)_[a-z_]+")
+
+
+def test_every_mcp_tool_a_skill_names_exists():
+    """A SKILL.md naming a tool the server lacks sends the model looking for it, then improvising."""
+    import ast
+
+    tree = ast.parse((SKILL / "src" / "hutch_copilot" / "server.py").read_text())
+    served = {f.name for f in tree.body if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and any(ast.unparse(d) == "mcp.tool()" for d in f.decorator_list)}
+    named = {(md.relative_to(SKILL).as_posix(), n) for md in SKILL.rglob("SKILL.md")
+             if ".git" not in md.parts for n in MCP_NAME.findall(md.read_text())}
+    assert served and named
+    assert not {(md, n) for md, n in named if n not in served}

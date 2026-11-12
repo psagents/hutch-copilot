@@ -1,0 +1,21 @@
+#!/bin/sh
+# Run hutch-mcp from its image on a hutch machine.
+#   hutch-mcp <sif>            stdio, for a client over ssh
+#   hutch-mcp <sif> <socket>   streamable HTTP on <socket>, for the SAGE tunnel: start it before run.sh
+# --cleanenv as in the tunnel's run.sh, so only EPICS_CA_*/EPICS_PVA_* pass through.
+set -eu
+sif=$1
+sock=${2-}
+binds=/cds,/reg/g,/sdf/home,/sdf/group,/sdf/data
+# The server's default hutch, from this machine's name (hutch-env's rule), unless HUTCH is set.
+hutch=${HUTCH:-$(bash -c '. "$1" >/dev/null 2>&1; hutch_from_hostname' _ "$(dirname -- "$0")/hutch-env" || true)}
+envs="--env USER=${USER:-$(id -un)}${hutch:+ --env HUTCH=$hutch}"   # hutch-python reads USER
+for v in $(env | sed -n 's/^\(EPICS_\(CA\|PVA\)_[A-Z_]*\)=.*/\1/p'); do envs="$envs --env $v=$(printenv "$v")"; done
+if [ -n "$sock" ]; then
+    rm -f "$sock"
+    # shellcheck disable=SC2086
+    exec apptainer run --cleanenv --bind "$binds,$(dirname -- "$sock")" $envs \
+        --env MCP_TRANSPORT=streamable-http --env "MCP_UDS=$sock" "$sif"
+fi
+# shellcheck disable=SC2086
+exec apptainer run --cleanenv --bind "$binds" $envs "$sif"

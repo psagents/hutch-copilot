@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import subprocess
 
-from hutch_tools import lute
+from hutch_copilot.tools import lute
 
 
 def _fake_sacct(monkeypatch, stdout: str):

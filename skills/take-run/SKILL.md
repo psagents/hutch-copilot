@@ -10,6 +10,9 @@ description: >
   take a data run.
 ---
 
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
+
 # /take-run — Start a DAQ Run
 
 This file owns the gate, the confirmation, and the verdict on what came back.
@@ -20,8 +23,10 @@ This file owns the gate, the confirmation, and the verdict on what came back.
 
 ```bash
 bin/hutch-state audit --hutch "$H" --experiment "$E"    # everything known, with age
-bin/hutch-daq --hutch "$H" state
 ```
+
+and the DAQ state: `bin/hutch-daq --hutch "$H" state` in `MODE: local`, `daq_state()` in `MODE: mcp`.
+
 
 `MissingValue` → ask the operator. `StaleValue` → re-resolve, or `--stale-ok` and report
 the age. A detector name recorded last shift will tell you it is old rather than looking
@@ -72,28 +77,37 @@ sending; do not translate this table.
 
 ## 3. Confirm — this is a write
 
-Run the command **without `--confirm`** first: it prints the classification and refuses
-(rc 5) without transmitting anything. Show the operator the command, the class and its
-reasons, the duration and the sample, and wait for explicit approval. Then re-send with
-the class you were actually granted:
+Tell the operator the command, the duration and the sample first. **You cannot approve it
+yourself**, in either mode:
 
-```bash
-bin/hutch-py --hutch "$H" --timeout 300 --confirm write run "<run command>"
-bin/hutch-daq --hutch "$H" state        # run_number / last_run_number
-```
+- **`MODE: local`**: send it **without `--confirm`** first. It prints the class and its reasons
+  and refuses (rc 5) without running anything. Show those to the operator, wait for explicit
+  approval, then re-send with the class they actually granted:
+  ```bash
+  bin/hutch-py --hutch "$H" --timeout 300 --confirm write run "<run command>"
+  ```
+- **`MODE: mcp`**: `hutch_py_run(code="<run command>")`. The server classifies it and, for a
+  write, shows the operator a form with the class, its reasons and the code. It runs only if they
+  type the class (`write`, `beam-critical`) and accept. Over SAGE it refuses writes until a
+  per-user policy exists: say so, and the run is taken from a session on the hutch machine.
+
+A decline, a cancel, or a client that cannot show the form is an error, and nothing ran:
+report it, and never retry to wear them down. Then read the DAQ state again for
+`run_number` / `last_run_number`.
 
 `run` launches a fresh device load and needs no live session. It pays that load on
 every call (tens of seconds), so batch a multi-step sequence into one snippet rather
-than issuing several. Exit code **1** means the snippet itself raised — the traceback
-is in `error`; **4** means the launcher or hutch could not be reached at all.
+than issuing several. `rc 1` means the snippet itself raised — the traceback is in
+`error`; `rc 4` means the launcher or hutch could not be reached; `rc 5` means the
+class confirmed was weaker than the snippet's.
 
 The run number comes from the DAQ, not from `get_run()`. `get_run()` is an HTTP GET
 against the elog (`mfx/macros.py:619-622`) despite its docstring claiming otherwise, so
-it lags the DAQ and needs off-hutch HTTPS. `hutch-daq state` already reports
+it lags the DAQ and needs off-hutch HTTPS. The DAQ state already reports
 `run_number` and `last_run_number` from `DaqControl.getStatus()`.
 
 **`DARK` is two writes, and the second is gated.** `takepeds()` records through
-`run`; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
+`hutch_py_run`; only **after XTC2 is confirmed** does the analysis side run, confirmed with the
 operator separately from the run itself:
 
 ```bash
@@ -133,7 +147,7 @@ on the strength of the command having returned.
 
 ```bash
 bin/hutch-state set --hutch "$H" --experiment "$E" last_run_number {run} \
-    --source "hutch-daq state run_number after autorun" --kind resolved
+    --source "daq_state run_number after autorun" --kind resolved
 bin/hutch-state set --hutch "$H" --experiment "$E" last_run_tag "{run_type}" \
     --source "run_type confirmed with operator" --kind operator
 ```

@@ -9,6 +9,9 @@ description: >
   patch the DAG, is LUTE ready, submit the analysis, analyze data.
 ---
 
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
+
 # setup-analysis
 
 You own everything up to **a registered workflow, or a job id**. You stop there.
@@ -224,7 +227,7 @@ it; a path it could not grant blocks. Paths owned by someone else are listed in
 `skipped_not_owned` — tell their owner. The hutch hosts' NFS mount has no ACL support, so
 the tool sets them over `ssh psana`. Never fix access with `777`.
 
-**`register` needs a ticket at `FILE:$HOME/krb5cc.ticket` specifically**, not the ambient
+**`register` needs a ticket at `FILE:<home from passwd>/krb5cc.ticket` specifically**, not the ambient
 cache — a fresh `kinit` in your shell does not satisfy it. The check validates expiry, so
 `ok: false` on a file that exists means the credential is stale; the error prints the
 `kinit` line to hand the operator. **They run it in their own terminal**, not as a `!`

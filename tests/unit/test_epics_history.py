@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from hutch_tools import epics
+from hutch_copilot.tools import epics
 
 #: MSTA on a connected motor: bit 11 set, so a sample is real.
 PRESENT = epics.MSTA_PRESENT

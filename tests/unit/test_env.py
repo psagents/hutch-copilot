@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from hutch_tools.common import script
+from hutch_copilot.tools.common import script
 
 ENV = script("bin", "hutch-env")
 
@@ -96,6 +96,31 @@ def test_the_hook_is_silent_off_hutch():
         assert res.returncode == 0, f"{host} exited {res.returncode}"
 
 
+def _hook_mode(tmp_path, host: str, happi_readable: bool) -> dict:
+    (tmp_path / "hostname").write_text(f"#!/bin/bash\necho {host}\n")
+    (tmp_path / "hostname").chmod(0o755)
+    (tmp_path / "hutch").write_text("mfx\n")
+    db = tmp_path / "db.json"
+    if happi_readable:
+        db.write_text("{}")
+    res = subprocess.run([str(HOOK)], capture_output=True, text=True,
+                         env={"PATH": f"{tmp_path}:/usr/bin:/bin", "HUTCH_HAPPI_DB": str(db),
+                              "HUTCH_SETUP_FILE": str(tmp_path / "hutch")})
+    return json.loads(res.stdout)
+
+
+@pytest.mark.parametrize("host,readable,mode,asks", [
+    ("mfx-daq", True, "MODE: local", True),       # Claude on the hutch machine
+    ("mfx-daq", False, "MODE: mcp", True),        # Cogito's container on the hutch machine
+    ("sdfiana025", False, "MODE: mcp", False),    # Cogito or claude on S3DF
+    ("psdev", True, "MODE: mcp", False),          # /cds is mounted, but this is not the hutch
+])
+def test_the_hook_says_how_the_hutch_is_reached(tmp_path, host, readable, mode, asks):
+    out = _hook_mode(tmp_path, host, readable)
+    assert mode in out["hookSpecificOutput"]["additionalContext"]
+    assert ("systemMessage" in out) is asks
+
+
 def test_the_hook_names_the_hutch_on_a_hutch_host():
     for host, hutch in [("mfx-daq", "mfx"), ("rix-daq", "rix"), ("tmo-control", "tmo")]:
         out = _hook_on(host).stdout
@@ -134,11 +159,12 @@ def test_no_external_path_literal_survives_in_the_package():
     and which copy wins depends on the code path that host takes. With one
     declaration and Python reading it, drift is not possible.
     """
-    from hutch_tools import common as paths
+    from hutch_copilot.tools import common as paths
 
     offenders = {}
-    pattern = re.compile(r'"(/cds/[^"]+|/sdf/(?:group|data)/[^"]+)"')
-    for py in sorted((paths.skill_root() / "hutch_tools").glob("*.py")):
+    # Anywhere inside a string, not only at its start: "source /cds/.../py39env.sh" hid here.
+    pattern = re.compile(r'"[^"\n]*?(/cds/[^"\s]+|/sdf/(?:group|data)/[^"\s]+)')
+    for py in sorted((paths.skill_root() / "src" / "hutch_copilot").rglob("*.py")):
         hits = set(pattern.findall(py.read_text(errors="replace")))
         if hits:
             offenders[py.name] = sorted(hits)
@@ -151,11 +177,11 @@ def test_no_external_path_literal_survives_in_the_package():
 @pytest.mark.parametrize("name", [
     "EPICS_BIN", "HAPPI_DB", "PYTHON_APPS", "ENG_TOOLS", "PCDS_PYTHON", "PSCONDA",
     "PSCONDA1", "LUTE_PY39", "LUTE_PY311", "DAQ_CONFIG_DIR", "OPR_LOG_ROOT",
-    "DS_ROOT", "SKILL_ROOTS", "ARCHIVER_URL",
+    "DS_ROOT", "SKILL_ROOTS", "ARCHIVER_URL", "PCDS_PY39ENV",
 ])
 def test_bash_and_python_agree_on_every_external_path(name):
     """Sourcing hutch-env and calling external_path() must give one answer."""
-    from hutch_tools import common as paths
+    from hutch_copilot.tools import common as paths
 
     from_bash = _sh(f'echo "$HUTCH_{name}"').stdout.strip()
     assert from_bash, f"hutch-env did not export HUTCH_{name}"

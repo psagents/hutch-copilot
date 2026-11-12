@@ -4,8 +4,12 @@ description: >
   Record what a turn established into the beamtime log and the experiment state file.
   Invoked by the Stop hook (bin/hutch-stop) at the end of any turn that touched the
   experiment, or by the operator as /sync-log. Reads the session transcript from the
-  watermark forward, never whole.
+  watermark forward, never whole. Triggers on: /sync-log, log that, update the log,
+  write it down, or a Stop-hook request to sync.
 ---
+
+> Part of `hutch-copilot`: its rules apply here, and its commands run from that skill's
+> directory (`bin/hutch-*`). If it is not loaded in this session, load it first.
 
 # Sync Log (`sync-log`)
 
@@ -79,7 +83,7 @@ Anything *resolved* during the turn, with provenance that is not optional:
 
 ```bash
 bin/hutch-state set last_run_number 43 --hutch $H --experiment $E \
-    --source "hutch-daq state --hutch mfx" --kind resolved
+    --source "daq_state on hutch-mfx" --kind resolved
 ```
 
 `--kind` follows the rule in the parent `SKILL.md` without exception:

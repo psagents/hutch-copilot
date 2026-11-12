@@ -3,58 +3,46 @@
 A Claude Code skill for running an LCLS/LCLS-II experiment: beam readiness, data
 collection, and reading back what the analysis produced.
 
-Two halves. The **skills** (`SKILL.md` and the four sub-skill directories — `take-run`,
-`are-we-ready`, `setup-analysis`, `assess-analysis`) carry
+Two halves. The **skills** (`SKILL.md`, and one per procedure under `skills/` — `/are-we-ready`,
+`/take-run`, `/debug-daq`, `/setup-analysis`, `/assess-analysis`, `/sync-log`) carry
 judgment — what to ask the operator, when to confirm, how to sequence a shift. The
-**tools** (`hutch_tools/`) carry mechanism.
+**tools** (`src/hutch_copilot/`) carry mechanism.
 
 ## Installing
 
-Run it on a `{hutch}-daq` machine — `mfx-daq`, `rix-daq`, and so on. That is the
-design target, not a preference: `/cds`, the DAQ log tree, the pcds environments and
-Channel Access are all native there.
-
-Claude Code only finds a skill inside a directory it scans, so the checkout has to be
-one of:
-
-| launched as | put it at |
-|---|---|
-| `claude` | `~/.claude/skills/hutch-copilot` |
-| `claude-lcls` (sets `CLAUDE_CONFIG_DIR`) | `~/.claude-lcls/skills/hutch-copilot` |
-
-A checkout anywhere else is invisible to the `Skill` tool no matter how correct the
-code is — the symptom is `Unknown skill: hutch-copilot`, with `SKILL.md` readable by
-hand. To serve both from one checkout, symlink the second — to **your** checkout, never another user's:
-
 ```bash
-ln -s ~/.claude/skills/hutch-copilot ~/.claude-lcls/skills/hutch-copilot
+git clone https://github.com/psagents/hutch-copilot.git ~/.claude/skills/hutch-copilot
+~/.claude/skills/hutch-copilot/bin/hutch-setup --hutch mfx --sif <image path on the hutch>
 ```
 
-Then put the tools on PATH. No install step, each `bin/hutch-*` finds the package itself:
+`hutch-setup` is idempotent; run it again after a pull, and `--check` reports what it would
+change without changing anything. For every Claude config on the account — `claude-lcls`
+(`$CLAUDE_CONFIG_DIR`), plain `claude` (`~/.claude`) and each Cogito host overlay — it:
 
-```bash
-source bin/hutch-env     # sets PATH and $HUTCH, finds caget
-```
+- **links the skills**: the checkout as `hutch-copilot`, and each `skills/<name>` beside it,
+  so `/are-we-ready` and the rest are real commands. Claude Code only finds a skill in a
+  directory it scans, and never inside another skill. A link that is not this checkout's —
+  another user's copy — is reported and left alone.
+- **installs the hooks**: `SessionStart` and `Stop` pointing at **this** checkout's `bin/`,
+  replacing any that point at another checkout. Other keys are kept; the old file is saved
+  as `settings.json.bak-<time>`.
+- **registers `hutch-<hutch>`**, the MCP server everything hutch-only goes through: local
+  (`bin/hutch-mcp <sif>`) for a plain session on the hutch itself, over your own ssh from
+  anywhere else, and always over ssh from Cogito, whose container has neither apptainer nor
+  `/cds`. Then checks that it connects.
+- **checks what it cannot do for you**: a Kerberos ticket (it prints the `kinit` line; run it
+  in your own terminal), key-based ssh to the hutch, the image at `--sif`, and the advisors
+  (`scripts/fetch-advisors.sh` installs them).
 
-At a hutch, `bin/hutch-session-start` announces the host, the hutch and this path at
-every session start. Off-hutch it stays silent, by design.
-
-Logging is ambient via a second hook. Register both from **your own** checkout:
-
-```bash
-scripts/install-hooks.py                        # ~/.claude-lcls (or $CLAUDE_CONFIG_DIR)
-scripts/install-hooks.py --config-dir ~/.claude # for plain `claude`
-scripts/install-hooks.py --check                # report only
-```
-
-It adds `SessionStart`/`Stop` if missing, and replaces any that point at another
-checkout — never copy hook lines from someone else's `settings.json`: their path is
-baked in, and your session then runs their copy of the skill and hooks. Other keys are
-kept; the old file is saved as `settings.json.bak-<time>`.
+It also records the hutch in `~/.config/hutch-copilot/hutch`. At a hutch,
+`bin/hutch-session-start` asks the operator for the experiment at every session start;
+anywhere else it only tells the model that the hutch is reachable through `hutch-<hutch>`,
+and says nothing to the operator. The tools need no install step: each `bin/hutch-*` finds
+the package itself, and `source bin/hutch-env` puts them on PATH.
 
 `hutch-stop` blocks the turn once when it ended having touched the experiment, so
 `sync-log` records it while the context is still live. It spawns nothing, writes nothing,
-and exits silently off-hutch, inside this checkout (developing the copilot is not
+and exits silently where no hutch is set up, inside this checkout (developing the copilot is not
 operating the hutch), with no experiment established, or on any malformed input.
 Four things stop it looping: `stop_hook_active`, the harness's own
 `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` (default 8), the advancing `sync_log.last_uuid`
@@ -98,6 +86,46 @@ required advisor as absent, or omit it entirely. Revisit if they move to the org
 
 **Restart Claude Code afterwards** — the skill list is read once at session start, so a
 freshly linked advisor is invisible until then.
+
+### Two settings: on the hutch, or through MCP
+
+A session reaches what only the hutch can read in one of two ways, and `bin/hutch-session-start`
+tells it which (`MODE: local` or `MODE: mcp`), by whether the hutch's own files are readable where
+Claude runs:
+
+| Where Claude runs | Mode |
+|---|---|
+| a terminal on the hutch machine (`claude` on `mfx-daq`) | **local**: `bin/hutch-*` directly |
+| Cogito, on S3DF **or** on the hutch machine (its container has no `/cds`) | **mcp**: the `hutch-mcp` tools, through SAGE/agentgateway as `mcp__sdf-mcp__hutch<hutch>_<tool>` (like `epics-mfx`), or, until that is enrolled, registered directly over your own ssh as `mcp__hutch-<hutch>__<tool>` |
+
+The skills name each step both ways, and the tools return the same JSON either way.
+
+### Off the hutch: `hutch-mcp`
+
+A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container
+mounts neither `/cds` nor the operator homes) reaches the hutch-only tools through
+`src/hutch_copilot/server.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
+on a Unix socket, the caller from `X-Authenticated-User`), with fourteen tools, each a
+fixed argv over an existing `bin/hutch-*`. Only `hutch_py_run` can write: the operator must
+type the action class into an MCP elicitation form, the model cannot, and over HTTP it
+refuses writes until a per-user policy exists.
+
+It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to
+Docker Hub. The image holds only Python and the MCP SDK; `bin/hutch-mcp` binds in what the
+tools wrap (`/cds`, `/reg/g`, `/sdf/home`, `/sdf/group`, `/sdf/data`). On the hutch:
+
+```bash
+apptainer pull hutch-mcp.sif docker://<image>:sha-<commit>
+bin/hutch-mcp hutch-mcp.sif                 # stdio, for a client over ssh
+bin/hutch-mcp hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
+```
+
+`bin/hutch-setup` registers it in every Claude config (see Installing); by hand, for one:
+
+```bash
+claude mcp add -s user hutch-mfx -- ssh -T -o BatchMode=yes \
+    -J psdev mfx-daq ~/.claude/skills/hutch-copilot/bin/hutch-mcp <path>/hutch-mcp.sif
+```
 
 ## The tools
 
@@ -145,7 +173,7 @@ a sentence an agent can talk itself out of.
 
 ## The safety gate
 
-`hutch_tools/daq.py` classifies every snippet before transmitting: `read-only`,
+`src/hutch_copilot/tools/session.py` classifies every snippet before transmitting: `read-only`,
 `write`, or `beam-critical`. Unrecognised code is classified as `write`, never
 read-only.
 

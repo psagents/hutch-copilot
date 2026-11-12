@@ -1,9 +1,9 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=64"]          # 64: editable installs (the image uses one)
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hutch-tools"          # import name is hutch_tools; hyphens are illegal in module names
+name = "hutch-copilot"        # import name is hutch_copilot; hyphens are illegal in module names
 version = "0.2.0"
 description = "Tool layer for the hutch-copilot LCLS beamline skill"
 requires-python = ">=3.9"          # psconda ships 3.9.20; do not use 3.10+ syntax
@@ -15,6 +15,8 @@ dependencies = []                   # core is stdlib-only, by design
 # arrival for anyone whose environment lacks it.
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.1"]
+# The MCP server (hutch_copilot.server) and only it; the image installs this.
+server = ["mcp==1.30.0", "requests==2.32.5"]
 
 # INSTALLATION IS OPTIONAL AND MUST STAY OPTIONAL.
 #
@@ -29,28 +31,28 @@ dev = ["pytest>=7", "ruff>=0.1"]
 # So these entry points are a convenience for CI and for developers who want
 # `pip install -e .`, never the only route.
 [project.scripts]
-hutch-state = "hutch_tools.state:main"
-hutch-daq = "hutch_tools.daq:main"
-hutch-happi = "hutch_tools.happi:main"
-hutch-epics = "hutch_tools.epics:main"
-hutch-lightpath = "hutch_tools.lightpath:main"
-hutch-py = "hutch_tools.session:main"
-hutch-data = "hutch_tools.data:main"
-hutch-skills = "hutch_tools.skills:main"
-hutch-lute = "hutch_tools.lute:main"
-hutch-log = "hutch_tools.log:main"
-hutch-normal = "hutch_tools.normal:main"
+hutch-state = "hutch_copilot.tools.state:main"
+hutch-daq = "hutch_copilot.tools.daq:main"
+hutch-happi = "hutch_copilot.tools.happi:main"
+hutch-epics = "hutch_copilot.tools.epics:main"
+hutch-lightpath = "hutch_copilot.tools.lightpath:main"
+hutch-py = "hutch_copilot.tools.session:main"
+hutch-data = "hutch_copilot.tools.data:main"
+hutch-skills = "hutch_copilot.tools.skills:main"
+hutch-lute = "hutch_copilot.tools.lute:main"
+hutch-log = "hutch_copilot.tools.log:main"
+hutch-normal = "hutch_copilot.normal:main"
+hutch-ready = "hutch_copilot.readiness:main"
+hutch-setup = "hutch_copilot.install:main"
 
-[tool.setuptools]
-packages = ["hutch_tools"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit"]
-# Makes hutch_tools importable without an install and without a conftest sys.path
-# hack, so the suite behaves identically installed or from a checkout. The
-# readiness scripts are on it too: they own the composite checks, so
-# test_readiness.py imports them directly rather than shelling out.
-pythonpath = [".", "are-we-ready/scripts"]
+# Makes hutch_copilot importable without an install and without a conftest sys.path
+# hack, so the suite behaves identically installed or from a checkout.
+pythonpath = ["src"]
 addopts = "-q"
 # Set the option rather than filtering the warning: pytest-asyncio emits it during
 # plugin init, before ini filters are installed, so muting it does not work anyway.
@@ -70,6 +72,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Remote scripts are strings executed elsewhere; local heuristics do not apply.
-"hutch_tools/resolve.py" = ["E731"]
 "tests/*" = ["B011"]

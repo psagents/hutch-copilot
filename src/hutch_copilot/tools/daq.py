@@ -102,7 +102,7 @@ def state(hutch: str, *, timeout: int = T_CONTROL_MS) -> dict:
 
     Judges nothing. Whether these add up to "ready to record" is a readiness
     question, and belongs to the layer that asks it -- see
-    ``are-we-ready/scripts/check_daq.py``.
+    ``hutch_copilot.readiness.check_daq``.
     """
     config = config_summary(hutch)
     host, platform = config["collect_host"], config["platform"]
