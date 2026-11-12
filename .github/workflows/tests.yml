@@ -1,5 +1,6 @@
-# The unit suite on every push and pull request. 3.9 is psconda's floor (pyproject); 3.12 is the
-# image's, and the only one that also runs the MCP server's tests (mcp needs 3.10+).
+# The unit suite on every push and pull request, on Rocky 9 like the hosts and the image: the hook
+# tests run bin/ scripts under PATH=/usr/bin:/bin, and others call setfacl and klist. jinja2 and
+# yaml are what psconda gives `hutch-lute`; mcp is the server's (pyproject [server]).
 name: tests
 
 on: [push, pull_request]
@@ -10,15 +11,9 @@ permissions:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    # A container, not setup-python: that has no 3.9 for the current Ubuntu runner.
-    container: python:${{ matrix.python }}-slim
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {python: "3.9", extras: dev}
-          - {python: "3.12", extras: "dev,server"}
+    container: rockylinux/rockylinux:9
     steps:
+      - run: dnf -y install python3.12 python3.12-pip acl krb5-workstation git
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: pip install ".[${{ matrix.extras }}]"
-      - run: python -m pytest
+      - run: python3.12 -m pip install pytest jinja2 pyyaml '.[server]'
+      - run: python3.12 -m pytest
