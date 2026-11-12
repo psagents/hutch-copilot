@@ -1,27 +1,40 @@
 #!/bin/bash
-# SessionStart hook: announce the hutch context. At a hutch, ask for the experiment; off it,
-# only tell the model, and only when bin/hutch-setup configured a hutch. Asking the operator in
-# every S3DF session would be noise, so off-hutch nothing is shown to them.
+# SessionStart hook: name the hutch, and say how it is reached. MODE: local where the hutch's own
+# files are readable (Claude on the hutch machine), else MODE: mcp (Cogito, even on the hutch
+# machine: its container has no /cds). At a hutch host it asks the operator for the experiment;
+# off it, it only tells the model, and only when bin/hutch-setup configured a hutch.
 set -u
 
 host="$(hostname -s 2>/dev/null)" || exit 0
 repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)" || exit 0
 
 case "$host" in
-    *-daq|*-control) hutch="${host%-*}" ;;
-    *)
-        # The passwd home, not $HOME: a Cogito host sets $HOME to its overlay.
-        hutch="$(cat "${HUTCH_SETUP_FILE:-$(getent passwd "${USER:-}" | cut -d: -f6)/.config/hutch-copilot/hutch}" 2>/dev/null)"
-        [ -n "$hutch" ] || exit 0
-        jq -n --arg ctx "hutch-copilot is set up for ${hutch^^} here ($host, off the hutch): \
-everything only the hutch can read goes through the hutch-$hutch MCP server, and the tools \
-are in $repo/bin. If this session turns to hutch work, ask which experiment first." \
-            '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
-        exit 0 ;;
+    *-daq|*-control) on_hutch=1; hutch="${host%-*}" ;;
+    # The passwd home, not $HOME: a Cogito host sets $HOME to its overlay.
+    *) on_hutch=""; hutch="$(cat "${HUTCH_SETUP_FILE:-$(getent passwd "${USER:-}" | cut -d: -f6)/.config/hutch-copilot/hutch}" 2>/dev/null)" ;;
 esac
+[ -n "$hutch" ] || exit 0
+
+. "$repo/bin/hutch-env" >/dev/null 2>&1    # HUTCH_HAPPI_DB, declared once there
+if [ -r "${HUTCH_HAPPI_DB:-}" ]; then
+    mode="MODE: local -- the hutch's own files are readable here. Run the hutch-only tools as
+bin/hutch-* (the local column of hutch-copilot's table); use no MCP tool for them."
+else
+    mode="MODE: mcp -- the hutch's own files are not readable here. The hutch-only reads go
+through MCP: mcp__sdf-mcp__hutch${hutch}_<tool> through SAGE, or mcp__hutch-${hutch}__<tool>
+where registered directly. Never the local bin/hutch-* for them."
+fi
+
+if [ -z "$on_hutch" ]; then
+    jq -n --arg ctx "hutch-copilot is set up for ${hutch^^} here ($host, off the hutch). $mode
+The tools are in $repo/bin. If this session turns to hutch work, ask which experiment first." \
+        '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
+    exit 0
+fi
 
 context="$(cat <<EOF
 HUTCH CONTEXT: $host (hutch=$hutch)
+$mode
 
 The hutch-copilot skill and its tools are installed at:
   $repo

@@ -29,13 +29,13 @@ def targets() -> list[dict]:
     out = []
     lcls = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude-lcls")
     if lcls.is_dir():
-        out.append({"name": "claude-lcls", "dir": lcls, "cogito": False,
+        out.append({"name": "claude-lcls", "dir": lcls,
                     "env": {**base, "CLAUDE_CONFIG_DIR": str(lcls)}})
     if (HOME / ".claude").is_dir():
-        out.append({"name": "claude", "dir": HOME / ".claude", "cogito": False,
+        out.append({"name": "claude", "dir": HOME / ".claude",
                     "env": {**base, "HOME": str(HOME)}})
     for host in sorted((HOME / ".cogito" / "hosts").glob("*/")):
-        out.append({"name": f"cogito:{host.name}", "dir": host / ".claude", "cogito": True,
+        out.append({"name": f"cogito:{host.name}", "dir": host / ".claude",
                     "env": {**base, "HOME": str(host)}})
     return out
 
@@ -90,21 +90,19 @@ def on_hutch(hutch: str) -> bool:
     return socket.gethostname().split(".")[0] in (f"{hutch}-daq", f"{hutch}-control")
 
 
-def mcp_command(hutch: str, sif: str, cogito: bool) -> list[str]:
-    """The server's argv: local on the hutch itself, else over the user's own ssh.
+def mcp_command(hutch: str, sif: str) -> list[str]:
+    """The server's argv, always over the user's own ssh.
 
-    A Cogito session takes ssh even on the hutch: its agent container has neither
-    apptainer nor /cds.
+    Never the local form, even when run on the hutch: ~/.claude.json is the same file on
+    S3DF, and a session on the hutch itself uses the CLIs (MODE: local), not this server.
     """
-    local = [str(REPO / "bin" / "hutch-mcp"), sif]
-    if on_hutch(hutch) and not cogito:
-        return local
-    return ["ssh", "-T", "-o", "BatchMode=yes", "-J", "psdev", f"{hutch}-daq", *local]
+    return ["ssh", "-T", "-o", "BatchMode=yes", "-J", "psdev", f"{hutch}-daq",
+            str(REPO / "bin" / "hutch-mcp"), sif]
 
 
 def register_mcp(t: dict, hutch: str, sif: str, check: bool) -> list[str]:
     """hutch-<hutch> in this config runs exactly mcp_command(); anything else is replaced."""
-    name, want = f"hutch-{hutch}", mcp_command(hutch, sif, t["cogito"])
+    name, want = f"hutch-{hutch}", mcp_command(hutch, sif)
     cfg = (pathlib.Path(t["env"]["CLAUDE_CONFIG_DIR"]) if "CLAUDE_CONFIG_DIR" in t["env"]
            else pathlib.Path(t["env"]["HOME"])) / ".claude.json"
     have = json.loads(cfg.read_text()).get("mcpServers", {}).get(name) if cfg.exists() else None

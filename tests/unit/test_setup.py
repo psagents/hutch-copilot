@@ -60,26 +60,23 @@ def test_hooks_replace_another_checkout_and_keep_the_rest(home):
     assert install.install_hooks(path, check=False) == []
 
 
-@pytest.mark.parametrize("host,cogito,local", [
-    ("sdfiana025", False, False), ("mfx-daq", False, True), ("mfx-daq", True, False),
-])
-def test_the_server_is_local_only_for_a_plain_session_on_the_hutch(monkeypatch, host, cogito,
-                                                                   local):
+@pytest.mark.parametrize("host", ["sdfiana025", "mfx-daq"])
+def test_the_server_is_always_registered_over_ssh(monkeypatch, host):
+    """~/.claude.json is shared with S3DF: a local form written on the hutch would break it there."""
     monkeypatch.setattr(install.socket, "gethostname", lambda: host)
-    argv = install.mcp_command("mfx", "/x/hutch-mcp.sif", cogito)
+    argv = install.mcp_command("mfx", "/x/hutch-mcp.sif")
+    assert argv[0] == "ssh"
+    assert argv[argv.index("-J") + 1:argv.index("-J") + 3] == ["psdev", "mfx-daq"]
     assert argv[-2:] == [str(install.REPO / "bin" / "hutch-mcp"), "/x/hutch-mcp.sif"]
-    assert (argv[0] == "ssh") is not local
-    if not local:
-        assert argv[argv.index("-J") + 1:argv.index("-J") + 3] == ["psdev", "mfx-daq"]
 
 
-def _target(home, cogito=False):
-    return {"name": "t", "dir": home / ".claude", "cogito": cogito, "env": {"HOME": str(home)}}
+def _target(home):
+    return {"name": "t", "dir": home / ".claude", "env": {"HOME": str(home)}}
 
 
 def test_a_matching_registration_is_left_alone(home, monkeypatch):
     monkeypatch.setattr(install.socket, "gethostname", lambda: "sdfiana025")
-    want = install.mcp_command("mfx", "/x.sif", False)
+    want = install.mcp_command("mfx", "/x.sif")
     (home / ".claude.json").write_text(json.dumps(
         {"mcpServers": {"hutch-mfx": {"command": want[0], "args": want[1:]}}}))
     monkeypatch.setattr(install.subprocess, "run", lambda *a, **k: pytest.fail("ran claude"))
@@ -96,7 +93,7 @@ def test_a_stale_registration_is_removed_then_added(home, monkeypatch):
                         or subprocess.CompletedProcess(argv, 0, "", ""))
     msgs = install.register_mcp(_target(home), "mfx", "/x.sif", check=False)
     assert [c[0][1:3] for c in calls] == [["mcp", "remove"], ["mcp", "add"]]
-    assert calls[1][0][calls[1][0].index("--") + 1:] == install.mcp_command("mfx", "/x.sif", False)
+    assert calls[1][0][calls[1][0].index("--") + 1:] == install.mcp_command("mfx", "/x.sif")
     assert calls[1][1]["HOME"] == str(home)
     assert msgs[0].startswith("→")
 

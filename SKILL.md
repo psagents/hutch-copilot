@@ -39,32 +39,45 @@ Run `--help` for subcommands and flags. They work from a bare checkout with no i
 step. `pip install -e .` is optional and only adds the same commands to PATH — never
 require it.
 
-**What only the hutch can read goes through MCP — always, wherever this session runs.**
+**What only the hutch can read is reached one of two ways, and the session start says which.**
 happi, Channel Access, the archiver, lightpath, the DAQ control port, and the readiness
-checks over them exist only on the hutch machine. Call them on the `hutch-<hutch>` MCP
-server (`mcp__hutch-<hutch>__<tool>`), on the hutch itself as much as on an S3DF node or in
-a Cogito container — never as a local `bin/hutch-*`:
+checks over them exist only on the hutch machine. The SessionStart hook prints `MODE: local`
+or `MODE: mcp`:
 
-| MCP tool | Answers |
-|---|---|
-| `ready_beam`, `ready_hutch`, `ready_daq` | the three readiness checks, verdict included (`are-we-ready`) |
-| `happi_list`, `happi_device`, `happi_pv` | the device database |
-| `epics_caget` | live PV values (a list: one call for many PVs) |
-| `epics_history`, `epics_moved` | the archiver |
-| `lightpath_path` | the beam path and its blockers |
-| `daq_state` | the DAQ's own state, off its control port |
-| `normal_diff` | the current state against the operator's normal snapshot |
-| `data_cat` | a file under `/cds` |
-| `hutch_py_run` | python in a fresh hutch-python load (`take-run`); a write asks the operator itself |
+- **`MODE: local`**: Claude runs directly on the hutch machine (`/cds` is readable). Run the
+  `bin/hutch-*` in the *local* column. Use no MCP tool for these, even one that is connected.
+- **`MODE: mcp`**: anywhere else, a Cogito session included, even one on the hutch machine,
+  whose container has no `/cds`. Call the tool in the *MCP* column. Through SAGE it is named
+  `mcp__sdf-mcp__hutch<hutch>_<tool>`, for example `mcp__sdf-mcp__hutchmfx_ready_beam`; on a
+  directly registered server, `mcp__hutch-<hutch>__<tool>`. Never run the local column here:
+  it fails with rc 4 and proves nothing.
+- **No `MODE:` line**: the hook did not run. Check once with `test -r /cds/group/pcds` on a
+  `*-daq` host. Readable means local, anything else means mcp. Never try local first and fall
+  back on rc 4.
 
-Leave `hutch` out: it defaults to the server's own. Locally, run only what works from
-anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
+| Answers | local | MCP |
+|---|---|---|
+| the three readiness checks, verdict included (`are-we-ready`) | `bin/hutch-ready beam\|hutch\|daq --hutch "$H"` | `ready_beam`, `ready_hutch`, `ready_daq` |
+| the device database | `bin/hutch-happi list\|device\|pv --hutch "$H"` | `happi_list`, `happi_device`, `happi_pv` |
+| live PV values | `bin/hutch-epics caget <pv>...` | `epics_caget` (a list: one call for many PVs) |
+| the archiver | `bin/hutch-epics history\|moved <pv> --from <t>` | `epics_history`, `epics_moved` |
+| the beam path and its blockers | `bin/hutch-lightpath path --hutch "$H"` | `lightpath_path` |
+| the DAQ's own state, off its control port | `bin/hutch-daq --hutch "$H" state` | `daq_state` |
+| the current state against the operator's normal snapshot | `bin/hutch-normal diff --hutch "$H" --experiment "$E"` | `normal_diff` |
+| a file under `/cds` | `bin/hutch-data cat <path>` | `data_cat` |
+| python in a fresh hutch-python load (`take-run`) | `bin/hutch-py --hutch "$H" … run "<code>"` | `hutch_py_run` |
+
+Over MCP, leave `hutch` out: it defaults to the server's own. In both modes, run locally what
+works from anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
 `hutch-daq logs`/`config`, `hutch-data xtc2`/`detectors`, `hutch-normal show`.
 
-If the server is not configured or a tool errors, that is rule 3: say which, and stop
-there. Never rebuild an answer from other reads, or from the tools' source — a verdict
-you assembled yourself is a guess with the tool's name on it. A write goes through
-`hutch_py_run`, which asks the operator directly: you never approve one yourself.
+If a tool is not there, will not load, or errors, that is rule 3: say which, and stop there.
+Loading a tool that still is not callable once is enough; do not load it again. Never rebuild
+an answer from other reads, or from the tools' source: a verdict you assembled yourself is a
+guess with the tool's name on it. **A write is never yours to approve.** Locally, `bin/hutch-py`
+refuses until the operator has approved the class you then pass as `--confirm`. Over MCP,
+`hutch_py_run` asks the operator itself, and refuses writes over SAGE until a per-user policy
+exists.
 
 Three rules that the tools enforce and you must not work around:
 

@@ -96,16 +96,28 @@ def test_the_hook_is_silent_off_hutch():
         assert res.returncode == 0, f"{host} exited {res.returncode}"
 
 
-def test_off_hutch_a_configured_hutch_tells_the_model_and_asks_nobody(tmp_path):
-    (tmp_path / "hutch").write_text("mfx\n")
-    (tmp_path / "hostname").write_text("#!/bin/bash\necho sdfiana025\n")
+def _hook_mode(tmp_path, host: str, happi_readable: bool) -> dict:
+    (tmp_path / "hostname").write_text(f"#!/bin/bash\necho {host}\n")
     (tmp_path / "hostname").chmod(0o755)
+    (tmp_path / "hutch").write_text("mfx\n")
+    db = tmp_path / "db.json"
+    if happi_readable:
+        db.write_text("{}")
     res = subprocess.run([str(HOOK)], capture_output=True, text=True,
-                         env={"PATH": f"{tmp_path}:/usr/bin:/bin",
+                         env={"PATH": f"{tmp_path}:/usr/bin:/bin", "HUTCH_HAPPI_DB": str(db),
                               "HUTCH_SETUP_FILE": str(tmp_path / "hutch")})
-    out = json.loads(res.stdout)
-    assert "systemMessage" not in out
-    assert "hutch-mfx MCP server" in out["hookSpecificOutput"]["additionalContext"]
+    return json.loads(res.stdout)
+
+
+@pytest.mark.parametrize("host,readable,mode,asks", [
+    ("mfx-daq", True, "MODE: local", True),       # Claude on the hutch machine
+    ("mfx-daq", False, "MODE: mcp", True),        # Cogito's container on the hutch machine
+    ("sdfiana025", False, "MODE: mcp", False),    # Cogito or claude on S3DF
+])
+def test_the_hook_says_how_the_hutch_is_reached(tmp_path, host, readable, mode, asks):
+    out = _hook_mode(tmp_path, host, readable)
+    assert mode in out["hookSpecificOutput"]["additionalContext"]
+    assert ("systemMessage" in out) is asks
 
 
 def test_the_hook_names_the_hutch_on_a_hutch_host():

@@ -87,6 +87,19 @@ required advisor as absent, or omit it entirely. Revisit if they move to the org
 **Restart Claude Code afterwards** — the skill list is read once at session start, so a
 freshly linked advisor is invisible until then.
 
+### Two settings: on the hutch, or through MCP
+
+A session reaches what only the hutch can read in one of two ways, and `bin/hutch-session-start`
+tells it which (`MODE: local` or `MODE: mcp`), by whether the hutch's own files are readable where
+Claude runs:
+
+| Where Claude runs | Mode |
+|---|---|
+| a terminal on the hutch machine (`claude` on `mfx-daq`) | **local**: `bin/hutch-*` directly |
+| Cogito, on S3DF **or** on the hutch machine (its container has no `/cds`) | **mcp**: the `hutch-mcp` tools, through SAGE/agentgateway as `mcp__sdf-mcp__hutch<hutch>_<tool>` (like `epics-mfx`), or, until that is enrolled, registered directly over your own ssh as `mcp__hutch-<hutch>__<tool>` |
+
+The skills name each step both ways, and the tools return the same JSON either way.
+
 ### Off the hutch: `hutch-mcp`
 
 A session that is not on the hutch machine (an S3DF node, or Cogito, whose agent container

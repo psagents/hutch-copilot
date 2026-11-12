@@ -21,14 +21,14 @@ ask for what this session already knows.
 
 ## 1. Collect
 
-`daq_state()` on the `hutch-<hutch>` MCP server, and locally:
+The DAQ state: `bin/hutch-daq --hutch "$H" state` in `MODE: local`, `daq_state()` in `MODE: mcp`, and in either mode:
 
 ```bash
 bin/hutch-daq --hutch "$H" config
 bin/hutch-daq --hutch "$H" logs --sessions      # when the scope is a past window
 ```
 
-`daq_state` reads the DAQ's control port directly — no hutch-python session needed. It returns
+The state is read off the DAQ's control port directly — no hutch-python session needed. It returns
 `transition`, `state`, `config_alias`, `recording`, `bypass_activedet`, `experiment`,
 `run_number` and `last_run_number`.
 
@@ -48,7 +48,7 @@ Invoke `@psana-daq`, stating hutch and scope explicitly — that is the form its
 for — and pass on:
 
 - `hutch`, and `$E` as the experiment the operator named.
-- every field from `daq_state`, verbatim, with `source` and `retrieved_at`.
+- every field of the DAQ state, verbatim, with `source` and `retrieved_at`.
 - the `path` from `config` — the leaf config that launched this DAQ. The advisor otherwise
   has to ask the operator, because `daqmgr` takes it as an argument and is not resident.
 - the session prefix, if the scope is a past window.
