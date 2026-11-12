@@ -1,7 +1,5 @@
-# Build the hutch-mcp image, smoke-test it, and push it to Docker Hub.
-# Pushing needs the repository variable DOCKERHUB_IMAGE (e.g. slaclab/hutch-mcp) and the secrets
-# DOCKERHUB_USERNAME and DOCKERHUB_TOKEN; without them the image is still built and tested.
-# On the hutch:  apptainer pull hutch-mcp.sif docker://<DOCKERHUB_IMAGE>:sha-<commit>
+# Build the hutch-mcp image, smoke-test it, and push it to GHCR with the workflow's own token.
+# On the hutch:  apptainer pull hutch-mcp.sif docker://ghcr.io/<owner>/<repo>:sha-<commit>
 name: hutch-mcp image
 
 on:
@@ -12,13 +10,13 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   image:
     runs-on: ubuntu-latest
     env:
-      IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'hutch-mcp' }}
-      PUSH: ${{ vars.DOCKERHUB_IMAGE != '' && secrets.DOCKERHUB_TOKEN != '' }}
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -44,10 +42,9 @@ jobs:
           n = len(asyncio.run(server.mcp.list_tools()))
           assert n == 14, n
           print("hutch-mcp image OK:", n, "tools")'
-      - if: env.PUSH == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - if: env.PUSH == 'true'
-        run: docker push --all-tags "$IMAGE"
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker push --all-tags "$IMAGE"

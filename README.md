@@ -111,11 +111,11 @@ type the action class into an MCP elicitation form, the model cannot, and over H
 refuses writes until a per-user policy exists.
 
 It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to
-Docker Hub. The image holds only Python and the MCP SDK; `bin/hutch-mcp` binds in what the
+GHCR. The image holds only Python and the MCP SDK; `bin/hutch-mcp` binds in what the
 tools wrap (`/cds`, `/reg/g`, `/sdf/home`, `/sdf/group`, `/sdf/data`). On the hutch:
 
 ```bash
-apptainer pull hutch-mcp.sif docker://<image>:sha-<commit>
+apptainer pull hutch-mcp.sif docker://ghcr.io/psagents/hutch-copilot:sha-<commit>
 bin/hutch-mcp hutch-mcp.sif                 # stdio, for a client over ssh
 bin/hutch-mcp hutch-mcp.sif $D/mcp.sock     # for the SAGE tunnel, before run.sh
 ```
