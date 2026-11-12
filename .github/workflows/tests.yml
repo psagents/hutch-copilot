@@ -1,5 +1,6 @@
 # The unit suite on every push and pull request, on Rocky 9 like the hosts and the image: the hook
-# tests run bin/ scripts under PATH=/usr/bin:/bin, and others call setfacl and klist. jinja2 and
+# tests run bin/ scripts (jq, hostname) under PATH=/usr/bin:/bin, and others call setfacl and klist.
+# Not as root, which reads the chmod-000 files the unreadable-path tests make. jinja2 and
 # yaml are what psconda gives `hutch-lute`; mcp is the server's (pyproject [server]).
 name: tests
 
@@ -13,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     container: rockylinux/rockylinux:9
     steps:
-      - run: dnf -y install python3.12 python3.12-pip acl krb5-workstation git
+      - run: dnf -y install python3.12 python3.12-pip acl krb5-workstation git jq hostname
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3.12 -m pip install pytest jinja2 pyyaml '.[server]'
-      - run: python3.12 -m pytest
+      - run: useradd -m ci && chown -R ci . && runuser -u ci -- python3.12 -m pytest
