@@ -20,7 +20,7 @@ pid=$(cat "$pidf" 2>/dev/null || true)
 running() { [ -n "$pid" ] && ps -p "$pid" -o args= 2>/dev/null | grep -q hutch-mcp; }
 
 if [ ! -f "$sif" ]; then
-    apptainer pull -q "$sif.part" "docker://ghcr.io/$repo@sha256:$digest"
+    apptainer -q pull "$sif.part" "docker://ghcr.io/$repo@sha256:$digest"
     mv "$sif.part" "$sif"
     ln -sfn "$sif" "$HOME/hutch-mcp.sif"
     echo "$(date -Is) pulled $sif"
