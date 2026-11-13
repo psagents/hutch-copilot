@@ -23,7 +23,12 @@ Make exactly these three checks, then report one verdict. Which form follows the
 |---|---|
 | `bin/hutch-ready beam --hutch "$H"` | `ready_beam()` |
 | `bin/hutch-ready hutch --hutch "$H"` | `ready_hutch()` |
-| `bin/hutch-ready daq --hutch "$H" --experiment "$E"` | `ready_daq(experiment="$E")` |
+| `bin/hutch-ready daq --hutch "$H" [--experiment "$E"]` | `ready_daq([experiment="$E"])` |
+
+`$E` is optional, not a precondition: `/are-we-ready` never asks for it. If the experiment
+is already known for the session, pass it along, so `experiment_mismatch` can fire. If it
+is not, run `ready_daq` without it — this is still a complete readiness check, just one
+that cannot compare against an expected experiment, and the report says which.
 
 Both forms return the same JSON. Nothing else: no other `bin/hutch-*`, no raw `caget`s,
 no reading the tools' source, no switching mode. The verdict is in that JSON. Run all three
@@ -41,12 +46,17 @@ Four things the JSON does not say on its face:
 - **Unknown is not OUT.** `unreadable`, `needs_session` and `can_record: null` mean the
   value was not read. Never report one as a confident no, and say which.
 - **`settled: false` means undetermined, not a fault.** Call `ready_beam(settle_s=30)`
-  (`--settle-s 30` locally) before reporting anything — passing an unsettled read on as a fault looks machine-wide.
+  (`--settle-s 30` locally) once before reporting anything — passing an unsettled read on
+  as a fault looks machine-wide. Retry at most once. If it is still `false` after that
+  one retry, stop calling it again: report beam as `unknown` with the unsettled JSON as
+  the reason, and say so under `Unknown`.
 - **`experiment_mismatch` outranks a green DAQ.** It means the DAQ has a different
   experiment open than the one the operator named, and it deliberately does not change
   `can_record`. So this is the one case where every signal reads ready and the data still
   lands in the wrong experiment — usually a session left over from the previous shift.
-  Report it with the impediment, never as a footnote.
+  Report it with the impediment, never as a footnote. This only exists when `$E` was
+  passed; without it `ready_daq` has nothing to compare against, which is not itself a
+  fault — report the DAQ's own `experiment` field and move on.
 
 Anything else unexpected: investigate with the hutch tools before reporting it, and say what
 you checked. For a `needs_session` device, say it was not read; never guess a PV suffix.
@@ -54,7 +64,7 @@ you checked. For a `needs_session` device, say it was not read; never guess a PV
 Report by consequence, in this shape and this order:
 
 ```
-**Ready: yes | no | unknown** — $H, $E, <retrieved_at>
+**Ready: yes | no | unknown** — $H, <$E or "experiment not given">, <retrieved_at>
 Act on:   <impediment, or the DAQ fault, or "nothing">
 Beam:     <impediment> at z=<z>; <n> blocked downstream by consequence | clear | unsettled
 Hutch:    <n> devices: <n> read, <n> on the lightpath, <n> unknown (<names>)
