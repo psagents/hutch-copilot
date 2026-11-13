@@ -96,29 +96,37 @@ def test_the_hook_is_silent_off_hutch():
         assert res.returncode == 0, f"{host} exited {res.returncode}"
 
 
-def _hook_mode(tmp_path, host: str, happi_readable: bool) -> dict:
+def _hook_mode(tmp_path, host: str, happi_readable: bool, cogito: bool) -> dict:
     (tmp_path / "hostname").write_text(f"#!/bin/bash\necho {host}\n")
     (tmp_path / "hostname").chmod(0o755)
     (tmp_path / "hutch").write_text("mfx\n")
     db = tmp_path / "db.json"
     if happi_readable:
         db.write_text("{}")
-    res = subprocess.run([str(HOOK)], capture_output=True, text=True,
-                         env={"PATH": f"{tmp_path}:/usr/bin:/bin", "HUTCH_HAPPI_DB": str(db),
-                              "HUTCH_SETUP_FILE": str(tmp_path / "hutch")})
-    return json.loads(res.stdout)
+    env = {"PATH": f"{tmp_path}:/usr/bin:/bin", "HUTCH_HAPPI_DB": str(db),
+           "HUTCH_SETUP_FILE": str(tmp_path / "hutch")}
+    if cogito:      # a Cogito host sets $HOME to its overlay, away from the passwd home
+        import os
+        env.update(USER=os.environ.get("USER") or os.getlogin(), HOME=str(tmp_path / "overlay"))
+    res = subprocess.run([str(HOOK)], capture_output=True, text=True, env=env)
+    return json.loads(res.stdout) if res.stdout else {}
 
 
-@pytest.mark.parametrize("host,readable,mode,asks", [
-    ("mfx-daq", True, "MODE: local", True),       # Claude on the hutch machine
-    ("mfx-daq", False, "MODE: mcp", True),        # Cogito's container on the hutch machine
-    ("sdfiana025", False, "MODE: mcp", False),    # Cogito or claude on S3DF
-    ("psdev", True, "MODE: mcp", False),          # /cds is mounted, but this is not the hutch
+@pytest.mark.parametrize("host,readable,cogito,route", [
+    ("mfx-daq", True, False, "MODE: local"),                    # Claude on the hutch machine
+    ("mfx-daq", False, True, "mcp__sdf-mcp__hutchmfx_"),        # Cogito on the hutch machine
+    ("sdfiana025", False, True, "mcp__sdf-mcp__hutchmfx_"),     # Cogito on S3DF
 ])
-def test_the_hook_says_how_the_hutch_is_reached(tmp_path, host, readable, mode, asks):
-    out = _hook_mode(tmp_path, host, readable)
-    assert mode in out["hookSpecificOutput"]["additionalContext"]
-    assert ("systemMessage" in out) is asks
+def test_the_hutch_and_cogito_differ_only_in_the_route(tmp_path, host, readable, cogito, route):
+    out = _hook_mode(tmp_path, host, readable, cogito)
+    assert route in out["hookSpecificOutput"]["additionalContext"]
+    assert "Which experiment" in out["systemMessage"]
+
+
+@pytest.mark.parametrize("host,readable", [("sdfiana025", False), ("psdev", True)])
+def test_a_terminal_off_the_hutch_gets_nothing(tmp_path, host, readable):
+    """No hutch-only tools there, and its sessions are mostly not hutch work: not even a greeting."""
+    assert _hook_mode(tmp_path, host, readable, cogito=False) == {}
 
 
 def test_the_hook_names_the_hutch_on_a_hutch_host():

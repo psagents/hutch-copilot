@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Install the optional advisor skills hutch-copilot consults.
+# Install the advisor skills hutch-copilot consults. bin/hutch-setup runs it, then links
+# every advisor into each Claude config.
 #
 #   scripts/fetch-advisors.sh            clone/update, then report
 #   scripts/fetch-advisors.sh --report   report only, touch nothing
 #
-# Advisors are consultants, not dependencies: hutch-copilot works with none of
-# them installed, so a source that cannot be reached is a warning, never fatal.
+# A source that cannot be reached is a warning, never fatal: the advisors a SKILL.md cites
+# are required (their judgments are refused without them, exit 4), the rest are optional.
 #
 # Sources are cloned whole into a cache and the skill directories inside them
 # are symlinked into place. The layout is read off the filesystem after cloning
@@ -129,46 +130,34 @@ if (( ! REPORT_ONLY )); then
 fi
 
 # ── report ─────────────────────────────────────────────────────────────────
-# Two tiers, both derived -- nothing here restates a list kept elsewhere.
-# DECLARED_ADVISORS in the test suite says which names may be cited; an `@name`
+# Two tiers, both derived -- nothing here restates a list kept elsewhere. ADVISORS
+# (src/hutch_copilot/tools/skills.py) says which names may be cited; an `@name`
 # citation in a SKILL.md says which of them a judgment actually routes through,
 # and those are required. Exits 4 (UNREACHABLE) if one of those is absent.
 python3 - "$REPO_ROOT" <<'PY'
-import ast, json, pathlib, re, subprocess, sys
+import pathlib, sys
 
 root = pathlib.Path(sys.argv[1])
-test = root / "tests/unit/test_self_contained.py"
-declared = set()
-for node in ast.walk(ast.parse(test.read_text())):
-    if isinstance(node, ast.Assign) and any(
-        getattr(t, "id", "") == "DECLARED_ADVISORS" for t in node.targets
-    ):
-        declared = set(ast.literal_eval(node.value))
+sys.path.insert(0, str(root / "src"))
+from hutch_copilot.tools.skills import ADVISORS, required, skills
 
-cited: dict[str, list[str]] = {}
-for doc in sorted(root.glob("SKILL.md")) + sorted(root.glob("*/SKILL.md")):
-    where = "/" if doc.parent == root else doc.parent.name
-    for name in set(re.findall(r"@([a-z][a-z0-9-]*)", doc.read_text())):
-        if name in declared:
-            cited.setdefault(name, []).append(where)
-
-found = json.loads(subprocess.run(
-    [str(root / "bin/hutch-skills"), "list"],
-    capture_output=True, text=True, check=True).stdout)["value"]
+cited = required()
+found = skills()["value"]
+ours = {"hutch-copilot", *(p.name for p in (root / "skills").iterdir())}
 
 def show(names):
     for name in sorted(names):
-        where = f"  (cited by {', '.join(sorted(cited[name]))})" if name in cited else ""
+        where = f"  (cited by {', '.join(cited[name])})" if name in cited else ""
         print(f"  {'ok     ' if name in found else 'MISSING'}  {name}{where}")
 
 print("required -- a judgment routes through these, and is refused without them:")
 show(cited)
 print("\navailable -- installed if present, absence is not a blocker:")
-show(declared - set(cited))
+show(ADVISORS - set(cited))
 
-extra = sorted(set(found) - declared - {"hutch-copilot"})
+extra = sorted(set(found) - ADVISORS - ours)
 if extra:
-    print("\ninstalled but not declared (add to DECLARED_ADVISORS to cite them):")
+    print("\ninstalled but not declared (add to ADVISORS in tools/skills.py to cite them):")
     print("  " + ", ".join(extra))
 
 absent = sorted(set(cited) - set(found))

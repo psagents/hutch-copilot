@@ -13,25 +13,9 @@ import re
 import pytest
 
 from hutch_copilot.tools import common as paths
+from hutch_copilot.tools.skills import ADVISORS, required
 
 ROOT = paths.skill_root()
-
-#: Skills that MAY be referenced as `@name` in the docs. Being listed here is
-#: permission, not a requirement -- the tier is derived, never stored: an advisor
-#: a SKILL.md actually cites as `@name` is *required* (a judgment routes through
-#: it, and this skill holds no science knowledge of its own to fall back on),
-#: while a declared-but-uncited one is merely available. `fetch-advisors.sh`
-#: reads this set and that citation scan to report the two tiers, and exits 4
-#: when a required advisor is absent. Adding a name here is a deliberate act.
-DECLARED_ADVISORS = {
-    "ask-lute", "ask-cctbx-xfel", "ask-happi",          # ~/.claude/skills
-    "ask-smalldata", "ask-lcls2", "ask-ami", "ask-epics",
-    "ask-slurm-s3df", "ask-s3df", "lcls-catalog",
-    "elog-copilot", "elog-search", "confluence-search",
-    "experimental-hutch-python", "xpm-seq",             # opencode root
-    "psana-daq", "psana-daq-control", "psana-daq-monitor",
-    "psana-daq-logs", "psana-daq-history", "psana-configdb",
-}
 
 CODE_DIRS = ("src", "bin")
 
@@ -85,12 +69,12 @@ def test_docs_reference_only_declared_advisors():
         # Fenced code is code: `@pytest.fixture` there is a decorator, not a citation.
         prose = re.sub(r"^```.*?^```", "", p.read_text(), flags=re.M | re.S)
         found = set(re.findall(r"@([a-z][a-z0-9-]*)", prose))
-        extra = found - DECLARED_ADVISORS
+        extra = found - ADVISORS
         if extra:
             undeclared[str(p.relative_to(ROOT))] = sorted(extra)
     assert not undeclared, (
         f"undeclared advisor references: {undeclared}. Either remove the pointer "
-        f"and give in-repo guidance instead, or add the skill to DECLARED_ADVISORS "
+        f"and give in-repo guidance instead, or add the skill to ADVISORS in tools/skills.py "
         f"and to the Advisors section in SKILL.md."
     )
 
@@ -103,16 +87,23 @@ def test_some_advisor_is_cited_and_so_required():
     required and exiting 0 -- the skill would look healthy with no source of
     judgment installed.
     """
-    cited = {
-        name
-        for p in _docs() if p.name == "SKILL.md"
-        for name in re.findall(r"@([a-z][a-z0-9-]*)", p.read_text())
-    } & DECLARED_ADVISORS
+    cited = required()
     assert cited, (
         "no SKILL.md cites an advisor as @name, so fetch-advisors.sh would treat "
         "every advisor as optional. This repo holds no science knowledge -- some "
         "judgment must route through a named advisor."
     )
+
+
+def test_a_citation_in_a_sub_skill_is_required_and_named(tmp_path, monkeypatch):
+    """`fetch-advisors.sh` once scanned one level deep, so every advisor read "cited by /"."""
+    from hutch_copilot.tools import skills
+
+    (tmp_path / "SKILL.md").write_text("ask @ask-lute")
+    (tmp_path / "skills" / "debug-daq").mkdir(parents=True)
+    (tmp_path / "skills" / "debug-daq" / "SKILL.md").write_text("@psana-daq, not @pytest")
+    monkeypatch.setattr(skills, "skill_root", lambda: tmp_path)
+    assert skills.required() == {"ask-lute": ["hutch-copilot"], "psana-daq": ["debug-daq"]}
 
 
 def test_no_code_path_points_at_another_skill():
@@ -204,8 +195,8 @@ def test_a_missing_root_is_skipped_not_fatal(tmp_path, monkeypatch):
 
 
 def test_every_declared_advisor_is_a_plausible_skill_name():
-    """Catches a typo in DECLARED_ADVISORS, which no other test would."""
-    for name in DECLARED_ADVISORS:
+    """Catches a typo in ADVISORS, which no other test would."""
+    for name in ADVISORS:
         assert re.fullmatch(r"[a-z][a-z0-9-]*", name), name
 
 

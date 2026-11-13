@@ -8,9 +8,34 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 from typing import Any
 
-from .common import UNREACHABLE, USAGE, external_path, fail, out, parser, utcnow
+from .common import UNREACHABLE, USAGE, external_path, fail, out, parser, skill_root, utcnow
+
+#: Skills a doc here MAY cite as `@name`. Being listed is permission, not a requirement: the
+#: tier is derived, never stored. One a SKILL.md cites is *required* (a judgment routes through
+#: it, and this skill holds no science knowledge to fall back on); the rest are available.
+ADVISORS = {
+    "ask-lute", "ask-cctbx-xfel", "ask-happi",
+    "ask-smalldata", "ask-lcls2", "ask-ami", "ask-epics",
+    "ask-slurm-s3df", "ask-s3df", "lcls-catalog",
+    "elog-copilot", "elog-search", "confluence-search",
+    "experimental-hutch-python", "xpm-seq",
+    "psana-daq", "psana-daq-control", "psana-daq-monitor",
+    "psana-daq-logs", "psana-daq-history", "psana-configdb",
+}
+
+
+def required() -> dict[str, list[str]]:
+    """Each advisor a SKILL.md here cites as `@name`, with the skills that cite it."""
+    root = skill_root()
+    cited: dict[str, list[str]] = {}
+    for doc in [root / "SKILL.md", *sorted((root / "skills").glob("*/SKILL.md"))]:
+        where = "hutch-copilot" if doc.parent == root else doc.parent.name
+        for name in sorted(set(re.findall(r"@([a-z][a-z0-9-]*)", doc.read_text())) & ADVISORS):
+            cited.setdefault(name, []).append(where)
+    return cited
 
 
 def _record(value: Any, source: str, **extra: Any) -> dict:

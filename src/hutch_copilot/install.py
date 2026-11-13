@@ -1,8 +1,10 @@
-"""hutch-setup: link the skills, install the hooks, register hutch-<hutch>, check the rest.
+"""hutch-setup: link the skills and advisors, install the hooks, record the hutch, check the ticket.
 
 Idempotent: run it again after a pull, or with --check to see what it would change.
 Every Claude config on this account is covered: $CLAUDE_CONFIG_DIR (claude-lcls), ~/.claude
-(plain claude) and each Cogito host overlay under ~/.cogito/hosts.
+(plain claude) and each Cogito host overlay under ~/.cogito/hosts. No config registers a hutch
+server: Cogito reaches the hutch through its own sdf-mcp gateway, and a terminal on the hutch
+machine runs the CLIs.
 """
 
 from __future__ import annotations
@@ -11,12 +13,13 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import shutil
-import socket
 import subprocess
 import time
 
 from .tools.common import skill_root
+from .tools.skills import ADVISORS, required, skill_roots
 
 REPO = skill_root()
 HOOKS = {"SessionStart": ("hutch-session-start", 5), "Stop": ("hutch-stop", 10)}
@@ -42,26 +45,57 @@ def targets() -> list[dict]:
 
 def link_skills(root: pathlib.Path, check: bool) -> list[str]:
     """hutch-copilot and each skills/<name> linked into ``root``; never replaces a stranger."""
-    msgs = []
+    msgs, linked = [], []
     for name, src in [("hutch-copilot", REPO)] + [(p.name, p) for p in sorted((REPO / "skills").iterdir())]:
         dst = root / name
         if dst.resolve() == src.resolve():
             continue
         if dst.exists() or dst.is_symlink():
-            msgs.append(f"✗ {dst} is not this checkout's ({os.path.realpath(dst)}); left alone")
+            msgs.append(f"✗ {dst} links to another copy ({os.path.realpath(dst)}): "
+                        f"remove it to use this checkout, then re-run")
             continue
-        msgs.append(f"→ link {dst} -> {src}")
+        linked.append(name)
         if not check:
             root.mkdir(parents=True, exist_ok=True)
             dst.symlink_to(src)
-    return msgs
+    return ([f"→ {root}: linked {', '.join(linked)}"] if linked else []) + msgs
+
+
+def link_advisors(roots: list[pathlib.Path], check: bool) -> list[str]:
+    """Every advisor into each root lacking it, from the first root or shared root that holds it."""
+    # A session loads only its own config's skills/: one fetched into ~/.claude is not claude-lcls's.
+    need = required()
+    msgs: list[str] = []
+    linked: dict[pathlib.Path, list[str]] = {}
+    for name in sorted(ADVISORS):
+        # os.path.isfile, not Path.is_file: a shared root this host cannot read must read as absent.
+        src = next((r / name for r in [*roots, *skill_roots()]
+                    if os.path.isfile(r / name / "SKILL.md")), None)
+        if src is None:
+            if name in need:
+                msgs.append(f"✗ install the required advisor {name}: it is in no skills folder "
+                            f"(scripts/fetch-advisors.sh --report shows where it looked)")
+            continue
+        for root in roots:
+            dst = root / name
+            if os.path.isfile(dst / "SKILL.md"):
+                continue
+            if dst.exists() or dst.is_symlink():
+                if name in need:
+                    msgs.append(f"✗ {dst} is not a usable copy of {name}: remove it, then re-run")
+                continue
+            linked.setdefault(root, []).append(name)
+            if not check:
+                root.mkdir(parents=True, exist_ok=True)
+                dst.symlink_to(src.resolve())
+    return [f"→ {root}: linked {len(n)} advisors" for root, n in linked.items()] + msgs
 
 
 def install_hooks(settings_path: pathlib.Path, check: bool) -> list[str]:
     """SessionStart and Stop point at this checkout's bin/; a hook from another checkout is replaced."""
     settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
     hooks = settings.setdefault("hooks", {})
-    msgs = []
+    events = []
     for event, (name, timeout) in HOOKS.items():
         want = str(REPO / "bin" / name)
         groups = hooks.setdefault(event, [])
@@ -73,9 +107,8 @@ def install_hooks(settings_path: pathlib.Path, check: bool) -> list[str]:
             g["hooks"] = [h for h in g.get("hooks", []) if h not in mine]
         hooks[event] = [g for g in groups if g["hooks"]]
         hooks[event].append({"hooks": [{"type": "command", "command": want, "timeout": timeout}]})
-        msgs.append(f"→ {settings_path} {event}: "
-                    f"{', '.join(h['command'] for h in mine) or '(none)'} -> {want}")
-    if msgs and not check:
+        events.append(event)
+    if events and not check:
         if settings_path.exists():
             shutil.copy2(settings_path, f"{settings_path}.bak-{time.strftime('%Y%m%d%H%M%S')}")
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,43 +116,25 @@ def install_hooks(settings_path: pathlib.Path, check: bool) -> list[str]:
         tmp.write_text(json.dumps(settings, indent=2) + "\n")
         tmp.chmod(0o600)
         os.replace(tmp, settings_path)
-    return msgs
+    return [f"→ {settings_path}: {' and '.join(events)} hooks run this checkout's bin/"] if events else []
 
 
-def on_hutch(hutch: str) -> bool:
-    return socket.gethostname().split(".")[0] in (f"{hutch}-daq", f"{hutch}-control")
-
-
-def mcp_command(hutch: str, sif: str) -> list[str]:
-    """The server's argv, always over the user's own ssh.
-
-    Never the local form, even when run on the hutch: ~/.claude.json is the same file on
-    S3DF, and a session on the hutch itself uses the CLIs (MODE: local), not this server.
-    """
-    return ["ssh", "-T", "-o", "BatchMode=yes", "-J", "psdev", f"{hutch}-daq",
-            str(REPO / "bin" / "hutch-mcp"), sif]
-
-
-def register_mcp(t: dict, hutch: str, sif: str, check: bool) -> list[str]:
-    """hutch-<hutch> in this config runs exactly mcp_command(); anything else is replaced."""
-    name, want = f"hutch-{hutch}", mcp_command(hutch, sif)
+def remove_mcp(t: dict, hutch: str, check: bool) -> list[str]:
+    """An old hutch-<hutch> registration (the server over ssh) removed from this config."""
+    name = f"hutch-{hutch}"
     cfg = (pathlib.Path(t["env"]["CLAUDE_CONFIG_DIR"]) if "CLAUDE_CONFIG_DIR" in t["env"]
            else pathlib.Path(t["env"]["HOME"])) / ".claude.json"
-    have = json.loads(cfg.read_text()).get("mcpServers", {}).get(name) if cfg.exists() else None
-    if have and [have.get("command"), *have.get("args", [])] == want:
+    if not (cfg.exists() and name in json.loads(cfg.read_text()).get("mcpServers", {})):
         return []
     if not check:
         claude = shutil.which("claude")
         if not claude:
-            return [f"✗ {t['name']}: `claude` is not on PATH; cannot register {name}"]
-        if have:
-            subprocess.run([claude, "mcp", "remove", "-s", "user", name], env=t["env"],
-                           capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
-        p = subprocess.run([claude, "mcp", "add", "-s", "user", name, "--", *want], env=t["env"],
+            return [f"✗ put `claude` on PATH, then re-run: {t['name']} needs it to remove {name}"]
+        p = subprocess.run([claude, "mcp", "remove", "-s", "user", name], env=t["env"],
                            capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=60)
         if p.returncode:
-            return [f"✗ {t['name']}: claude mcp add {name} failed: {p.stderr.strip()}"]
-    return [f"→ {t['name']}: {name} = {' '.join(want)}"]
+            return [f"✗ {t['name']}: `claude mcp remove -s user {name}` failed: {p.stderr.strip()}"]
+    return [f"→ {t['name']}: removed {name}; the hutch is reached from Cogito or {hutch}-daq"]
 
 
 def _run(argv: list[str], timeout: int = 60, env: dict | None = None) -> subprocess.CompletedProcess:
@@ -130,35 +145,19 @@ def _run(argv: list[str], timeout: int = 60, env: dict | None = None) -> subproc
         return subprocess.CompletedProcess(argv, 255, "", str(exc))
 
 
-def checks(hutch: str, sif: str) -> list[str]:
-    """What setup cannot do for you: the Kerberos ticket, key-based ssh, the image, the advisors."""
-    msgs = []
+def checks() -> list[str]:
+    """What setup cannot do for you: the Kerberos ticket the eLog reads."""
     ticket = f"FILE:{HOME}/krb5cc.ticket"
-    if _run(["klist", "-s", "-c", ticket]).returncode:
-        msgs.append(f"✗ no valid Kerberos ticket; in your own terminal: "
-                    f"kinit -c {ticket} {os.environ.get('USER', '$USER')}@SLAC.STANFORD.EDU")
-    reach = ([] if on_hutch(hutch)
-             else ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-J", "psdev",
-                   f"{hutch}-daq"])
-    p = _run([*reach, "test", "-r", sif])
-    if p.returncode == 255 and reach:
-        msgs.append(f"✗ ssh to {hutch}-daq needs a password or failed: {p.stderr.strip()[-200:]}")
-    elif p.returncode:
-        msgs.append(f"✗ no image at {sif} on {hutch}-daq; pull it there with "
-                    f"apptainer pull {sif} docker://<image>:<tag>")
-    adv = _run([str(REPO / "scripts" / "fetch-advisors.sh"), "--report"], timeout=120)
-    if adv.returncode:
-        msgs.append(f"✗ advisors: {(adv.stdout + adv.stderr).strip().splitlines()[-1:]} "
-                    f"(scripts/fetch-advisors.sh installs them)")
-    return msgs
+    if _run(["klist", "-s", "-c", ticket]).returncode == 0:
+        return []
+    return [f"✗ get a Kerberos ticket for the eLog, in your own terminal (not with `!`): "
+            f"kinit -c {ticket} {os.environ.get('USER', '$USER')}@SLAC.STANFORD.EDU"]
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct this command's parser (kept separate so it can be introspected)."""
     ap = argparse.ArgumentParser(prog="hutch-setup", description=__doc__.splitlines()[0])
     ap.add_argument("--hutch", required=True, help="e.g. mfx")
-    ap.add_argument("--sif", default=str(HOME / "hutch-mcp.sif"),
-                    help="the hutch-mcp image, as a path on the hutch machine")
     ap.add_argument("--check", action="store_true", help="report what would change; change nothing")
     return ap
 
@@ -168,11 +167,19 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     hutch = args.hutch.strip().lower()
     ts = targets()
+    roots = list(dict.fromkeys((t["dir"] / "skills").resolve() for t in ts))
     msgs: list[str] = []
-    for root in {(t["dir"] / "skills").resolve() for t in ts}:
+    for root in roots:
         msgs += link_skills(root, args.check)
-    for settings in {(t["dir"] / "settings.json").resolve() for t in ts}:
+    for settings in dict.fromkeys((t["dir"] / "settings.json").resolve() for t in ts):
         msgs += install_hooks(settings, args.check)
+    if not args.check:
+        print("fetching the advisors...", flush=True)
+        fetched = re.search(r"linked: \d+ new, \d+ updated", _run(
+            [str(REPO / "scripts" / "fetch-advisors.sh")], timeout=600).stdout)
+        if fetched and fetched.group() != "linked: 0 new, 0 updated":
+            msgs.append(f"→ advisors from GitHub, {fetched.group()}")
+    msgs += link_advisors(roots, args.check)
     marker = pathlib.Path(os.environ.get("HUTCH_SETUP_FILE")
                           or HOME / ".config" / "hutch-copilot" / "hutch")
     if not marker.exists() or marker.read_text().strip() != hutch:
@@ -181,16 +188,16 @@ def main(argv: list[str] | None = None) -> int:
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text(hutch + "\n")
     for t in ts:
-        msgs += register_mcp(t, hutch, args.sif, args.check)
-    msgs += checks(hutch, args.sif)
-    if not args.check and shutil.which("claude"):
-        for t in ts:
-            line = next((ln for ln in _run([shutil.which("claude"), "mcp", "list"], 120, t["env"])
-                         .stdout.splitlines() if ln.startswith(f"hutch-{hutch}:")), "")
-            if "Connected" not in line:
-                msgs.append(f"✗ {t['name']}: hutch-{hutch} does not connect: {line[-120:] or 'absent'}")
-    print("\n".join(msgs) if msgs else f"✓ hutch-copilot is set up for {hutch}")
-    if any(m.startswith("→") for m in msgs) and not args.check:
-        print("start a new session for the skills, hooks and server to load")
-    pending = [m for m in msgs if m.startswith("✗") or (args.check and m.startswith("→"))]
-    return 1 if pending else 0
+        msgs += remove_mcp(t, hutch, args.check)
+    msgs += checks()
+    # ~ shortens what was done; never what to run: `FILE:~/` is not expanded by a shell.
+    done = [m.replace(f"{HOME}/", "~/") for m in msgs if m.startswith("→")]
+    todo = [m[2:] for m in msgs if m.startswith("✗")]
+    print(f"hutch-copilot setup for {hutch.upper()}" + (", what it would change:" if args.check else ":"))
+    print("\n".join(f"  {m}" for m in done) or "  ✓ nothing to change")
+    if todo:
+        print("\nYou still need to:\n" + "\n".join(f"  {i}. {m}" for i, m in enumerate(todo, 1)))
+    if not args.check:
+        print(f"\n{'Then s' if todo else 'S'}tart a new Cogito session, or Claude Code on {hutch}-daq, "
+              f"and type /are-we-ready.")
+    return 1 if todo or (args.check and done) else 0

@@ -24,7 +24,7 @@ def home(tmp_path, monkeypatch):
 def test_links_every_skill_once_and_then_does_nothing(home):
     root = home / ".claude" / "skills"
     msgs = install.link_skills(root, check=False)
-    assert len(msgs) == 1 + len(SKILLS)
+    assert len(msgs) == 1 and all(name in msgs[0] for name in ["hutch-copilot", *SKILLS])
     assert (root / "are-we-ready").resolve() == install.REPO / "skills" / "are-we-ready"
     assert (root / "hutch-copilot").resolve() == install.REPO
     assert install.link_skills(root, check=False) == []
@@ -60,47 +60,61 @@ def test_hooks_replace_another_checkout_and_keep_the_rest(home):
     assert install.install_hooks(path, check=False) == []
 
 
-@pytest.mark.parametrize("host", ["sdfiana025", "mfx-daq"])
-def test_the_server_is_always_registered_over_ssh(monkeypatch, host):
-    """~/.claude.json is shared with S3DF: a local form written on the hutch would break it there."""
-    monkeypatch.setattr(install.socket, "gethostname", lambda: host)
-    argv = install.mcp_command("mfx", "/x/hutch-mcp.sif")
-    assert argv[0] == "ssh"
-    assert argv[argv.index("-J") + 1:argv.index("-J") + 3] == ["psdev", "mfx-daq"]
-    assert argv[-2:] == [str(install.REPO / "bin" / "hutch-mcp"), "/x/hutch-mcp.sif"]
-
-
 def _target(home):
     return {"name": "t", "dir": home / ".claude", "env": {"HOME": str(home)}}
 
 
-def test_a_matching_registration_is_left_alone(home, monkeypatch):
-    monkeypatch.setattr(install.socket, "gethostname", lambda: "sdfiana025")
-    want = install.mcp_command("mfx", "/x.sif")
-    (home / ".claude.json").write_text(json.dumps(
-        {"mcpServers": {"hutch-mfx": {"command": want[0], "args": want[1:]}}}))
-    monkeypatch.setattr(install.subprocess, "run", lambda *a, **k: pytest.fail("ran claude"))
-    assert install.register_mcp(_target(home), "mfx", "/x.sif", check=False) == []
-
-
-def test_a_stale_registration_is_removed_then_added(home, monkeypatch):
-    monkeypatch.setattr(install.socket, "gethostname", lambda: "sdfiana025")
-    (home / ".claude.json").write_text(json.dumps(
-        {"mcpServers": {"hutch-mfx": {"command": "ssh", "args": ["old/server/hutch-mcp.sh"]}}}))
+def test_an_old_hutch_server_is_removed_and_none_is_added(home, monkeypatch):
+    """Off the hutch only Cogito's gateway reaches it; on it, the CLIs do."""
     calls = []
     monkeypatch.setattr(install.shutil, "which", lambda name: "/bin/claude")
-    monkeypatch.setattr(install.subprocess, "run", lambda argv, **k: calls.append((argv, k["env"]))
+    monkeypatch.setattr(install.subprocess, "run", lambda argv, **k: calls.append(argv)
                         or subprocess.CompletedProcess(argv, 0, "", ""))
-    msgs = install.register_mcp(_target(home), "mfx", "/x.sif", check=False)
-    assert [c[0][1:3] for c in calls] == [["mcp", "remove"], ["mcp", "add"]]
-    assert calls[1][0][calls[1][0].index("--") + 1:] == install.mcp_command("mfx", "/x.sif")
-    assert calls[1][1]["HOME"] == str(home)
-    assert msgs[0].startswith("→")
+    assert install.remove_mcp(_target(home), "mfx", check=False) == []
+    (home / ".claude.json").write_text(json.dumps(
+        {"mcpServers": {"hutch-mfx": {"command": "ssh", "args": ["mfx-daq"]}}}))
+    assert install.remove_mcp(_target(home), "mfx", check=True)[0].startswith("→")
+    assert calls == []
+    install.remove_mcp(_target(home), "mfx", check=False)
+    assert [c[1:3] for c in calls] == [["mcp", "remove"]]
 
 
 def test_check_reports_pending_work_and_writes_nothing(home, monkeypatch, capsys):
-    monkeypatch.setattr(install, "checks", lambda hutch, sif: [])
+    monkeypatch.setattr(install, "checks", lambda *a: [])
     monkeypatch.setattr(install.subprocess, "run", lambda *a, **k: pytest.fail("ran something"))
     assert install.main(["--hutch", "mfx", "--check"]) == 1
     assert not (home / "hutch").exists() and not (home / ".claude" / "skills").exists()
-    assert "hutch-mfx" in capsys.readouterr().out
+    assert "~/hutch = mfx" in capsys.readouterr().out
+
+
+def test_advisors_reach_every_config_and_a_stranger_is_left_alone(home, monkeypatch):
+    """claude-lcls once lacked three required advisors that ~/.claude/skills had."""
+    a, b, shared = home / "a" / "skills", home / "b" / "skills", home / "shared"
+    for root, name in ((shared, "ask-lute"), (a, "psana-daq")):
+        (root / name).mkdir(parents=True)
+        (root / name / "SKILL.md").write_text("x")
+    b.mkdir(parents=True)
+    (b / "psana-daq").symlink_to(home / "gone")
+    monkeypatch.setenv("HUTCH_SKILL_ROOTS", str(shared))
+    monkeypatch.setattr(install, "required",
+                        lambda: {"ask-lute": ["x"], "psana-daq": ["y"], "ask-smalldata": ["z"]})
+    msgs = install.link_advisors([a, b], check=False)
+    assert (a / "ask-lute").resolve() == (b / "ask-lute").resolve() == (shared / "ask-lute").resolve()
+    assert (b / "psana-daq").readlink() == home / "gone"
+    assert any(m.startswith("✗") and str(b / "psana-daq") in m for m in msgs)
+    assert any(m.startswith("✗") and "ask-smalldata" in m for m in msgs)
+    assert not [m for m in install.link_advisors([a, b], check=False) if m.startswith("→")]
+
+
+def test_only_what_needs_the_operator_is_listed_for_them(home, monkeypatch, capsys):
+    monkeypatch.setattr(install, "_run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(install, "link_advisors", lambda roots, check: [])
+    monkeypatch.setattr(install, "remove_mcp", lambda *a: [])
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    monkeypatch.setattr(install, "checks", lambda *a: ["✗ get a Kerberos ticket"])
+    assert install.main(["--hutch", "mfx"]) == 1
+    out = capsys.readouterr().out
+    assert "You still need to:\n  1. get a Kerberos ticket" in out and "Then start a new" in out
+    monkeypatch.setattr(install, "checks", lambda *a: [])
+    assert install.main(["--hutch", "mfx"]) == 0
+    assert "You still need to" not in capsys.readouterr().out

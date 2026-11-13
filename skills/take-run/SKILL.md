@@ -78,7 +78,7 @@ sending; do not translate this table.
 ## 3. Confirm — this is a write
 
 Tell the operator the command, the duration and the sample first. **You cannot approve it
-yourself**, in either mode:
+yourself**, in any session:
 
 - **`MODE: local`**: send it **without `--confirm`** first. It prints the class and its reasons
   and refuses (rc 5) without running anything. Show those to the operator, wait for explicit
@@ -88,11 +88,12 @@ yourself**, in either mode:
   ```
 - **`MODE: mcp`**: `hutch_py_run(code="<run command>")`. The server classifies it and, for a
   write, shows the operator a form with the class, its reasons and the code. It runs only if they
-  type the class (`write`, `beam-critical`) and accept. Over SAGE it refuses writes until a
-  per-user policy exists: say so, and the run is taken from a session on the hutch machine.
+  type the class (`write`, `beam-critical`) and accept. A caller `authz/policy.yaml` does not
+  grant is refused before the form: report it as it is.
+- **No `MODE:` line** (a terminal off the hutch): there is no route to the hutch here. Say so,
+  and send the operator to Cogito or to Claude Code on `$H-daq`.
 
-A decline, a cancel, or a client that cannot show the form is an error, and nothing ran:
-report it, and never retry to wear them down. Then read the DAQ state again for
+A decline, a cancel, or a client that cannot show the form is final, and nothing ran: report it, and never retry to wear them down. Then read the DAQ state again for
 `run_number` / `last_run_number`.
 
 `run` launches a fresh device load and needs no live session. It pays that load on
