@@ -1,0 +1,22 @@
+# Who may run a write through the SAGE gateway (hutch_py_run over HTTP). Modelled on epics-mcp's
+# authz/policy.yaml; src/hutch_copilot/server.py reads it on every gateway write.
+#
+# Default-deny: no grant, no write. A missing, unreadable or malformed file denies every write.
+# A grant names a hutch and the highest action class allowed there (write < beam-critical).
+# `hutch`, and `user` in direct_grants, take fnmatch patterns. A user is the gateway's
+# X-Authenticated-User exactly as the server logs it, e.g. someone@slac.stanford.edu.
+#
+# A granted write still runs as the account that runs the tunnel: this decides who may ask, and
+# the server logs who did. Over ssh (stdio) this file is not read: the write runs as the caller.
+
+users: {}
+#  someone@slac.stanford.edu:
+#    groups: [mfx-operators]
+
+groups: {}
+#  mfx-operators:
+#    grants:
+#      - {hutch: mfx, class: write}
+
+direct_grants: []
+#  - {user: someone@slac.stanford.edu, hutch: mfx, class: beam-critical}

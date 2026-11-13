@@ -8,6 +8,7 @@ and only once the operator has typed the action class into an MCP elicitation fo
 
 from __future__ import annotations
 
+import fnmatch
 import getpass
 import logging
 import os
@@ -15,6 +16,7 @@ import pathlib
 import subprocess
 import sys
 
+import yaml
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -23,6 +25,7 @@ from pydantic import BaseModel
 from .tools import session
 
 BIN = pathlib.Path(__file__).resolve().parents[2] / "bin"
+POLICY = BIN.parent / "authz" / "policy.yaml"
 #: lightpath settles for ~40 s; anything far past that is hung.
 T_TOOL = 300
 LOG = logging.getLogger("hutch-mcp")
@@ -165,6 +168,20 @@ class _Approval(BaseModel):
     confirm: str
 
 
+def _granted(user: str, hutch: str, cls: str) -> bool:
+    """Whether authz/policy.yaml lets ``user`` run a ``cls`` operation on ``hutch``."""
+    try:
+        policy = yaml.safe_load(POLICY.read_text()) or {}
+        grants = [g for g in policy.get("direct_grants") or [] if fnmatch.fnmatchcase(user, g["user"])]
+        for group in ((policy.get("users") or {}).get(user) or {}).get("groups") or []:
+            grants += policy["groups"][group].get("grants") or []
+        return any(fnmatch.fnmatchcase(hutch, g["hutch"])
+                   and session.SEVERITY[g["class"]] >= session.SEVERITY[cls] for g in grants)
+    except Exception:   # fail closed, as epics-mcp: a policy that cannot be evaluated grants nothing
+        LOG.exception("%s could not be evaluated; the write is denied", POLICY)
+        return False
+
+
 @mcp.tool()
 async def hutch_py_run(code: str, ctx: Context, timeout_s: int = 300,
                        hutch: str | None = None) -> str:
@@ -177,14 +194,17 @@ async def hutch_py_run(code: str, ctx: Context, timeout_s: int = 300,
     verdict = session.classify(code)
     confirm = None
     if verdict["class"] != session.READ_ONLY:
-        # Over HTTP the server runs as whoever started it, so a write would run as them.
-        if not _user().startswith("stdio:"):
-            raise ToolError("writes are refused over HTTP until a per-user policy exists; "
-                            "use a stdio session over your own ssh")
+        user, cls = _user(), verdict["class"]
+        # Through the gateway a write runs as the tunnel's account whoever asks, so the policy
+        # decides who may ask. Over ssh it runs as the caller, who needs no grant.
+        if not user.startswith("stdio:") and not _granted(user, h, cls):
+            LOG.warning("user=%s hutch=%s hutch_py_run class=%s denied by policy", user, h, cls)
+            raise ToolError(f"{user} has no grant for a {cls} operation on {h} through the gateway "
+                            f"(authz/policy.yaml); nothing ran. Ask to be granted, or run it from "
+                            f"Claude Code on the hutch machine")
         params = ctx.session.client_params
         if not (params and params.capabilities.elicitation):
             raise ToolError("this client cannot ask the operator (no MCP elicitation); nothing ran")
-        cls = verdict["class"]
         answer = await ctx.elicit(
             f"hutch-py on {h}, as {_user()}: a {cls} operation.\n"
             f"why: {'; '.join(verdict['reasons'])}\n\n{code}\n\n"
@@ -194,7 +214,7 @@ async def hutch_py_run(code: str, ctx: Context, timeout_s: int = 300,
         confirm = answer.data.confirm.strip().lower()
         if confirm not in session.SEVERITY:
             raise ToolError(f"approval {confirm!r} is not an action class; nothing ran")
-    LOG.info("user=%s hutch_py_run class=%s confirm=%s", _user(), verdict["class"], confirm)
+    LOG.info("user=%s hutch=%s hutch_py_run class=%s confirm=%s", _user(), h, verdict["class"], confirm)
     # hutch-py's own gate still decides: a confirmation weaker than the class is refused (rc 5).
     return _run("hutch-py", "--hutch", h, "--timeout", str(timeout_s),
                 *_opt("--confirm", confirm), "run", code, timeout=timeout_s + 60)
