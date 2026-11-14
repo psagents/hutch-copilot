@@ -84,7 +84,7 @@ an answer from other reads, or from the tools' source: a verdict you assembled y
 guess with the tool's name on it. **A write is never yours to approve.** Locally, `bin/hutch-py`
 refuses until the operator has approved the class you then pass as `--confirm`. Over MCP,
 `hutch_py_run` asks the operator itself, in a form where they type the class. It refuses a
-caller `authz/policy.yaml` does not grant: report its message as it is; nothing ran.
+caller the server's policy does not grant: report its message as it is; nothing ran.
 
 Three rules that the tools enforce and you must not work around:
 

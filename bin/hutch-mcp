@@ -1,7 +1,8 @@
 #!/bin/sh
 # Run hutch-mcp from its image on a hutch machine.
 #   hutch-mcp <sif>            stdio, for a client over ssh
-#   hutch-mcp <sif> <socket>   streamable HTTP on <socket>, for the SAGE tunnel: start it before run.sh
+#   hutch-mcp <sif> <socket>   streamable HTTP on <socket>, for the SAGE tunnel: start it before run.sh.
+#                              Gateway writes follow policy.yaml beside <socket> (authz/policy.yaml)
 # --cleanenv as in the tunnel's run.sh, so only EPICS_CA_*/EPICS_PVA_* pass through.
 set -eu
 sif=$1
@@ -15,7 +16,8 @@ if [ -n "$sock" ]; then
     rm -f "$sock"
     # shellcheck disable=SC2086
     exec apptainer run --cleanenv --bind "$binds,$(dirname -- "$sock")" $envs \
-        --env MCP_TRANSPORT=streamable-http --env "MCP_UDS=$sock" "$sif"
+        --env MCP_TRANSPORT=streamable-http --env "MCP_UDS=$sock" \
+        --env "AUTHZ_POLICY_FILE=$(dirname -- "$sock")/policy.yaml" "$sif"
 fi
 # shellcheck disable=SC2086
 exec apptainer run --cleanenv --bind "$binds" $envs "$sif"

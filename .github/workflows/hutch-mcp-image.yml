@@ -5,7 +5,7 @@ name: hutch-mcp image
 on:
   push:
     branches: [main, ENH/hutch-mcp-container]
-    paths: [Dockerfile, .dockerignore, pyproject.toml, src/**, bin/**, authz/**, .github/workflows/hutch-mcp-image.yml]
+    paths: [Dockerfile, .dockerignore, pyproject.toml, src/**, bin/**, .github/workflows/hutch-mcp-image.yml]
   workflow_dispatch:
 
 permissions:

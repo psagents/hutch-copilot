@@ -94,7 +94,7 @@ whether the hutch's own files are readable where Claude runs, and whether it is 
 | Where Claude runs | Hook says | The hutch-only tools |
 |---|---|---|
 | a terminal on the hutch machine (`claude` on `mfx-daq`) | `MODE: local` | `bin/hutch-*` directly; writes after the operator's yes |
-| Cogito, on S3DF **or** on the hutch machine (its container has no `/cds`) | `MODE: mcp` | `mcp__sdf-mcp__hutch<hutch>_<tool>`, through the gateway; writes per `authz/policy.yaml` |
+| Cogito, on S3DF **or** on the hutch machine (its container has no `/cds`) | `MODE: mcp` | `mcp__sdf-mcp__hutch<hutch>_<tool>`, through the gateway; writes per the bundle's `policy.yaml` |
 | a terminal anywhere else (S3DF) | nothing | none: offline work only (analysis, data on disk, state, log) |
 
 Cogito is told apart by `$HOME`: a Cogito host sets it to its overlay, away from the passwd
@@ -110,14 +110,16 @@ fixed argv over an existing `bin/hutch-*`. Only `hutch_py_run` can write: the op
 type the action class into an MCP elicitation form, and the model cannot.
 
 Through the gateway (HTTP), the server is one process run by whoever runs the tunnel, so every
-write would run as that account. [`authz/policy.yaml`](../authz/policy.yaml), modelled on
-epics-mcp's, decides who may ask: the caller is the gateway's `X-Authenticated-User`, trusted
-because only agentgateway's certificate reaches the socket, with the SLAC email domain stripped
-as epics-mcp's `USERNAME_STRIP_DOMAIN` does (only that domain: another one never matches). It is default-deny and fails
-closed: a missing, unreadable or malformed policy refuses every gateway write. It is re-read on
-every write, and shipped in the image, so a grant is a reviewed pull request, live once the
-cron pulls the new image. A granted write is then shown to the operator, and runs as the
-tunnel's account; the log records who asked. Over ssh (stdio) the policy is not read, because
+write would run as that account. A policy, modelled on epics-mcp's, decides who may ask, and
+it lives where epics-mcp's does: in the tunnel bundle, as `policy.yaml` beside `mcp.sock`
+(`~/cogito-rmcp-hutch-<hutch>/` on the hutch machine), kept by the server's owner and passed by
+`bin/hutch-mcp` as `AUTHZ_POLICY_FILE`. [`authz/policy.yaml`](../authz/policy.yaml) is only the
+example to copy; nothing reads it. The caller is the gateway's `X-Authenticated-User`, a bare
+username (`user=lconreux` in the server's log), trusted because only agentgateway's certificate
+reaches the socket; a name with a domain matches no grant. It is default-deny and fails closed:
+no `AUTHZ_POLICY_FILE`, or a policy that cannot be read or evaluated, refuses every gateway
+write. It is re-read on every write, so an edit applies without a restart. A granted write is
+then shown to the operator, and runs as the tunnel's account; the log records who asked. Over ssh (stdio) the policy is not read, because
 the server runs as the caller.
 
 Not verified yet: whether agentgateway relays the elicitation form to Cogito. If it does not, a

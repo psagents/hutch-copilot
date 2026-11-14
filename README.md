@@ -34,9 +34,9 @@ Then start a new Cogito session, or Claude Code on mfx-daq, and type /are-we-rea
 
 It does what a script can: links the skills and the advisors into each Claude, installs two
 hooks, and records which hutch is yours. Only you can get the Kerberos ticket (`kinit`, in
-your own terminal). To take runs from Cogito, your SLAC login must also be listed in
-[`authz/policy.yaml`](authz/policy.yaml): a pull request to that file, live about 15 minutes
-after it is merged.
+your own terminal). To take runs from Cogito, your SLAC username must also be granted in the
+hutch server's policy, which its owner keeps on the hutch machine
+(`~/cogito-rmcp-hutch-mfx/policy.yaml`; [`authz/policy.yaml`](authz/policy.yaml) is the example).
 
 Run it again after a `git pull`, or whenever something seems missing. `--check` shows what it
 would change and changes nothing. Then start a new session: Claude reads its skills only when
@@ -107,6 +107,6 @@ everywhere.
 | no greeting in Claude Code on S3DF | nothing: that is expected, it stays quiet there |
 | it cannot reach the hutch, in Claude Code on S3DF | expected: use Cogito, or Claude Code on `mfx-daq` |
 | it cannot reach the hutch, in Cogito | the session's facility must be LCLS, which is what brings the `sdf-mcp` gateway |
-| it says you have no grant, in Cogito | ask to be added to `authz/policy.yaml` |
+| it says you have no grant, in Cogito | ask the hutch server's owner to add you to its `policy.yaml` |
 | an advisor is missing | re-run `hutch-setup`; `scripts/fetch-advisors.sh --report` shows where it looked |
 | eLog steps fail, no valid Kerberos ticket | run the `kinit` line, in your own terminal |

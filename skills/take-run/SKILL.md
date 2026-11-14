@@ -88,7 +88,7 @@ yourself**, in any session:
   ```
 - **`MODE: mcp`**: `hutch_py_run(code="<run command>")`. The server classifies it and, for a
   write, shows the operator a form with the class, its reasons and the code. It runs only if they
-  type the class (`write`, `beam-critical`) and accept. A caller `authz/policy.yaml` does not
+  type the class (`write`, `beam-critical`) and accept. A caller the server's policy does not
   grant is refused before the form: report it as it is.
 - **No `MODE:` line** (a terminal off the hutch): there is no route to the hutch here. Say so,
   and send the operator to Cogito or to Claude Code on `$H-daq`.

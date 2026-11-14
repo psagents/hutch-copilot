@@ -25,7 +25,6 @@ from pydantic import BaseModel
 from .tools import session
 
 BIN = pathlib.Path(__file__).resolve().parents[2] / "bin"
-POLICY = BIN.parent / "authz" / "policy.yaml"
 #: lightpath settles for ~40 s; anything far past that is hung.
 T_TOOL = 300
 LOG = logging.getLogger("hutch-mcp")
@@ -169,21 +168,21 @@ class _Approval(BaseModel):
 
 
 def _granted(user: str, hutch: str, cls: str) -> bool:
-    """Whether authz/policy.yaml lets ``user`` run a ``cls`` operation on ``hutch``."""
-    # The gateway sends the SLAC email; the policy names bare usernames, as epics-mcp's. Only the
-    # SLAC domain is stripped: another domain's `lconreux@...` must not match lconreux's grant.
-    user = user.removesuffix("@slac.stanford.edu")
-    if not user or "@" in user:
+    """Whether the policy at $AUTHZ_POLICY_FILE lets ``user`` run a ``cls`` operation on ``hutch``."""
+    # As epics-mcp: the deployment's own file (the tunnel bundle's policy.yaml), never one in the
+    # image. The gateway sends bare usernames; one with a domain matches no grant.
+    path = os.environ.get("AUTHZ_POLICY_FILE")
+    if not path or not user or "@" in user:
         return False
     try:
-        policy = yaml.safe_load(POLICY.read_text()) or {}
+        policy = yaml.safe_load(pathlib.Path(path).read_text()) or {}
         grants = [g for g in policy.get("direct_grants") or [] if fnmatch.fnmatchcase(user, g["user"])]
         for group in ((policy.get("users") or {}).get(user) or {}).get("groups") or []:
             grants += policy["groups"][group].get("grants") or []
         return any(fnmatch.fnmatchcase(hutch, g["hutch"])
                    and session.SEVERITY[g["class"]] >= session.SEVERITY[cls] for g in grants)
     except Exception:   # fail closed, as epics-mcp: a policy that cannot be evaluated grants nothing
-        LOG.exception("%s could not be evaluated; the write is denied", POLICY)
+        LOG.exception("%s could not be evaluated; the write is denied", path)
         return False
 
 
@@ -205,7 +204,7 @@ async def hutch_py_run(code: str, ctx: Context, timeout_s: int = 300,
         if not user.startswith("stdio:") and not _granted(user, h, cls):
             LOG.warning("user=%s hutch=%s hutch_py_run class=%s denied by policy", user, h, cls)
             raise ToolError(f"{user} has no grant for a {cls} operation on {h} through the gateway "
-                            f"(authz/policy.yaml); nothing ran. Ask to be granted, or run it from "
+                            f"(its policy.yaml); nothing ran. Ask its owner for a grant, or run it from "
                             f"Claude Code on the hutch machine")
         params = ctx.session.client_params
         if not (params and params.capabilities.elicitation):
