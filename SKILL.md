@@ -39,21 +39,23 @@ Run `--help` for subcommands and flags. They work from a bare checkout with no i
 step. `pip install -e .` is optional and only adds the same commands to PATH — never
 require it.
 
-**What only the hutch can read is reached one of two ways, and the session start says which.**
+**What only the hutch can read is reached one way per session, and the session start says which.**
 happi, Channel Access, the archiver, lightpath, the DAQ control port, and the readiness
-checks over them exist only on the hutch machine. The SessionStart hook prints `MODE: local`
-or `MODE: mcp`:
+checks over them exist only on the hutch machine. The SessionStart hook prints:
 
 - **`MODE: local`**: Claude runs directly on the hutch machine (`/cds` is readable). Run the
   `bin/hutch-*` in the *local* column. Use no MCP tool for these, even one that is connected.
-- **`MODE: mcp`**: anywhere else, a Cogito session included, even one on the hutch machine,
-  whose container has no `/cds`. Call the tool in the *MCP* column. Through SAGE it is named
-  `mcp__sdf-mcp__hutch<hutch>_<tool>`, for example `mcp__sdf-mcp__hutchmfx_ready_beam`; on a
-  directly registered server, `mcp__hutch-<hutch>__<tool>`. Never run the local column here:
-  it fails with rc 4 and proves nothing.
-- **No `MODE:` line**: the hook did not run. Check once with `test -r /cds/group/pcds` on a
-  `*-daq` host. Readable means local, anything else means mcp. Never try local first and fall
-  back on rc 4.
+- **`MODE: mcp`**: a Cogito session, on S3DF or on the hutch machine (its container has no
+  `/cds`). Call the tool in the *MCP* column through Cogito's sdf-mcp gateway, as
+  `mcp__sdf-mcp__hutch<hutch>_<tool>` (for example `mcp__sdf-mcp__hutchmfx_ready_beam`). Never run the local column here: it fails with rc 4 and
+  proves nothing.
+- **No `MODE:` line**: a Claude Code terminal off the hutch (S3DF), or a `*-daq` host where the
+  hook did not run. On a `*-daq` host, check once with `test -r /cds/group/pcds`: readable means
+  local. Anywhere else this session has **no hutch-only tools**, and offline work needs none:
+  analysis (`/setup-analysis`, `/assess-analysis`), data on disk, the state file and the
+  beamtime log. For online work, say so plainly and send the operator to Cogito or to Claude
+  Code on `<hutch>-daq`: both do all of it. Never try local first and fall back
+  on rc 4.
 
 | Answers | local | MCP |
 |---|---|---|
@@ -71,13 +73,18 @@ Over MCP, leave `hutch` out: it defaults to the server's own. In both modes, run
 works from anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
 `hutch-daq logs`/`config`, `hutch-data xtc2`/`detectors`, `hutch-normal show`.
 
+**Other MCP servers in the session are not part of any procedure.** Cogito's gateway also
+serves other facility servers, such as `epics-mfx`; a terminal may have more. A procedure uses
+only the tools named here, so it answers the same way in every setting. One of those servers
+may answer a question the operator asks outside a procedure: say which server answered.
+
 If a tool is not there, will not load, or errors, that is rule 3: say which, and stop there.
 Loading a tool that still is not callable once is enough; do not load it again. Never rebuild
 an answer from other reads, or from the tools' source: a verdict you assembled yourself is a
 guess with the tool's name on it. **A write is never yours to approve.** Locally, `bin/hutch-py`
 refuses until the operator has approved the class you then pass as `--confirm`. Over MCP,
-`hutch_py_run` asks the operator itself, and refuses writes over SAGE until a per-user policy
-exists.
+`hutch_py_run` asks the operator itself, in a form where they type the class. It refuses a
+caller the server's policy does not grant: report its message as it is; nothing ran.
 
 Three rules that the tools enforce and you must not work around:
 
@@ -120,6 +127,22 @@ Two rules about the experiment state file, which every sub-skill reads and write
 > **Logging is ambient.** A `Stop` hook (`bin/hutch-stop`) asks you to sync at the end of
 > any turn that touched the experiment; `sync-log` does the writing. Each sub-skill still
 > records its own conclusions with provenance — `sync-log` catches what they did not.
+
+---
+
+## Talking to the operator
+
+The operator runs the experiment, not this skill: they should never need its internals to
+follow you.
+
+- **Plain words.** Never `rc 4`, `MODE`, "action class", `settled`, "elicitation" or a tool name
+  as the explanation. Say what it means: "the hutch tools did not answer", "the beam reading had
+  not settled yet".
+- **Say where each reading came from**: "the DAQ says", "the archiver shows", "`@ask-lute`
+  says". An unsourced number reads as your own.
+- **Before handing a question to an advisor, say so in one line**, and name it.
+- **Before any write, say what it will do and how they will approve it**: their explicit yes in
+  the chat (`MODE: local`), or typing its class in the form `hutch_py_run` shows (`MODE: mcp`).
 
 ---
 
@@ -227,7 +250,7 @@ fault belongs to.
 `~/.claude/skills/<name>/` directly — the skill list is fixed at session start, so the
 `Skill` tool will not see it until a restart, but its files are readable at once. Tell
 the operator you did so. `fetch-advisors.sh` clones from GitHub; it cannot install the
-filesystem-only advisors (`README.md`, *Advisors*).
+filesystem-only advisors (`docs/DEVELOPING.md`, *Advisors*).
 
 If that fails too, it is tool rule 3 — a source you could not reach. So:
 
@@ -244,7 +267,8 @@ submit. See its precondition contract.
 
 ## Reference
 
-- `README.md` — installation, the exit-code contract, the safety gate, open work.
+- `README.md` — what the operator sees: setup, first session, what it asks, troubleshooting.
+- `docs/DEVELOPING.md` — how setup works, the exit-code contract, the safety gate, open work.
 
 **This repo holds no science knowledge** — no parameter defaults, no metric thresholds,
 no DAG recipes. Operating a workflow is here; what to set up and how to read its output is

@@ -1,0 +1,49 @@
+# authz/policy.yaml — example write policy for hutch-mcp behind the SAGE gateway
+#
+# An example, as epics-mcp's authz/policy.yaml: nothing reads this copy. The live policy is the
+# tunnel bundle's own policy.yaml, beside its mcp.sock (~/cogito-rmcp-hutch-<hutch>/ on the hutch
+# machine), edited there by the server's owner; bin/hutch-mcp passes it as AUTHZ_POLICY_FILE.
+# The server reads it on every gateway write, so a change applies without a restart.
+#
+# Object types:   hutch:<name>           a hutch (mfx, xpp, ...)
+#                 group:<name>           user group
+# Relations:      grant                  may run, at a hutch, operations up to an action class
+#                 member                 user is a member of a group
+# Action classes: write < beam-critical  a grant of beam-critical covers write, not the reverse
+#
+# Evaluation (any match grants):
+#   1. direct_grants:  user → grant → hutch, class
+#   2. group grants:   user's group → grant → hutch, class
+#
+# Users are bare usernames, as the gateway sends them (X-Authenticated-User); `user` in
+# direct_grants and every `hutch` take fnmatch patterns. Default-deny: no policy file, no grant,
+# no write; a file that cannot be read or evaluated denies every write. Unlike epics-mcp's open
+# read grant there is no open write grant: never grant user "*".
+#
+# Over ssh (stdio) no policy is read: the write runs as the caller. Through the gateway a granted
+# write still needs the operator's typed approval, and runs as the account that runs the tunnel.
+
+# ── Users ────────────────────────────────────────────────────────────────────
+users:
+  alice:
+    groups: [mfx-operators, mfx-staff]
+  bob:
+    groups: [mfx-operators]
+  carol:
+    groups: []             # no group membership — only direct grants apply
+
+# ── Groups ───────────────────────────────────────────────────────────────────
+groups:
+  mfx-operators:
+    grants:
+      - {hutch: mfx, class: write}            # runs and motor moves
+  mfx-staff:
+    grants:
+      - {hutch: mfx, class: beam-critical}    # stoppers and the like, as well
+
+# ── Direct grants ─────────────────────────────────────────────────────────────
+# user → grant → hutch, class   (for one person, without a group)
+direct_grants:
+  - user: carol
+    hutch: mfx
+    class: write
