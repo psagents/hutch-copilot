@@ -112,7 +112,8 @@ type the action class into an MCP elicitation form, and the model cannot.
 Through the gateway (HTTP), the server is one process run by whoever runs the tunnel, so every
 write would run as that account. [`authz/policy.yaml`](../authz/policy.yaml), modelled on
 epics-mcp's, decides who may ask: the caller is the gateway's `X-Authenticated-User`, trusted
-because only agentgateway's certificate reaches the socket. It is default-deny and fails
+because only agentgateway's certificate reaches the socket, with the SLAC email domain stripped
+as epics-mcp's `USERNAME_STRIP_DOMAIN` does (only that domain: another one never matches). It is default-deny and fails
 closed: a missing, unreadable or malformed policy refuses every gateway write. It is re-read on
 every write, and shipped in the image, so a grant is a reviewed pull request, live once the
 cron pulls the new image. A granted write is then shown to the operator, and runs as the

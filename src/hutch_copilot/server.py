@@ -170,6 +170,11 @@ class _Approval(BaseModel):
 
 def _granted(user: str, hutch: str, cls: str) -> bool:
     """Whether authz/policy.yaml lets ``user`` run a ``cls`` operation on ``hutch``."""
+    # The gateway sends the SLAC email; the policy names bare usernames, as epics-mcp's. Only the
+    # SLAC domain is stripped: another domain's `lconreux@...` must not match lconreux's grant.
+    user = user.removesuffix("@slac.stanford.edu")
+    if not user or "@" in user:
+        return False
     try:
         policy = yaml.safe_load(POLICY.read_text()) or {}
         grants = [g for g in policy.get("direct_grants") or [] if fnmatch.fnmatchcase(user, g["user"])]

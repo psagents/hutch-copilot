@@ -154,12 +154,12 @@ def test_a_write_without_a_typed_approval_never_runs(monkeypatch, ctx, why):
 
 POLICY = """
 users:
-  ytl@slac.stanford.edu: {groups: [mfx-operators]}
+  ytl: {groups: [mfx-operators]}
 groups:
   mfx-operators:
     grants: [{hutch: mfx, class: write}]
 direct_grants:
-  - {user: "*@slac.stanford.edu", hutch: xpp, class: beam-critical}
+  - {user: "*", hutch: xpp, class: beam-critical}
 """
 
 
@@ -171,6 +171,8 @@ def _over_gateway(monkeypatch, tmp_path, user, policy=POLICY):
 
 @pytest.mark.parametrize("user,code,hutch,why", [
     ("bob@slac.stanford.edu", "mfx_dg1.mv(3)", "mfx", "no grant"),            # in no group
+    ("ytl@gmail.com", "mfx_dg1.mv(3)", "mfx", "no grant"),                    # not SLAC's ytl
+    ("@slac.stanford.edu", "xpp_stopper.remove()", "xpp", "no grant"),       # no name, even for "*"
     ("ytl@slac.stanford.edu", "mfx_stopper_1.remove()", "mfx", "no grant"),  # write < beam-critical
     ("ytl@slac.stanford.edu", "mfx_dg1.mv(3)", "rix", "no grant"),           # another hutch
 ])
@@ -197,7 +199,7 @@ def test_a_granted_gateway_write_still_needs_the_typed_approval(monkeypatch, tmp
     assert len(ctx.asked) == 1 and seen[0][-4:] == ["--confirm", typed, "run", code]
 
 
-@pytest.mark.parametrize("policy", ["users: [", "groups: {}\nusers: {ytl@slac.stanford.edu: {groups: [gone]}}", ""])
+@pytest.mark.parametrize("policy", ["users: [", "groups: {}\nusers: {ytl: {groups: [gone]}}", ""])
 def test_a_policy_that_cannot_be_evaluated_grants_nothing(monkeypatch, tmp_path, policy):
     _over_gateway(monkeypatch, tmp_path, "ytl@slac.stanford.edu", policy)
     assert not hutch_mcp._granted("ytl@slac.stanford.edu", "mfx", "write")
@@ -212,6 +214,7 @@ def test_the_shipped_policy_parses():
     """A broken policy denies every gateway write, silently to whoever edited it."""
     policy = hutch_mcp.yaml.safe_load(hutch_mcp.POLICY.read_text())
     assert set(policy) == {"users", "groups", "direct_grants"}
+    assert all(g["user"] != "*" for g in policy["direct_grants"]), "an open write grant"
 
 
 def test_the_model_cannot_pass_a_confirmation():
