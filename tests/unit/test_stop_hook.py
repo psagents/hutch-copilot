@@ -80,6 +80,8 @@ def test_a_turn_that_touched_the_experiment_is_asked_to_sync(fake_host, transcri
     assert "skills/sync-log/SKILL.md" in out["reason"]
     assert "mfx101609126" in out["reason"]
     assert "mfx101609126" in out["systemMessage"]
+    # Without it, a Cogito session searched the filesystem for its own transcript for minutes.
+    assert str(transcript) in out["reason"]
 
 
 def test_the_experiment_comes_from_the_transcript_not_a_guess(fake_host, tmp_path):

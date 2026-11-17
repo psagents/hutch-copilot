@@ -61,7 +61,8 @@ reason="Before this turn ends, sync the beamtime log for $experiment.
 
 Read $repo/skills/sync-log/SKILL.md and follow it: record what this turn established in
 the beamtime log (events) and the state file (facts, with provenance), then advance
-the watermark. Hutch is $hutch, experiment is $experiment.
+the watermark. Hutch is $hutch, experiment is $experiment. The session transcript is
+$transcript: read it only as the skill says, and never search for another.
 
 If nothing in this turn is worth recording, say so in one line and stop -- an empty
 entry is worse than none."
