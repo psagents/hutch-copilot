@@ -17,7 +17,8 @@ You are writing the record a later shift reads. Two destinations, and the split 
 already drawn in the tools: **`state` stores facts; `log` records events.**
 
 This runs at the end of a turn, so you usually already know what happened — you did it.
-Read the transcript only to recover what has fallen out of your context.
+Read the transcript only to recover what has fallen out of your context: a turn still in it
+needs none. The Stop hook names the transcript's path; never search the filesystem for one.
 
 ---
 
@@ -29,7 +30,8 @@ bin/hutch-state get sync_log.last_uuid --hutch $H --experiment $E --value-only
 
 Missing (rc=3) means nothing has ever been synced for this experiment. Then sync only
 the current turn, not the whole session — a first sync that reconstructs a week of
-history from a transcript invents more than it records.
+history from a transcript invents more than it records. A watermark that is not in this
+session's transcript is an earlier session's: the same, sync this turn only, from your context.
 
 **Never read the transcript whole.** A one-month session file measured 1.8 MB; loading it
 destroys the context this pass exists to preserve. Read forward from the watermark only,
