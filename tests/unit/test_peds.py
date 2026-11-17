@@ -92,12 +92,12 @@ def test_every_fallback_family_has_a_process_and_a_deploy_step():
 # Deployment is a write
 # --------------------------------------------------------------------------
 def test_refuses_without_a_write_confirmation(monkeypatch):
-    """The gate is daq.require_confirmation, and it fires before any transport."""
+    """The gate is --confirm write, and it fires before any transport."""
     def no_ssh(*a, **kw):
         raise AssertionError("a refused command reached the network")
 
     monkeypatch.setattr(lute, "ssh", no_ssh)
-    with pytest.raises(lute.SafetyRefusal, match="makepeds"):
+    with pytest.raises(lute.Refused, match="makepeds"):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm=None)
 
 
@@ -111,20 +111,19 @@ def test_the_refusal_does_not_depend_on_what_is_on_disk(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("HUTCH_DS_ROOT", str(tmp_path))
     paths.xtc2_dir("mfx", "e1").mkdir(parents=True)     # no files: guard would trip
-    with pytest.raises(lute.SafetyRefusal):
+    with pytest.raises(lute.Refused):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx", confirm=None)
 
 
 def test_the_cli_maps_a_refusal_to_rc_5(monkeypatch, capsys):
-    """rc 5, not a traceback: require_confirmation raises PermissionError, which
-    the LuteError/OSError handler does not catch."""
+    """rc 5, not a traceback, and not the LuteError/OSError rc 4."""
     def no_ssh(*a, **kw):
         raise AssertionError("a refused command reached the network")
 
     monkeypatch.setattr(lute, "ssh", no_ssh)
     rc = lute.main(["peds", "--hutch", "mfx", "--experiment", "e1", "--run", "43"])
     assert rc == 5
-    assert "SafetyRefusal" in capsys.readouterr().err
+    assert "Refused" in capsys.readouterr().err
 
 
 def test_fallback_commands_are_also_gated(tmp_path, monkeypatch):
@@ -135,7 +134,7 @@ def test_fallback_commands_are_also_gated(tmp_path, monkeypatch):
         raise AssertionError("a refused command reached the network")
 
     monkeypatch.setattr(lute, "ssh", no_ssh)
-    with pytest.raises(lute.SafetyRefusal):
+    with pytest.raises(lute.Refused):
         lute.deploy_pedestals(experiment="e1", run=43, hutch="mfx",
                               detector="jungfrau", fallback=True, confirm=None)
 

@@ -89,7 +89,7 @@ from .common import (
     staff_groups,
     xtc2_files,
 )
-from .session import BridgeUnavailable, SafetyRefusal, require_confirmation
+from .session import BridgeUnavailable
 from .session import _ssh as ssh
 from .state import MissingValue, StaleValue, State
 
@@ -104,6 +104,10 @@ WORKFLOW_HINTS = ("lute", "dag", "sfx", "xes", "xss", "crystfel", "smalldata",
 
 class LuteError(RuntimeError):
     pass
+
+
+class Refused(RuntimeError):
+    """A write asked for without --confirm write; nothing ran (rc 5)."""
 
 
 @functools.lru_cache(maxsize=None)
@@ -510,15 +514,13 @@ def deploy_pedestals(
 ) -> dict:
     """Deploy pedestal constants for a DARK run, by running makepeds on psdev.
 
-    Writes to the calibration store, so every command goes through the same
-    confirmation gate as anything sent to a live session. ``takepeds()`` is not
-    done here -- that runs *inside* the hutch-python session, and is just
-    ``hutch-daq exec 'takepeds()'``.
+    Writes to the calibration store, so it needs ``confirm="write"``, as the other hutch-lute
+    writes do. ``takepeds()`` is not done here: it runs in hutch-python, as a ``hutch-py run``.
 
     Raises
     ------
-    SafetyRefusal
-        Declared confirmation weaker than the command's class. Nothing runs.
+    Refused
+        No ``confirm="write"``. Nothing runs.
     LuteError
         XTC2 has not landed, or no fallback tools exist for this detector.
     """
@@ -538,11 +540,10 @@ def deploy_pedestals(
     else:
         commands = [f"makepeds -e {experiment} -r {int(run)} -u {operator}"]
 
-    # Gate before the XTC2 guard, and gate every command before any of them
-    # runs: a refusal must not depend on what is on disk, and a refusal on the
-    # second command must not leave the first already deployed.
-    for cmd in commands:
-        require_confirmation(cmd, confirm)
+    # Before the XTC2 guard: a refusal must not depend on what is on disk.
+    if confirm != "write":
+        raise Refused("makepeds writes to the calibration store: show these to the operator, "
+                              "then re-run with --confirm write:\n  " + "\n  ".join(commands))
 
     # Ordering hazard: makepeds reads the XTC2 files, so they must have landed.
     # Deploying before arrival produces pedestals from absent or partial data,
@@ -1846,7 +1847,7 @@ def main(argv: list[str] | None = None) -> int:
             needed, why = needs_kerberos(open(args.yaml).read())
             return out({"needs_kerberos": needed, "why": why,
                         "have_ticket": have_ticket()})
-    except SafetyRefusal as exc:
+    except Refused as exc:
         return fail(exc, REFUSED)
     except (LuteError, OSError) as exc:
         return fail(exc, UNREACHABLE)

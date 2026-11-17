@@ -241,7 +241,7 @@ def skill_root() -> pathlib.Path:
 
 
 def script(*parts: str) -> pathlib.Path:
-    """Path to a script shipped with this skill, e.g. script('scripts', 'oc_bridge.py')."""
+    """Path to a script shipped with this skill, e.g. script('scripts', 'fetch-advisors.sh')."""
     p = skill_root().joinpath(*parts)
     if not p.exists():
         raise FileNotFoundError(f"skill script not found: {p}")

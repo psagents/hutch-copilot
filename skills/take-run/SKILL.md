@@ -78,29 +78,26 @@ sending; do not translate this table.
 ## 3. Confirm — this is a write
 
 Tell the operator the command, the duration and the sample first. **You cannot approve it
-yourself**, in any session:
+yourself**: Claude Code shows them its own permission prompt for the call, with the code, and
+their click there is the approval. A "no" there is final: nothing ran; report it, and never
+retry to wear them down.
 
-- **`MODE: local`**: send it **without `--confirm`** first. It prints the class and its reasons
-  and refuses (rc 5) without running anything. Show those to the operator, wait for explicit
-  approval, then re-send with the class they actually granted:
+- **`MODE: local`**:
   ```bash
-  bin/hutch-py --hutch "$H" --timeout 300 --confirm write run "<run command>"
+  bin/hutch-py --hutch "$H" --timeout 300 run "<run command>"
   ```
-- **`MODE: mcp`**: `hutch_py_run(code="<run command>")`. The server classifies it and, for a
-  write, shows the operator a form with the class, its reasons and the code. It runs only if they
-  type the class (`write`, `beam-critical`) and accept. A caller the server's policy does not
-  grant is refused before the form: report it as it is.
+- **`MODE: mcp`**: `hutch_py_run(code="<run command>")`. Through the gateway the server also
+  refuses a caller its policy does not grant: report its message as it is.
 - **No `MODE:` line** (a terminal off the hutch): there is no route to the hutch here. Say so,
   and send the operator to Cogito or to Claude Code on `$H-daq`.
 
-A decline, a cancel, or a client that cannot show the form is final, and nothing ran: report it, and never retry to wear them down. Then read the DAQ state again for
-`run_number` / `last_run_number`.
+Then read the DAQ state again for `run_number` / `last_run_number`.
 
 `run` launches a fresh device load and needs no live session. It pays that load on
 every call (tens of seconds), so batch a multi-step sequence into one snippet rather
-than issuing several. `rc 1` means the snippet itself raised — the traceback is in
-`error`; `rc 4` means the launcher or hutch could not be reached; `rc 5` means the
-class confirmed was weaker than the snippet's.
+than issuing several, which is also one approval rather than several. `rc 1` means the
+snippet itself raised — the traceback is in `error`; `rc 4` means the launcher or hutch
+could not be reached.
 
 The run number comes from the DAQ, not from `get_run()`. `get_run()` is an HTTP GET
 against the elog (`mfx/macros.py:619-622`) despite its docstring claiming otherwise, so

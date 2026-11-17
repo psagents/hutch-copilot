@@ -91,8 +91,8 @@ def link_advisors(roots: list[pathlib.Path], check: bool) -> list[str]:
     return [f"→ {root}: linked {len(n)} advisors" for root, n in linked.items()] + msgs
 
 
-def install_hooks(settings_path: pathlib.Path, check: bool) -> list[str]:
-    """SessionStart and Stop point at this checkout's bin/; a hook from another checkout is replaced."""
+def install_hooks(settings_path: pathlib.Path, check: bool, ask: list[str] = ()) -> list[str]:
+    """SessionStart and Stop run this checkout's bin/, and Claude Code asks before each ``ask`` rule."""
     settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
     hooks = settings.setdefault("hooks", {})
     events = []
@@ -108,7 +108,13 @@ def install_hooks(settings_path: pathlib.Path, check: bool) -> list[str]:
         hooks[event] = [g for g in groups if g["hooks"]]
         hooks[event].append({"hooks": [{"type": "command", "command": want, "timeout": timeout}]})
         events.append(event)
-    if events and not check:
+    changes = [f"{' and '.join(events)} hooks run this checkout's bin/"] if events else []
+    # The one approval for hutch-python: an `ask` rule prompts even in auto mode (Cogito's).
+    new = [r for r in ask if r not in settings.get("permissions", {}).get("ask", [])]
+    if new:
+        settings.setdefault("permissions", {}).setdefault("ask", []).extend(new)
+        changes.append(f"Claude Code asks before every {', '.join(new)}")
+    if changes and not check:
         if settings_path.exists():
             shutil.copy2(settings_path, f"{settings_path}.bak-{time.strftime('%Y%m%d%H%M%S')}")
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +122,7 @@ def install_hooks(settings_path: pathlib.Path, check: bool) -> list[str]:
         tmp.write_text(json.dumps(settings, indent=2) + "\n")
         tmp.chmod(0o600)
         os.replace(tmp, settings_path)
-    return [f"→ {settings_path}: {' and '.join(events)} hooks run this checkout's bin/"] if events else []
+    return [f"→ {settings_path}: {'; '.join(changes)}"] if changes else []
 
 
 def remove_mcp(t: dict, hutch: str, check: bool) -> list[str]:
@@ -171,8 +177,15 @@ def main(argv: list[str] | None = None) -> int:
     msgs: list[str] = []
     for root in roots:
         msgs += link_skills(root, args.check)
-    for settings in dict.fromkeys((t["dir"] / "settings.json").resolve() for t in ts):
-        msgs += install_hooks(settings, args.check)
+    # Cogito reaches hutch-python as the gateway's tool; a terminal on the hutch runs bin/hutch-py.
+    cogito = [f"mcp__sdf-mcp__hutch{hutch}_hutch_py_run"]
+    terminal = ["Bash(bin/hutch-py *)", "Bash(hutch-py *)", f"Bash({REPO}/bin/hutch-py *)"]
+    settings: dict[pathlib.Path, list[str]] = {}
+    for t in ts:
+        settings.setdefault((t["dir"] / "settings.json").resolve(),
+                            cogito if t["name"].startswith("cogito:") else terminal)
+    for path, ask in settings.items():
+        msgs += install_hooks(path, args.check, ask)
     if not args.check:
         print("fetching the advisors...", flush=True)
         fetched = re.search(r"linked: \d+ new, \d+ updated", _run(

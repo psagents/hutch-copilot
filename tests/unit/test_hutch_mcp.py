@@ -105,51 +105,12 @@ def test_the_caller_outside_a_request_is_the_stdio_account(monkeypatch):
     assert hutch_mcp._user() == "stdio:someone"
 
 
-class _Ctx:
-    """A client: ``elicitation`` is whether it advertised the capability; ``answer`` its reply."""
-
-    def __init__(self, answer=None, typed="write", elicitation=True):
-        caps = type("Caps", (), {"elicitation": object() if elicitation else None})()
-        self.session = type("S", (), {"client_params": type("P", (), {"capabilities": caps})()})()
-        self.asked = []
-        self._answer, self._typed = answer, typed
-
-    async def elicit(self, message, schema):
-        self.asked.append(message)
-        return type("R", (), {"action": self._answer, "data": schema(confirm=self._typed)})()
-
-
-def _py_run(code, ctx, monkeypatch):
+def test_over_ssh_any_snippet_runs_as_the_caller_with_no_policy(monkeypatch):
+    """The approval is Claude Code's prompt, before the call; nothing here judges the code."""
     seen = _fake_run(monkeypatch)
-    return seen, asyncio.run(hutch_mcp.hutch_py_run(code, ctx, hutch="mfx"))
-
-
-def test_a_read_only_snippet_runs_without_asking(monkeypatch):
-    ctx = _Ctx()
-    seen, _ = _py_run("print(mfx_dg1.position)", ctx, monkeypatch)
-    assert ctx.asked == []
-    assert seen == [["--hutch", "mfx", "--timeout", "300", "run", "print(mfx_dg1.position)"]]
-
-
-def test_a_write_runs_only_with_the_class_the_operator_typed(monkeypatch):
-    ctx = _Ctx("accept", typed=" Write ")
-    seen, _ = _py_run("mfx_dg1.mv(3)", ctx, monkeypatch)
-    assert "mfx_dg1.mv(3)" in ctx.asked[0] and "'write'" in ctx.asked[0]
-    assert seen == [["--hutch", "mfx", "--timeout", "300", "--confirm", "write", "run",
-                     "mfx_dg1.mv(3)"]]
-
-
-@pytest.mark.parametrize("ctx,why", [
-    (_Ctx("decline"), "did not approve"),
-    (_Ctx("cancel"), "did not approve"),
-    (_Ctx("accept", typed="yes"), "not an action class"),
-    (_Ctx("accept", elicitation=False), "cannot ask the operator"),
-])
-def test_a_write_without_a_typed_approval_never_runs(monkeypatch, ctx, why):
-    seen = _fake_run(monkeypatch)
-    with pytest.raises(ToolError, match=why):
-        asyncio.run(hutch_mcp.hutch_py_run("mfx_dg1.mv(3)", ctx, hutch="mfx"))
-    assert seen == []
+    monkeypatch.delenv("AUTHZ_POLICY_FILE", raising=False)
+    hutch_mcp.hutch_py_run("mfx_dg1.mv(3)", hutch="mfx")
+    assert seen == [["--hutch", "mfx", "--timeout", "300", "run", "mfx_dg1.mv(3)"]]
 
 
 POLICY = """
@@ -157,9 +118,9 @@ users:
   ytl: {groups: [mfx-operators]}
 groups:
   mfx-operators:
-    grants: [{hutch: mfx, class: write}]
+    grants: [{hutch: mfx}]
 direct_grants:
-  - {user: "*", hutch: xpp, class: beam-critical}
+  - {user: "*", hutch: xpp}
 """
 
 
@@ -169,62 +130,54 @@ def _over_gateway(monkeypatch, tmp_path, user, policy=POLICY):
     monkeypatch.setattr(hutch_mcp, "_user", lambda: user)
 
 
-@pytest.mark.parametrize("user,code,hutch", [
-    ("bob", "mfx_dg1.mv(3)", "mfx"),                      # in no group
-    ("ytl@slac.stanford.edu", "mfx_dg1.mv(3)", "mfx"),    # the gateway sends bare names
-    ("", "xpp_stopper.remove()", "xpp"),                  # no name, even for "*"
-    ("ytl", "mfx_stopper_1.remove()", "mfx"),             # write < beam-critical
-    ("ytl", "mfx_dg1.mv(3)", "rix"),                      # another hutch
+@pytest.mark.parametrize("user,hutch", [
+    ("bob", "mfx"),                      # in no group
+    ("ytl@slac.stanford.edu", "mfx"),    # the gateway sends bare names
+    ("", "xpp"),                         # no name, even for "*"
+    ("ytl", "rix"),                      # another hutch
 ])
-def test_a_gateway_write_without_a_grant_is_refused_before_asking(monkeypatch, tmp_path,
-                                                                   user, code, hutch):
+def test_a_gateway_call_without_a_grant_runs_nothing(monkeypatch, tmp_path, user, hutch):
     seen = _fake_run(monkeypatch)
     _over_gateway(monkeypatch, tmp_path, user)
-    ctx = _Ctx("accept")
     with pytest.raises(ToolError, match="no grant"):
-        asyncio.run(hutch_mcp.hutch_py_run(code, ctx, hutch=hutch))
-    assert seen == [] and ctx.asked == []
+        hutch_mcp.hutch_py_run("print(1)", hutch=hutch)
+    assert seen == []
 
 
-@pytest.mark.parametrize("user,code,hutch,typed", [
-    ("ytl", "mfx_dg1.mv(3)", "mfx", "write"),                 # through a group
-    ("bob", "xpp_stopper.remove()", "xpp", "beam-critical"),  # a direct pattern
-])
-def test_a_granted_gateway_write_still_needs_the_typed_approval(monkeypatch, tmp_path,
-                                                                user, code, hutch, typed):
+@pytest.mark.parametrize("user,hutch", [("ytl", "mfx"), ("bob", "xpp")])   # a group; a pattern
+def test_a_granted_gateway_call_runs(monkeypatch, tmp_path, user, hutch):
     seen = _fake_run(monkeypatch)
     _over_gateway(monkeypatch, tmp_path, user)
-    ctx = _Ctx("accept", typed=typed)
-    asyncio.run(hutch_mcp.hutch_py_run(code, ctx, hutch=hutch))
-    assert len(ctx.asked) == 1 and seen[0][-4:] == ["--confirm", typed, "run", code]
+    hutch_mcp.hutch_py_run("mfx_dg1.mv(3)", hutch=hutch)
+    assert seen == [["--hutch", hutch, "--timeout", "300", "run", "mfx_dg1.mv(3)"]]
 
 
 @pytest.mark.parametrize("policy", ["users: [", "groups: {}\nusers: {ytl: {groups: [gone]}}", ""])
 def test_a_policy_that_cannot_be_evaluated_grants_nothing(monkeypatch, tmp_path, policy):
     _over_gateway(monkeypatch, tmp_path, "ytl", policy)
-    assert not hutch_mcp._granted("ytl", "mfx", "write")
+    assert not hutch_mcp._granted("ytl", "mfx")
 
 
 def test_no_policy_file_grants_nothing(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTHZ_POLICY_FILE", str(tmp_path / "absent.yaml"))
-    assert not hutch_mcp._granted("ytl", "mfx", "write")
+    assert not hutch_mcp._granted("ytl", "mfx")
     monkeypatch.delenv("AUTHZ_POLICY_FILE")
-    assert not hutch_mcp._granted("ytl", "mfx", "write")
+    assert not hutch_mcp._granted("ytl", "mfx")
 
 
 def test_the_example_policy_is_never_read_and_grants_no_one_openly(monkeypatch):
-    """The repo's copy is an example: unread by default, and a model without a "*" write grant."""
+    """The repo's copy is an example: unread by default, and a model without a "*" grant."""
     example = hutch_mcp.BIN.parent / "authz" / "policy.yaml"
     policy = hutch_mcp.yaml.safe_load(example.read_text())
     assert set(policy) == {"users", "groups", "direct_grants"}
     assert all(g["user"] != "*" for g in policy["direct_grants"])
     monkeypatch.delenv("AUTHZ_POLICY_FILE", raising=False)
-    assert not hutch_mcp._granted("alice", "mfx", "write")
+    assert not hutch_mcp._granted("alice", "mfx")
     monkeypatch.setenv("AUTHZ_POLICY_FILE", str(example))
-    assert hutch_mcp._granted("alice", "mfx", "beam-critical") and not hutch_mcp._granted("bob", "mfx", "beam-critical")
+    assert hutch_mcp._granted("alice", "mfx") and not hutch_mcp._granted("alice", "xpp")
 
 
-def test_the_model_cannot_pass_a_confirmation():
-    """confirm comes only from the operator's form; it is not in the tool's schema."""
+def test_the_model_passes_only_the_code():
+    """No approval or class in the schema: the operator's approval is the client's prompt."""
     tools = {t.name: t for t in asyncio.run(hutch_mcp.mcp.list_tools())}
     assert set(tools["hutch_py_run"].inputSchema["properties"]) == {"code", "timeout_s", "hutch"}

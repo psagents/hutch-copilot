@@ -94,7 +94,7 @@ whether the hutch's own files are readable where Claude runs, and whether it is 
 | Where Claude runs | Hook says | The hutch-only tools |
 |---|---|---|
 | a terminal on the hutch machine (`claude` on `mfx-daq`) | `MODE: local` | `bin/hutch-*` directly; writes after the operator's yes |
-| Cogito, on S3DF **or** on the hutch machine (its container has no `/cds`) | `MODE: mcp` | `mcp__sdf-mcp__hutch<hutch>_<tool>`, through the gateway; writes per the bundle's `policy.yaml` |
+| Cogito, on S3DF **or** on the hutch machine (its container has no `/cds`) | `MODE: mcp` | `mcp__sdf-mcp__hutch<hutch>_<tool>`, through the gateway; `hutch_py_run` per the bundle's `policy.yaml` |
 | a terminal anywhere else (S3DF) | nothing | none: offline work only (analysis, data on disk, state, log) |
 
 Cogito is told apart by `$HOME`: a Cogito host sets it to its overlay, away from the passwd
@@ -106,11 +106,11 @@ A Cogito session (whose agent container mounts neither `/cds` nor the operator h
 reaches the hutch-only tools through the gateway, which serves
 `src/hutch_copilot/server.py`: an MCP server built like epics-mcp (FastMCP, stdio or streamable HTTP
 on a Unix socket, the caller from `X-Authenticated-User`), with fourteen tools, each a
-fixed argv over an existing `bin/hutch-*`. Only `hutch_py_run` can write: the operator must
-type the action class into an MCP elicitation form, and the model cannot.
+fixed argv over an existing `bin/hutch-*`. Only `hutch_py_run` can write (see *Approving
+hutch-python* below).
 
 Through the gateway (HTTP), the server is one process run by whoever runs the tunnel, so every
-write would run as that account. A policy, modelled on epics-mcp's, decides who may ask, and
+`hutch_py_run` runs as that account. A policy, modelled on epics-mcp's, decides who may ask, and
 it lives where epics-mcp's does: in the tunnel bundle, as `policy.yaml` beside `mcp.sock`
 (`~/cogito-rmcp-hutch-<hutch>/` on the hutch machine), kept by the server's owner and passed by
 `bin/hutch-mcp` as `AUTHZ_POLICY_FILE`. [`authz/policy.yaml`](../authz/policy.yaml) is only the
@@ -118,14 +118,10 @@ example to copy; nothing reads it. The caller is the gateway's `X-Authenticated-
 username (`user=lconreux` in the server's log), trusted because only agentgateway's certificate
 reaches the socket; a name with a domain matches no grant. It is default-deny and fails closed:
 no `AUTHZ_POLICY_FILE`, or a policy that cannot be read or evaluated, refuses every gateway
-write. It is re-read on every write, so an edit applies without a restart. A granted write is
-then shown to the operator, and runs as the tunnel's account; the log records who asked. Over ssh (stdio) the policy is not read, because
-the server runs as the caller.
-
-Not verified yet: whether agentgateway relays the elicitation form to Cogito. If it does not, a
-granted write is refused with "this client cannot ask the operator", which fails safe. The
-account running the tunnel should be the hutch's operator account (or a service account), not
-a person's, before anyone else is granted.
+`hutch_py_run`. It is re-read on every call, so an edit applies without a restart; the log
+records who asked. Over ssh (stdio) the policy is not read, because the server runs as the
+caller. The account running the tunnel should be the hutch's operator account (or a service
+account), not a person's, before anyone else is granted.
 
 It ships as an image, built by `.github/workflows/hutch-mcp-image.yml` on Rocky 9 and pushed to
 GHCR. The image holds only Python and the MCP SDK; `bin/hutch-mcp` binds in what the
@@ -187,7 +183,7 @@ question, so there is never a choice to make about where a fact comes from.
 | `hutch-happi` | the device database — what exists, where, under which PV prefix |
 | `hutch-epics` | Channel Access — live PV reads; and PV history from the archiver |
 | `hutch-lightpath` | the beam path to a hutch, and what blocks it |
-| `hutch-py` | the hutch-python device namespace — via the CLI (`run`), or a live session (`exec`, deprecated) — and the safety gate in front of both |
+| `hutch-py` | python in a fresh load of the hutch's own hutch-python (`run`), and its `conf.yml` |
 | `hutch-daq` | the DAQ — state (via its control port, no session needed), logs, config. Read-only |
 | `hutch-data` | what landed on disk — `daq` (LCLS-I or LCLS-II), psana1/psana2 detectors, XTC/XTC2, PDB cells, `/cds` files |
 | `hutch-skills` | which skills are installed, and where |
@@ -201,8 +197,7 @@ contract the agent must obey — provenance on every write, stale reads fail, a
 resolver that cannot reach its source raises rather than guessing.
 
 They run from a bare checkout with no install step. The package is stdlib-only at
-module scope and Python 3.9-compatible, because psconda ships 3.9 and the bridge
-listener runs inside a live hutch-python session. `pip install -e .` is a convenience
+module scope and Python 3.9-compatible, because psconda ships 3.9. `pip install -e .` is a convenience
 for CI, never a requirement — a tool that needs setting up is a tool that is broken
 at 03:00.
 
@@ -214,35 +209,26 @@ code a caller can branch on:
 | 0 | ok |
 | 2 | called wrong (argparse usage) |
 | 3 | state error — missing field, or stale past its TTL |
-| 4 | unreachable — no bridge listener, missing file, no Slurm record |
-| 5 | **refused** — the safety gate did not transmit |
+| 4 | unreachable — no launcher, missing file, no Slurm record |
+| 5 | **refused** — a `hutch-lute` write without `--confirm write`; nothing ran |
 
-`5` is the one that matters. It is how a refusal becomes machine-checkable instead of
-a sentence an agent can talk itself out of.
+## Approving hutch-python
 
-## The safety gate
+There is one approval, and it is Claude Code's: every hutch-python run waits for the operator's
+click in its permission prompt, which shows the code. `bin/hutch-setup` installs the `ask` rules
+that force it, which hold even in auto mode (Cogito's):
 
-`src/hutch_copilot/tools/session.py` classifies every snippet before transmitting: `read-only`,
-`write`, or `beam-critical`. Unrecognised code is classified as `write`, never
-read-only.
+| Config | `ask` rule |
+|---|---|
+| Cogito | `mcp__sdf-mcp__hutch<hutch>_hutch_py_run` |
+| `claude`, `claude-lcls` (a terminal on the hutch) | `Bash(<…>hutch-py *)`, for `hutch-py` called bare, from `bin/`, or by the checkout's full path |
 
-```bash
-# no --confirm: prints the classification, transmits nothing, exits 5
-bin/hutch-py --hutch mfx exec 'mfx_stopper_1.remove()'
-
-# declaring a weaker class than the code needs is a refusal, not a downgrade
-bin/hutch-py --hutch mfx exec 'mfx_stopper_1.remove()' --confirm write   # rc=5
-```
-
-This is defence in depth, not a proof — patterns cannot capture every unsafe
-expression, and human confirmation is still required. It only makes skipping one
-impossible by accident.
-
-The session itself is a loopback socket: `scripts/oc_bridge.py` runs
-`exec(code, globals())` inside the operator's hutch-python session, which is the only
-way to reach its loaded device objects. It has **no access control** — any local user
-can connect to port 9999 and exec in that namespace. The classifier is a discipline
-on our own calls, not an enforcement boundary.
+Nothing in the tools judges the code: the old classifier (`read-only` / `write` /
+`beam-critical`, `--confirm`) and the MCP elicitation form are gone, the latter because
+agentgateway does not relay it. The server cannot see the client's prompt, so what it enforces
+is who may run at all through the gateway (the policy above). The rules match the command as
+typed: a snippet run through anything but `hutch-py` or `hutch_py_run` is not covered, and the
+skills say never to do that.
 
 ## Tests
 
@@ -286,8 +272,6 @@ The tools run directly on `{hutch}-daq`. Outstanding:
   Moving them to the org would also let the two tiers be checked without a filesystem:
   see the rejected `knowledge` topic note under *Advisors*, which only fails today
   because a topic query cannot see those 7.
-- **A terminal API instead of the session bridge.** `hutch-python` takes a script
-  argument (`hutch-python --cfg <conf.yml> script.py`), which may remove the need for
-  a live interactive session and the socket entirely. Worth measuring before
-  investing further in `oc_bridge.py`: does a script run get the same loaded
-  namespace, and what does it cost per invocation.
+- **The live-session bridge is gone.** `hutch-py run` (a script through the hutch's own
+  `{hutch}python`) replaced it; `exec`, `ping`, `install` and `scripts/oc_bridge.py` were removed
+  with the classifier that gated them.
