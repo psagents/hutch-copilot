@@ -3,11 +3,11 @@
 Runs on a ``{hutch}-daq`` machine, where everything it needs is reachable: the
 ``{hutch}opr`` log and config trees, and the DAQ's own control port. State is
 read with ``psdaq``'s ``DaqControl``, in the DAQ's release and interpreter --
-not through hutch-python's bridge, which is usually not running and would make
-a reachable DAQ read as unknown.
+not through a hutch-python load, which is slow and would make a reachable DAQ read as
+unknown when it fails.
 
-Nothing here writes. Beginning or configuring a run is a write that goes
-through ``hutch-py exec`` with an explicit confirmation.
+Nothing here writes. Beginning or configuring a run is a ``hutch-py run``, which the operator
+approves in Claude Code's permission prompt.
 """
 
 from __future__ import annotations

@@ -92,9 +92,9 @@ everywhere.
 ## What it will ask you
 
 - **The experiment**, once per session.
-- **Your approval for anything that moves hardware or starts a run.** It says what will happen
-  first, and runs it only once you approve: a yes in the chat, or typing `write` (or
-  `beam-critical`) in the form it shows. It cannot approve anything itself.
+- **Your approval for anything it runs in hutch-python** (runs, moves). It says what will happen
+  first; Claude Code then asks your permission, showing the code, and nothing runs until you
+  allow it. It cannot approve anything itself.
 - **A Kerberos ticket**, when the eLog needs one: run the `kinit` line it gives you in your own
   terminal, not with `!`, which has no prompt for your password.
 - **What only you know**: a sample name, which run is the calibrant. Never what it can read.

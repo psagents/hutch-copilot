@@ -118,3 +118,19 @@ def test_only_what_needs_the_operator_is_listed_for_them(home, monkeypatch, caps
     monkeypatch.setattr(install, "checks", lambda *a: [])
     assert install.main(["--hutch", "mfx"]) == 0
     assert "You still need to" not in capsys.readouterr().out
+
+
+def test_every_config_asks_before_hutch_python_and_keeps_its_own_rules(home, monkeypatch):
+    """The one approval for hutch-python: an `ask` rule, which prompts even in Cogito's auto mode."""
+    cog = home / ".cogito" / "hosts" / "h1" / ".claude"
+    cog.mkdir(parents=True)
+    (cog / "settings.json").write_text(json.dumps({"permissions": {"ask": ["Bash(rm *)"]}}))
+    monkeypatch.setattr(install, "_run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(install, "link_advisors", lambda roots, check: [])
+    monkeypatch.setattr(install, "checks", lambda *a: [])
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    install.main(["--hutch", "mfx"])
+    ask = lambda d: json.loads((d / "settings.json").read_text())["permissions"]["ask"]
+    assert ask(cog) == ["Bash(rm *)", "mcp__sdf-mcp__hutchmfx_hutch_py_run"]
+    assert "Bash(bin/hutch-py *)" in ask(home / ".claude")
+    assert not [m for m in install.install_hooks(cog / "settings.json", False, ask(cog)) if m]

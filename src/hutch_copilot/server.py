@@ -2,8 +2,9 @@
 
 stdio by default (a client over ssh); streamable HTTP on the Unix socket ``MCP_UDS`` when
 ``MCP_TRANSPORT=streamable-http``, for the SAGE tunnel, as epics-mcp does. Every tool runs an
-existing ``bin/hutch-*`` with a fixed argv and returns its JSON. Only ``hutch_py_run`` can write,
-and only once the operator has typed the action class into an MCP elicitation form.
+existing ``bin/hutch-*`` with a fixed argv and returns its JSON. Only ``hutch_py_run`` can write:
+the operator approves each call in Claude Code's permission prompt, and through the gateway the
+deployment's policy says who may run it at all.
 """
 
 from __future__ import annotations
@@ -17,12 +18,10 @@ import subprocess
 import sys
 
 import yaml
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import BaseModel
 
-from .tools import session
 
 BIN = pathlib.Path(__file__).resolve().parents[2] / "bin"
 #: lightpath settles for ~40 s; anything far past that is hung.
@@ -34,7 +33,7 @@ mcp = FastMCP(
     instructions="Hutch tools (happi, Channel Access, archiver, lightpath, DAQ state, the three "
                  "readiness checks over them, and hutch_py_run) that only the hutch machine can "
                  "reach. Each returns the hutch-copilot tool's JSON. `hutch` defaults to this "
-                 "server's own. hutch_py_run asks the operator directly before any write.",
+                 "server's own. hutch_py_run can move hardware: the operator approves each call.",
     # Only agentgateway's certificate reaches the socket (ghostunnel), and it sends its own Host.
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
@@ -70,7 +69,7 @@ def _run(binary: str, *args: str | None, timeout: int = T_TOOL) -> str:
 
 #: The only dash-led argv entries a tool may send; any argument value starting with "-" is refused.
 _FLAGS = {"--hutch", "--suffix", "--from", "--to", "--experiment", "--taking-data", "--settle-s",
-          "--confirm", "--timeout"}
+          "--timeout"}
 
 
 def _opt(flag: str, value: str | None) -> tuple[str | None, str | None]:
@@ -163,12 +162,8 @@ def ready_daq(experiment: str | None = None, hutch: str | None = None) -> str:
     return _run("hutch-ready", "daq", "--hutch", _hutch(hutch), *_opt("--experiment", experiment))
 
 
-class _Approval(BaseModel):
-    confirm: str
-
-
-def _granted(user: str, hutch: str, cls: str) -> bool:
-    """Whether the policy at $AUTHZ_POLICY_FILE lets ``user`` run a ``cls`` operation on ``hutch``."""
+def _granted(user: str, hutch: str) -> bool:
+    """Whether the policy at $AUTHZ_POLICY_FILE lets ``user`` run hutch-python on ``hutch``."""
     # As epics-mcp: the deployment's own file (the tunnel bundle's policy.yaml), never one in the
     # image. The gateway sends bare usernames; one with a domain matches no grant.
     path = os.environ.get("AUTHZ_POLICY_FILE")
@@ -179,49 +174,30 @@ def _granted(user: str, hutch: str, cls: str) -> bool:
         grants = [g for g in policy.get("direct_grants") or [] if fnmatch.fnmatchcase(user, g["user"])]
         for group in ((policy.get("users") or {}).get(user) or {}).get("groups") or []:
             grants += policy["groups"][group].get("grants") or []
-        return any(fnmatch.fnmatchcase(hutch, g["hutch"])
-                   and session.SEVERITY[g["class"]] >= session.SEVERITY[cls] for g in grants)
+        return any(fnmatch.fnmatchcase(hutch, g["hutch"]) for g in grants)
     except Exception:   # fail closed, as epics-mcp: a policy that cannot be evaluated grants nothing
-        LOG.exception("%s could not be evaluated; the write is denied", path)
+        LOG.exception("%s could not be evaluated; hutch_py_run is denied", path)
         return False
 
 
 @mcp.tool()
-async def hutch_py_run(code: str, ctx: Context, timeout_s: int = 300,
-                       hutch: str | None = None) -> str:
-    """Run python in a fresh hutch-python load on the hutch (hutch-py run).
+def hutch_py_run(code: str, timeout_s: int = 300, hutch: str | None = None) -> str:
+    """Run python in a fresh hutch-python load on the hutch (hutch-py run); it can move hardware.
 
-    Read-only snippets run at once. Anything else is shown to the operator, who must type its
-    action class (write, beam-critical) to approve: you cannot approve it, only show it first.
+    The operator approves each call in Claude Code's own permission prompt, which shows the code.
+    Say what it does first. You cannot approve it.
     """
-    h = _hutch(hutch)
-    verdict = session.classify(code)
-    confirm = None
-    if verdict["class"] != session.READ_ONLY:
-        user, cls = _user(), verdict["class"]
-        # Through the gateway a write runs as the tunnel's account whoever asks, so the policy
-        # decides who may ask. Over ssh it runs as the caller, who needs no grant.
-        if not user.startswith("stdio:") and not _granted(user, h, cls):
-            LOG.warning("user=%s hutch=%s hutch_py_run class=%s denied by policy", user, h, cls)
-            raise ToolError(f"{user} has no grant for a {cls} operation on {h} through the gateway "
-                            f"(its policy.yaml); nothing ran. Ask its owner for a grant, or run it from "
-                            f"Claude Code on the hutch machine")
-        params = ctx.session.client_params
-        if not (params and params.capabilities.elicitation):
-            raise ToolError("this client cannot ask the operator (no MCP elicitation); nothing ran")
-        answer = await ctx.elicit(
-            f"hutch-py on {h}, as {_user()}: a {cls} operation.\n"
-            f"why: {'; '.join(verdict['reasons'])}\n\n{code}\n\n"
-            f"Type {cls!r} to run it, or decline.", schema=_Approval)
-        if answer.action != "accept":
-            raise ToolError(f"the operator did not approve ({answer.action}); nothing ran")
-        confirm = answer.data.confirm.strip().lower()
-        if confirm not in session.SEVERITY:
-            raise ToolError(f"approval {confirm!r} is not an action class; nothing ran")
-    LOG.info("user=%s hutch=%s hutch_py_run class=%s confirm=%s", _user(), h, verdict["class"], confirm)
-    # hutch-py's own gate still decides: a confirmation weaker than the class is refused (rc 5).
-    return _run("hutch-py", "--hutch", h, "--timeout", str(timeout_s),
-                *_opt("--confirm", confirm), "run", code, timeout=timeout_s + 60)
+    h, user = _hutch(hutch), _user()
+    # Through the gateway hutch-python runs as the tunnel's account whoever asks, so the policy
+    # decides who may run it at all. Over ssh it runs as the caller, who needs no grant.
+    if not user.startswith("stdio:") and not _granted(user, h):
+        LOG.warning("user=%s hutch=%s hutch_py_run denied by policy", user, h)
+        raise ToolError(f"{user} has no grant to run hutch-python on {h} through the gateway (its "
+                        f"policy.yaml); nothing ran. Ask its owner for a grant, or run it from "
+                        f"Claude Code on the hutch machine")
+    LOG.info("user=%s hutch=%s hutch_py_run", user, h)
+    return _run("hutch-py", "--hutch", h, "--timeout", str(timeout_s), "run", code,
+                timeout=timeout_s + 60)
 
 
 @mcp.tool()

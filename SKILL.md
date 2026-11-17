@@ -28,7 +28,7 @@ so the tool to call follows from which source answers the question.
 | `bin/hutch-happi` | The device database: what exists, where, under which PV prefix |
 | `bin/hutch-epics` | Channel Access: live PV reads, and archived PV history |
 | `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
-| `bin/hutch-py` | The hutch-python device namespace — via the CLI (`run`), or a live session (`exec`, deprecated) — and the safety gate in front of both |
+| `bin/hutch-py` | Python in a fresh load of the hutch's own hutch-python (`run`), and its `conf.yml` |
 | `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
 | `bin/hutch-data` | What landed on disk: the DAQ generation (`daq`), psana1/psana2 detectors, XTC/XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |
@@ -81,10 +81,11 @@ may answer a question the operator asks outside a procedure: say which server an
 If a tool is not there, will not load, or errors, that is rule 3: say which, and stop there.
 Loading a tool that still is not callable once is enough; do not load it again. Never rebuild
 an answer from other reads, or from the tools' source: a verdict you assembled yourself is a
-guess with the tool's name on it. **A write is never yours to approve.** Locally, `bin/hutch-py`
-refuses until the operator has approved the class you then pass as `--confirm`. Over MCP,
-`hutch_py_run` asks the operator itself, in a form where they type the class. It refuses a
-caller the server's policy does not grant: report its message as it is; nothing ran.
+guess with the tool's name on it. **A write is never yours to approve.** Every hutch-python run (`bin/hutch-py run` locally,
+`hutch_py_run` over MCP) waits for the operator's click in Claude Code's own permission prompt,
+which shows the code: say what it does before you call it, and if they decline, stop. Through
+the gateway the server also refuses a caller its policy does not grant: report its message as it
+is; nothing ran.
 
 Three rules that the tools enforce and you must not work around:
 
@@ -135,14 +136,14 @@ Two rules about the experiment state file, which every sub-skill reads and write
 The operator runs the experiment, not this skill: they should never need its internals to
 follow you.
 
-- **Plain words.** Never `rc 4`, `MODE`, "action class", `settled`, "elicitation" or a tool name
+- **Plain words.** Never `rc 4`, `MODE`, `settled`, "permission rule" or a tool name
   as the explanation. Say what it means: "the hutch tools did not answer", "the beam reading had
   not settled yet".
 - **Say where each reading came from**: "the DAQ says", "the archiver shows", "`@ask-lute`
   says". An unsourced number reads as your own.
 - **Before handing a question to an advisor, say so in one line**, and name it.
-- **Before any write, say what it will do and how they will approve it**: their explicit yes in
-  the chat (`MODE: local`), or typing its class in the form `hutch_py_run` shows (`MODE: mcp`).
+- **Before any write, say what it will do**, and that they approve it in Claude Code's permission
+  prompt, which will show them the code.
 
 ---
 
@@ -268,7 +269,7 @@ submit. See its precondition contract.
 ## Reference
 
 - `README.md` — what the operator sees: setup, first session, what it asks, troubleshooting.
-- `docs/DEVELOPING.md` — how setup works, the exit-code contract, the safety gate, open work.
+- `docs/DEVELOPING.md` — how setup works, the exit-code contract, the gateway policy, open work.
 
 **This repo holds no science knowledge** — no parameter defaults, no metric thresholds,
 no DAG recipes. Operating a workflow is here; what to set up and how to read its output is

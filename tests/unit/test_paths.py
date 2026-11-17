@@ -19,7 +19,7 @@ def test_skill_root_is_self_resolving():
 
 
 def test_script_lookup_resolves_a_shipped_script():
-    assert paths.script("scripts", "oc_bridge.py").exists()
+    assert paths.script("scripts", "fetch-advisors.sh").exists()
 
 
 def test_script_lookup_fails_loudly():
