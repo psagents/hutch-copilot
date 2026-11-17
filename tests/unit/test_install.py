@@ -298,15 +298,14 @@ def test_workspace_is_idempotent(workspace, monkeypatch):
     assert pathlib.Path(first["db"]).exists()
 
 
-def test_workspace_writes_only_lute_output_and_reads_the_lute_beside_it(workspace, monkeypatch):
+def test_workspace_opens_lute_output_and_the_lute_beside_it(workspace, monkeypatch):
     calls = []
     monkeypatch.setattr(lute, "grant_group", lambda *g, **k: calls.append((g, k)) or {"ok": True})
     p = lute.plan(experiment="e1", hutch="MFX", directory="d", workflows=[])
     p["lute"] = {**p["lute"], "kind": "clone", "root": str(workspace.parent / "d/lute")}
     lute.setup_workspace(p)
     assert calls == [(("e1", "ps-mfx", "ps-data"),
-                      {"rw": [workspace.parent / "d/lute_output"],
-                       "rx": [workspace.parent / "d/lute"]})]
+                      {"rw": [workspace.parent / "d/lute_output", workspace.parent / "d/lute"]})]
 
 
 def test_patch_dags_reports_no_change_on_a_second_run(workspace):
@@ -669,8 +668,7 @@ def test_grant_group_sets_default_acls_and_strips_world_write(tmp_path):
     db.touch()
     db.chmod(0o666)
     (tmp_path / "ws").chmod(0o2777)
-    (tmp_path / "lute").mkdir()
-    res = paths.grant_group(group, rw=[tmp_path / "ws"], rx=[tmp_path / "lute"])
+    res = paths.grant_group(group, rw=[tmp_path / "ws"])
     assert res["ok"], res
     assert db.stat().st_mode & 0o7777 == 0o775
     assert (tmp_path / "ws").stat().st_mode & 0o7777 == 0o2775
@@ -678,9 +676,6 @@ def test_grant_group_sets_default_acls_and_strips_world_write(tmp_path):
     acl = subprocess.run(["getfacl", "-p", str(tmp_path / "ws/lute_output")],
                          capture_output=True, text=True).stdout
     assert f"default:group:{group}:rwx" in acl
-    acl = subprocess.run(["getfacl", "-p", str(tmp_path / "lute")],
-                         capture_output=True, text=True).stdout
-    assert "\nmask::r-x" in acl and "default:mask::r-x" in acl
 
 
 @pytest.mark.parametrize("printed, actual", [

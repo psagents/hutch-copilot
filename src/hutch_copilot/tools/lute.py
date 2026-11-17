@@ -1397,19 +1397,18 @@ def clone_build(plan_: dict, *, confirm: str | None = None) -> dict:
 
 
 def setup_workspace(plan_: dict) -> dict:
-    """Create lute_output and lute.db: writable by the staff groups, the LUTE code read-only."""
+    """Create lute_output and lute.db; open it, and a non-central LUTE, to the staff groups."""
     out_dir = pathlib.Path(plan_["lute_output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     db = out_dir / "lute.db"
     created = not db.exists()
     if created:
         db.touch()
-    # The original layout: lute_output (LUTE's work_dir, where the yaml lives and
-    # smalldata_tools is cloned) is written; the LUTE beside it is only read and run.
-    rx = {"install": [plan_["lute"]["root"]], "clone": [plan_["lute"]["root"]],
-          "pip": [plan_["lute_envs_dir"]]}.get(plan_["lute"]["kind"], [])
+    # lute_output is LUTE's work_dir: the yaml, DAGs and its smalldata_tools clone.
+    rw = [out_dir, *{"install": [plan_["lute"]["root"]], "clone": [plan_["lute"]["root"]],
+                     "pip": [plan_["lute_envs_dir"]]}.get(plan_["lute"]["kind"], [])]
     groups = staff_groups(plan_["hutch"], plan_["experiment"])
-    acl = grant_group(*groups, rw=[out_dir], rx=[pathlib.Path(p) for p in rx])
+    acl = grant_group(*groups, rw=[pathlib.Path(p) for p in rw])
     if not acl["ok"]:
         raise InstallError(f"groups {', '.join(groups)} could not be given "
                            f"access to: {acl['failed'][:10]}")
