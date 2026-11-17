@@ -134,3 +134,17 @@ def test_every_config_asks_before_hutch_python_and_keeps_its_own_rules(home, mon
     assert ask(cog) == ["Bash(rm *)", "mcp__sdf-mcp__hutchmfx_hutch_py_run"]
     assert "Bash(bin/hutch-py *)" in ask(home / ".claude")
     assert not [m for m in install.install_hooks(cog / "settings.json", False, ask(cog)) if m]
+
+
+def test_a_cogito_host_linked_to_claude_gets_both_rules_in_the_shared_file(home, monkeypatch):
+    """Cogito hosts' .claude is often a link to ~/.claude: first-come rules left Cogito unprompted."""
+    host = home / ".cogito" / "hosts" / "h1"
+    host.mkdir(parents=True)
+    (host / ".claude").symlink_to(home / ".claude")
+    monkeypatch.setattr(install, "_run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(install, "link_advisors", lambda roots, check: [])
+    monkeypatch.setattr(install, "checks", lambda *a: [])
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    install.main(["--hutch", "mfx"])
+    ask = json.loads((home / ".claude" / "settings.json").read_text())["permissions"]["ask"]
+    assert "mcp__sdf-mcp__hutchmfx_hutch_py_run" in ask and "Bash(bin/hutch-py *)" in ask

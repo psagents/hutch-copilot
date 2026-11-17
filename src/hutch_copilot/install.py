@@ -180,10 +180,12 @@ def main(argv: list[str] | None = None) -> int:
     # Cogito reaches hutch-python as the gateway's tool; a terminal on the hutch runs bin/hutch-py.
     cogito = [f"mcp__sdf-mcp__hutch{hutch}_hutch_py_run"]
     terminal = ["Bash(bin/hutch-py *)", "Bash(hutch-py *)", f"Bash({REPO}/bin/hutch-py *)"]
+    # One file can serve several configs: a Cogito host's .claude is often a link to ~/.claude.
+    # It then needs every config's rules; each is inert where its tool does not exist.
     settings: dict[pathlib.Path, list[str]] = {}
     for t in ts:
-        settings.setdefault((t["dir"] / "settings.json").resolve(),
-                            cogito if t["name"].startswith("cogito:") else terminal)
+        rules = settings.setdefault((t["dir"] / "settings.json").resolve(), [])
+        rules += [r for r in (cogito if t["name"].startswith("cogito:") else terminal) if r not in rules]
     for path, ask in settings.items():
         msgs += install_hooks(path, args.check, ask)
     if not args.check:
