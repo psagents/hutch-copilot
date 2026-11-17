@@ -269,45 +269,50 @@ def _unescape_getfacl(name: str) -> str:
     return os.fsdecode(out)
 
 
-def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Path] = ()) -> dict:
-    """Give ``group`` access to these trees (access + default ACLs), then check it took.
+def staff_groups(hutch: str, experiment: str) -> list[str]:
+    """Groups that run an experiment's workflows: its members, hutch staff, data staff."""
+    return [experiment, f"ps-{hutch.lower()}", "ps-data"]
 
-    An eLog workflow runs as whoever fires it, so every experiment member needs
-    the registered workspace -- not just ``ps-data``. Every owned path is set to
+
+def grant_group(*groups: str, rw: list[pathlib.Path]) -> dict:
+    """Give ``groups`` write to these trees (access + default ACLs), then check it took.
+
+    An eLog workflow runs as whoever fires it, and staff are not added to the
+    experiment group, so each of ``groups`` needs the workspace. Every owned path is set to
     0o775, as setup_lute does, never world-writable. Paths this user does not own
     cannot take an ACL and are reported, not failed.
     """
     me = os.getuid()
     skipped, failed = [], []
-    for perm, roots in (("rwX", rw), ("rX", rx)):
-        want = "rw" if perm == "rwX" else "r"
-        for root in map(pathlib.Path, roots):
-            if not root.exists():
+    spec = ",".join(f"g:{g}:rwX,d:g:{g}:rwX" for g in groups)
+    for root in map(pathlib.Path, rw):
+        if not root.exists():
+            continue
+        owned = []
+        for p in [root, *root.rglob("*")]:
+            if p.is_symlink():
                 continue
-            owned = []
-            for p in [root, *root.rglob("*")]:
-                if p.is_symlink():
-                    continue
-                st = p.lstat()
-                if st.st_uid != me:
-                    skipped.append(str(p))
-                    continue
-                owned.append(str(p))
-                # setup_lute's 0o775. Group rwx is also the ACL mask, so the named group
-                # keeps write. Keep setgid: a numeric chmod(2) clears it on directories.
-                os.chmod(p, 0o775 | st.st_mode & 0o2000)
-            # One recursive call per tree; it reports, and skips, what it cannot change.
-            # The hutch hosts mount /sdf/data over NFSv4 without POSIX ACLs ("Operation
-            # not supported", and getfacl shows none that S3DF has), so set and check on psana.
-            setfacl = ["setfacl", "-R", "-m", f"g:{group}:{perm},d:g:{group}:{perm}", str(root)]
-            remote = b"Operation not supported" in _acl(setfacl, False).stderr
-            if remote:
-                _acl(setfacl, True)
-            acls = _acl(["getfacl", "-Rp", str(root)], remote).stdout.decode("utf-8", "replace")
-            granted = set()
-            for block in acls.split("\n\n"):
-                name = re.search(r"^# file: (.+)$", block, re.M)
-                if name and re.search(rf"^group:{re.escape(group)}:{want}", block, re.M):
-                    granted.add(_unescape_getfacl(name.group(1)))
-            failed += [p for p in owned if p not in granted]
-    return {"group": group, "ok": not failed, "failed": failed, "skipped_not_owned": skipped}
+            st = p.lstat()
+            if st.st_uid != me:
+                skipped.append(str(p))
+                continue
+            owned.append(str(p))
+            # setup_lute's 0o775. Group rwx is also the ACL mask, so the named group
+            # keeps write. Keep setgid: a numeric chmod(2) clears it on directories.
+            os.chmod(p, 0o775 | st.st_mode & 0o2000)
+        # One recursive call per tree; it reports, and skips, what it cannot change.
+        # The hutch hosts mount /sdf/data over NFSv4 without POSIX ACLs ("Operation
+        # not supported", and getfacl shows none that S3DF has), so set and check on psana.
+        setfacl = ["setfacl", "-R", "-m", spec, str(root)]
+        remote = b"Operation not supported" in _acl(setfacl, False).stderr
+        if remote:
+            _acl(setfacl, True)
+        acls = _acl(["getfacl", "-Rp", str(root)], remote).stdout.decode("utf-8", "replace")
+        granted = set()
+        for block in acls.split("\n\n"):
+            name = re.search(r"^# file: (.+)$", block, re.M)
+            if name and all(re.search(rf"^group:{re.escape(g)}:rw", block, re.M) for g in groups):
+                granted.add(_unescape_getfacl(name.group(1)))
+        failed += [p for p in owned if p not in granted]
+    return {"groups": list(groups), "ok": not failed, "failed": failed,
+            "skipped_not_owned": skipped}
