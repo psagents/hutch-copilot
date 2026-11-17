@@ -20,6 +20,7 @@ from .common import (
     log_file,
     out,
     parser,
+    staff_groups,
     state_file,
     utcnow,
     xtc2_dir,
@@ -168,7 +169,7 @@ class State:
                 # Every experiment member logs, not just ps-data. Best effort: the
                 # directory's default ACL then covers each atomic rewrite.
                 with contextlib.suppress(OSError):
-                    grant_group(self.experiment, rw=[self.path.parent])
+                    grant_group(*staff_groups(self.hutch, self.experiment), rw=[self.path.parent])
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)

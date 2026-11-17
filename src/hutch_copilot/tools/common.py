@@ -269,12 +269,17 @@ def _unescape_getfacl(name: str) -> str:
     return os.fsdecode(out)
 
 
-def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Path] = ()) -> dict:
-    """Give ``group`` access to these trees (access + default ACLs), then check it took.
+def staff_groups(hutch: str, experiment: str) -> list[str]:
+    """Groups that run an experiment's workflows: its members, hutch staff, data staff."""
+    return [experiment, f"ps-{hutch.lower()}", "ps-data"]
 
-    An eLog workflow runs as whoever fires it, so every experiment member needs
-    the registered workspace -- not just ``ps-data``. Every owned path is set to
-    0o775, as setup_lute does, never world-writable. Paths this user does not own
+
+def grant_group(*groups: str, rw: list[pathlib.Path] = (), rx: list[pathlib.Path] = ()) -> dict:
+    """Give ``groups`` access to these trees (access + default ACLs), then check it took.
+
+    An eLog workflow runs as whoever fires it, and staff are not added to the
+    experiment group, so each of ``groups`` needs the workspace. Owned ``rw`` paths are set
+    to 0o775, never world-writable, and ``rx`` ones get an ``r-x`` mask. Paths this user does not own
     cannot take an ACL and are reported, not failed.
     """
     me = os.getuid()
@@ -299,7 +304,12 @@ def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Pat
             # One recursive call per tree; it reports, and skips, what it cannot change.
             # The hutch hosts mount /sdf/data over NFSv4 without POSIX ACLs ("Operation
             # not supported", and getfacl shows none that S3DF has), so set and check on psana.
-            setfacl = ["setfacl", "-R", "-m", f"g:{group}:{perm},d:g:{group}:{perm}", str(root)]
+            spec = ",".join(f"g:{g}:{perm},d:g:{g}:{perm}" for g in groups)
+            if perm == "rX":
+                # A read-only tree also caps every other group: the owning one, and any
+                # inherited from the parent's default ACL (results/<user> gives some rwx).
+                spec += ",m::rX,d:m::rX"
+            setfacl = ["setfacl", "-R", "-m", spec, str(root)]
             remote = b"Operation not supported" in _acl(setfacl, False).stderr
             if remote:
                 _acl(setfacl, True)
@@ -307,7 +317,9 @@ def grant_group(group: str, *, rw: list[pathlib.Path] = (), rx: list[pathlib.Pat
             granted = set()
             for block in acls.split("\n\n"):
                 name = re.search(r"^# file: (.+)$", block, re.M)
-                if name and re.search(rf"^group:{re.escape(group)}:{want}", block, re.M):
+                if name and all(re.search(rf"^group:{re.escape(g)}:{want}", block, re.M)
+                                for g in groups):
                     granted.add(_unescape_getfacl(name.group(1)))
             failed += [p for p in owned if p not in granted]
-    return {"group": group, "ok": not failed, "failed": failed, "skipped_not_owned": skipped}
+    return {"groups": list(groups), "ok": not failed, "failed": failed,
+            "skipped_not_owned": skipped}

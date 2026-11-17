@@ -80,12 +80,13 @@ from .common import (
     USAGE,
     external_path,
     fail,
+    grant_group,
     out,
     parser,
-    results_dir,
-    grant_group,
     resolve_daq,
+    results_dir,
     skill_root,
+    staff_groups,
     xtc2_files,
 )
 from .session import BridgeUnavailable, SafetyRefusal, require_confirmation
@@ -1072,7 +1073,7 @@ DEFAULT_TRIGGER = "END_OF_RUN"
 INSTALL_SUBCOMMANDS = (
     ("plan", "print every path, payload and precondition; touches nothing"),
     ("envs", "recreate both pip virtual environments, --lute pip only (destructive)"),
-    ("workspace", "create lute_output and lute.db, grant the experiment group (idempotent)"),
+    ("workspace", "create lute_output and lute.db, grant the staff groups (idempotent)"),
     ("dags", "set account/partition/reservation in each DAG (idempotent)"),
     ("register", "POST workflow definitions to the eLog"),
     ("all", "workspace, dags, LUTE (pip/clone only), register -- in order, after checks"),
@@ -1396,21 +1397,21 @@ def clone_build(plan_: dict, *, confirm: str | None = None) -> dict:
 
 
 def setup_workspace(plan_: dict) -> dict:
-    """Create the output directory and lute.db, and open both to the experiment group."""
+    """Create lute_output and lute.db: writable by the staff groups, the LUTE code read-only."""
     out_dir = pathlib.Path(plan_["lute_output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     db = out_dir / "lute.db"
     created = not db.exists()
     if created:
         db.touch()
-    # Without --directory the workspace is results/ itself: grant only what LUTE writes.
-    base = pathlib.Path(plan_["results_dir"]) if plan_["directory"] else out_dir
-    rx = [base / "smalldata_tools"]
-    if plan_["lute"]["kind"] in ("install", "clone"):
-        rx.append(pathlib.Path(plan_["lute"]["root"]))
-    acl = grant_group(plan_["experiment"], rw=[base], rx=rx)
+    # The original layout: lute_output (LUTE's work_dir, where the yaml lives and
+    # smalldata_tools is cloned) is written; the LUTE beside it is only read and run.
+    rx = {"install": [plan_["lute"]["root"]], "clone": [plan_["lute"]["root"]],
+          "pip": [plan_["lute_envs_dir"]]}.get(plan_["lute"]["kind"], [])
+    groups = staff_groups(plan_["hutch"], plan_["experiment"])
+    acl = grant_group(*groups, rw=[out_dir], rx=[pathlib.Path(p) for p in rx])
     if not acl["ok"]:
-        raise InstallError(f"experiment group {plan_['experiment']} could not be given "
+        raise InstallError(f"groups {', '.join(groups)} could not be given "
                            f"access to: {acl['failed'][:10]}")
     return {"lute_output_dir": str(out_dir), "db": str(db), "db_created": created, "acl": acl}
 

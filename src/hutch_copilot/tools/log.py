@@ -18,6 +18,7 @@ from .common import (
     log_file,
     out,
     parser,
+    staff_groups,
 )
 
 #: Marker for entries reconstructed after the fact by /sync-log, so a reader can
@@ -59,7 +60,7 @@ def init(hutch: str, experiment: str, *, shift_date: str, shift_start: str | Non
 
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("\n".join(lines))
-    acl = grant_group(experiment, rw=[p.parent])
+    acl = grant_group(*staff_groups(hutch, experiment), rw=[p.parent])
     return {"created": True, "path": str(p), "shift_start": start, "acl": acl}
 
 

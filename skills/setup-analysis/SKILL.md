@@ -221,9 +221,11 @@ whose accounts list `lcls:<E>` (`lcls:onshift` today) and add it to every DAG st
 the eLog payload. `--reservation none` skips it.
 
 **The workspace is the experiment's, not yours.** An eLog workflow runs as whoever
-clicks it. `workspace` gives the experiment group (`<E>`) `rwX` plus default ACLs on the
-workspace and `rX` on a `clone:`/`install:` LUTE, removes any world-write, and verifies
-it; a path it could not grant blocks. Paths owned by someone else are listed in
+clicks it, and staff are not in the experiment group. `workspace` gives `<E>`, `ps-<hutch>`
+and `ps-data` `rwX` plus default ACLs on `lute_output/` (the `work_dir`: config, DAGs,
+smalldata_tools) and `rX` on a `clone:`/`install:`/`pip` LUTE, with an `r-x` mask so no
+group writes the code. It removes any world-write and verifies it; a path it could not
+grant blocks. Paths owned by someone else are listed in
 `skipped_not_owned` — tell their owner. The hutch hosts' NFS mount has no ACL support, so
 the tool sets them over `ssh psana`. Never fix access with `777`.
 
