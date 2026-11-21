@@ -69,7 +69,7 @@ def _run(binary: str, *args: str | None, timeout: int = T_TOOL) -> str:
 
 #: The only dash-led argv entries a tool may send; any argument value starting with "-" is refused.
 _FLAGS = {"--hutch", "--suffix", "--from", "--to", "--experiment", "--taking-data", "--settle-s",
-          "--timeout"}
+          "--timeout", "--devices", "--ioc", "--limit"}
 
 
 def _opt(flag: str, value: str | None) -> tuple[str | None, str | None]:
@@ -106,6 +106,12 @@ def happi_pv(name: str, suffix: str | None = None, hutch: str | None = None) -> 
 def epics_caget(pv: list[str]) -> str:
     """Live Channel Access values of one or more PVs, read now."""
     return _run("hutch-epics", "caget", *pv)
+
+
+@mcp.tool()
+def epics_grep(pattern: str, ioc: str | None = None, limit: int = 200) -> str:
+    """PVs whose name matches a regex, from every IOC's pvlist, with the IOC serving each."""
+    return _run("hutch-epics", "grep", pattern, *_opt("--ioc", ioc), "--limit", str(limit))
 
 
 @mcp.tool()
@@ -181,8 +187,11 @@ def _granted(user: str, hutch: str) -> bool:
 
 
 @mcp.tool()
-def hutch_py_run(code: str, timeout_s: int = 300, hutch: str | None = None) -> str:
+def hutch_py_run(code: str, timeout_s: int = 300, hutch: str | None = None,
+                 devices: list[str] | None = None) -> str:
     """Run python in a fresh hutch-python load on the hutch (hutch-py run); it can move hardware.
+
+    ``devices``: happi names to load instead of conf.yml's db and beamline module, ~2x faster.
 
     The operator approves each call in Claude Code's own permission prompt, which shows the code.
     Say what it does first. You cannot approve it.
@@ -196,8 +205,8 @@ def hutch_py_run(code: str, timeout_s: int = 300, hutch: str | None = None) -> s
                         f"policy.yaml); nothing ran. Ask its owner for a grant, or run it from "
                         f"Claude Code on the hutch machine")
     LOG.info("user=%s hutch=%s hutch_py_run", user, h)
-    return _run("hutch-py", "--hutch", h, "--timeout", str(timeout_s), "run", code,
-                timeout=timeout_s + 60)
+    return _run("hutch-py", "--hutch", h, "--timeout", str(timeout_s), "run",
+                *_opt("--devices", ",".join(devices or [])), code, timeout=timeout_s + 60)
 
 
 @mcp.tool()

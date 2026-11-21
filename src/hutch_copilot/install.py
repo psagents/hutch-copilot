@@ -180,12 +180,16 @@ def main(argv: list[str] | None = None) -> int:
     # Cogito reaches hutch-python as the gateway's tool; a terminal on the hutch runs bin/hutch-py.
     cogito = [f"mcp__sdf-mcp__hutch{hutch}_hutch_py_run"]
     terminal = ["Bash(bin/hutch-py *)", "Bash(hutch-py *)", f"Bash({REPO}/bin/hutch-py *)"]
+    # An eLog post is a write that runs locally in both modes, so every config asks before it.
+    elog = ["Bash(bin/hutch-elog post *)", "Bash(hutch-elog post *)",
+            f"Bash({REPO}/bin/hutch-elog post *)"]
     # One file can serve several configs: a Cogito host's .claude is often a link to ~/.claude.
     # It then needs every config's rules; each is inert where its tool does not exist.
     settings: dict[pathlib.Path, list[str]] = {}
     for t in ts:
         rules = settings.setdefault((t["dir"] / "settings.json").resolve(), [])
-        rules += [r for r in (cogito if t["name"].startswith("cogito:") else terminal) if r not in rules]
+        own = cogito if t["name"].startswith("cogito:") else terminal
+        rules += [r for r in own + elog if r not in rules]
     for path, ask in settings.items():
         msgs += install_hooks(path, args.check, ask)
     if not args.check:

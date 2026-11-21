@@ -36,6 +36,7 @@ BINARIES = {
     "skills": "tools.skills",
     "lute": "tools.lute",
     "log": "tools.log",
+    "elog": "tools.elog",
     "normal": "normal",
     "ready": "readiness",
     "setup": "install",

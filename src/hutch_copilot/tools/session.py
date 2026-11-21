@@ -104,18 +104,19 @@ def _ssh(
         )
     return proc.stdout.decode("utf-8", "replace")
 
-#: Prepended to every staged script. The happi load sits inside safe_load(), so a
+#: Prepended to a full-load script. The happi load sits inside safe_load(), so a
 #: db it cannot read leaves an empty namespace and rc=0 -- silently reporting
 #: nothing rather than failing. Keyed off size alone: daq is absent at MEC/CXI/XCS
 #: (lcls1) and `las` (nodaq).
-#:
-#: hutch-python builds elog only from ~/.web.cfg, which personal accounts lack;
-#: HutchELog with no user/pw authenticates with the caller's Kerberos ticket instead.
-#: It must also land in {hutch}.db: autorun & co. `from mfx.db import elog` at call time.
-_GUARD = (
+_SIZE_GUARD = (
     "assert len(globals()) > 50, (\n"
     "    'hutch-python loaded a near-empty namespace -- check that conf.yml db "
     "is readable by this user (the /reg/g spelling is not)')\n"
+)
+#: Prepended to every staged script. hutch-python builds elog only from ~/.web.cfg, which
+#: personal accounts lack; HutchELog with no user/pw authenticates with the caller's Kerberos
+#: ticket instead. It must also land in {hutch}.db: autorun & co. `from mfx.db import elog`.
+_GUARD = (
     "if 'elog' not in globals():\n"
     "    try:\n"
     "        from elog import HutchELog as _HE; elog = _HE({hutch!r})\n"
@@ -125,18 +126,43 @@ _GUARD = (
     "-- elog posting unavailable; kinit?\\n')\n"
 )
 
+#: ``--devices``: hutch-python's own load_conf on conf.yml minus ``db`` and ``load``, then only
+#: the named happi devices. 13 s against 47 s for the full load on mfx-daq (2026-11-20).
+#: Keeps the real hutch dir, which load_conf needs for presets, logs and ``{hutch}.db``.
+_LEAN = (
+    "import sys as _sys, yaml as _yaml, pathlib as _pl\n"
+    "_sys.path.insert(0, {hd!r})\n"
+    "from hutch_python.load_conf import load_conf as _load_conf\n"
+    "_conf = _yaml.safe_load(_pl.Path({hd!r}, 'conf.yml').read_text())\n"
+    "_conf.pop('db', None); _conf.pop('load', None)\n"
+    "globals().update(_load_conf(_conf, hutch_dir=_pl.Path({hd!r})))\n"
+    "from happi import Client as _Client\n"
+    "_happi = _Client(path={db!r})\n"
+    "for _n in {names!r}:\n"
+    "    globals()[_n] = _happi.load_device(name=_n)\n"
+)
+
 #: Printed last so the caller can see the namespace it actually got.
 _SIZE_MARKER = "HUTCH_NS_SIZE:"
 
 
-def run_script(hutch: str, code: str, *, timeout: int = T_LOAD) -> dict:
+def run_script(hutch: str, code: str, *, timeout: int = T_LOAD,
+               devices: list[str] | None = None) -> dict:
     """Run python in a fresh hutch-python load, with no live session; ``timeout`` in seconds."""
     h = hutch.strip().lower()
-    # The hutch's own wrapper, not hutch-python directly: it sources {hutch}env,
-    # which sets the conda env and the PYTHONPATH that `load: mfx.beamline` and
-    # `from mfx.db import elog` need. Reimplementing that here would drift.
-    launcher = f"{external_path('PYTHON_APPS')}/{h}/{h}python"
+    hd = f"{external_path('PYTHON_APPS')}/{h}"
     guard = _GUARD.format(hutch=h.upper(), db=f"{h}.db")
+    if devices:
+        launcher = "bash"
+        argv = ["bash", "-c", f"source {hd}/{h}env >/dev/null && exec python /dev/stdin"]
+        guard = _LEAN.format(hd=hd, db=external_path("HAPPI_DB"), names=devices) + guard
+    else:
+        # The hutch's own wrapper, not hutch-python directly: it sources {hutch}env,
+        # which sets the conda env and the PYTHONPATH that `load: mfx.beamline` and
+        # `from mfx.db import elog` need. Reimplementing that here would drift.
+        launcher = f"{hd}/{h}python"
+        argv = [launcher, "/dev/stdin"]
+        guard = _SIZE_GUARD + guard
     staged = f"{guard}{code}\nprint({_SIZE_MARKER!r}, len(globals()))\n"
 
     # /dev/stdin, not a temp file: cli.py reads the script to EOF before exec, so
@@ -146,7 +172,7 @@ def run_script(hutch: str, code: str, *, timeout: int = T_LOAD) -> dict:
     env = {**os.environ, "PATH": f"{scripts}:{os.environ.get('PATH', '')}"}
     try:
         proc = subprocess.run(
-            [launcher, "/dev/stdin"],
+            argv,
             input=staged.encode(),
             capture_output=True,
             timeout=timeout,
@@ -209,6 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--timeout", type=int, default=T_LOAD, help="seconds, load included")
     run_parser = sub.add_parser("run", help="run python in a fresh load, no session")
     run_parser.add_argument("code", help="python source, or - to read stdin")
+    run_parser.add_argument("--devices", type=lambda s: s.split(","), default=None,
+                            help="comma-separated happi names: load only these, not conf.yml's db/load")
     sub.add_parser("conf", help="the hutch's conf.yml")
     return ap
 
@@ -221,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
             return out(hutch_conf(args.hutch))
         if args.cmd == "run":
             code = sys.stdin.read() if args.code == "-" else args.code
-            res = run_script(args.hutch, code, timeout=args.timeout)
+            res = run_script(args.hutch, code, timeout=args.timeout, devices=args.devices)
             out(res)
             # A snippet that raised is not an unreachable source: collapsing the
             # two would leave a caller unable to tell "no launcher" from

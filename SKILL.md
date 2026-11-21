@@ -26,14 +26,15 @@ so the tool to call follows from which source answers the question.
 |---|---|
 | `bin/hutch-state` | Keeps track of the experiment state |
 | `bin/hutch-happi` | The device database: what exists, where, under which PV prefix |
-| `bin/hutch-epics` | Channel Access: live PV reads, and archived PV history |
+| `bin/hutch-epics` | Channel Access: live PV reads, PV names by regex from the IOCs' pvlists (`grep`), and archived PV history |
 | `bin/hutch-lightpath` | The beam path to a hutch, and what blocks it |
-| `bin/hutch-py` | Python in a fresh load of the hutch's own hutch-python (`run`), and its `conf.yml` |
+| `bin/hutch-py` | Python in a fresh load of the hutch's own hutch-python (`run`; `--devices a,b` loads only those happi devices, ~2x faster), and its `conf.yml` |
 | `bin/hutch-daq` | The DAQ: its state (off its control port, no session needed), logs and config. Read-only |
 | `bin/hutch-data` | What landed on disk: the DAQ generation (`daq`), psana1/psana2 detectors, XTC/XTC2, PDB cells, `/cds` files |
 | `bin/hutch-skills` | Which skills are installed, and where |
 | `bin/hutch-lute` | LUTE: which LUTE (`--lute`), workspace setup, registration, running a Task or a whole DAG by hand, monitoring, pedestals |
 | `bin/hutch-log` | the beamtime log |
+| `bin/hutch-elog` | posting to the experiment's eLog (`post`, a write). Reading it is `elog-search` |
 
 Run `--help` for subcommands and flags. They work from a bare checkout with no install
 step. `pip install -e .` is optional and only adds the same commands to PATH — never
@@ -62,6 +63,7 @@ checks over them exist only on the hutch machine. The SessionStart hook prints:
 | the three readiness checks, verdict included (`are-we-ready`) | `bin/hutch-ready beam\|hutch\|daq --hutch "$H"` | `ready_beam`, `ready_hutch`, `ready_daq` |
 | the device database | `bin/hutch-happi list\|device\|pv --hutch "$H"` | `happi_list`, `happi_device`, `happi_pv` |
 | live PV values | `bin/hutch-epics caget <pv>...` | `epics_caget` (a list: one call for many PVs) |
+| which PVs exist, and which IOC serves each | `bin/hutch-epics grep '<regex>'` | `epics_grep` |
 | the archiver | `bin/hutch-epics history\|moved <pv> --from <t>` | `epics_history`, `epics_moved` |
 | the beam path and its blockers | `bin/hutch-lightpath path --hutch "$H"` | `lightpath_path` |
 | the DAQ's own state, off its control port | `bin/hutch-daq --hutch "$H" state` | `daq_state` |
@@ -71,7 +73,7 @@ checks over them exist only on the hutch machine. The SessionStart hook prints:
 
 Over MCP, leave `hutch` out: it defaults to the server's own. In both modes, run locally what
 works from anywhere: `hutch-state`, `hutch-log`, `hutch-skills`, `hutch-lute` (not `peds`),
-`hutch-daq logs`/`config`, `hutch-data xtc2`/`detectors`, `hutch-normal show`.
+`hutch-daq logs`/`config`, `hutch-data xtc2`/`detectors`, `hutch-normal show`, `hutch-elog`.
 
 **Other MCP servers in the session are not part of any procedure.** Cogito's gateway also
 serves other facility servers, such as `epics-mfx`; a terminal may have more. A procedure uses
@@ -83,7 +85,8 @@ Loading a tool that still is not callable once is enough; do not load it again. 
 an answer from other reads, or from the tools' source: a verdict you assembled yourself is a
 guess with the tool's name on it. **A write is never yours to approve.** Every hutch-python run (`bin/hutch-py run` locally,
 `hutch_py_run` over MCP) waits for the operator's click in Claude Code's own permission prompt,
-which shows the code: say what it does before you call it, and if they decline, stop. Through
+which shows the code: say what it does before you call it, and if they decline, stop. So does
+every `bin/hutch-elog post`: show the operator the text first. Through
 the gateway the server also refuses a caller its policy does not grant: report its message as it
 is; nothing ran.
 
@@ -103,7 +106,7 @@ Three rules that the tools enforce and you must not work around:
 An unbounded probe reads every jungfrau/epix stream just to count codes.
 
 Resolve, don't recall: device lists and PV prefixes come from happi (`happi_list`,
-`happi_pv`), detector aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq config`. This skill
+`happi_pv`), the PVs under a prefix from `epics_grep '^<prefix>'`, detector aliases and unit cells from `hutch-data`, DAQ hosts from `hutch-daq config`. This skill
 deliberately ships no tables of them.
 
 **"Did this move overnight?" is not a `caget` question.** `caget` reads now. For what
@@ -220,6 +223,7 @@ of it.
 | `/setup-analysis` | a LUTE workflow, up to registration or a job id |
 | `/assess-analysis` | a submitted LUTE job: what it produced, and the one knob to turn |
 | `/sync-log` | the beamtime log and state file, from this turn |
+| `/live-shmem` | any live analysis off the DAQ's monitoring shared memory: find it, write the reader, watch it |
 
 ---
 

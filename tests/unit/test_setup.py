@@ -131,8 +131,10 @@ def test_every_config_asks_before_hutch_python_and_keeps_its_own_rules(home, mon
     monkeypatch.setattr(install.shutil, "which", lambda name: None)
     install.main(["--hutch", "mfx"])
     ask = lambda d: json.loads((d / "settings.json").read_text())["permissions"]["ask"]
-    assert ask(cog) == ["Bash(rm *)", "mcp__sdf-mcp__hutchmfx_hutch_py_run"]
+    assert ask(cog)[:2] == ["Bash(rm *)", "mcp__sdf-mcp__hutchmfx_hutch_py_run"]
     assert "Bash(bin/hutch-py *)" in ask(home / ".claude")
+    # An eLog post runs locally in both modes, so both configs ask before it.
+    assert all("Bash(bin/hutch-elog post *)" in ask(d) for d in (cog, home / ".claude"))
     assert not [m for m in install.install_hooks(cog / "settings.json", False, ask(cog)) if m]
 
 
