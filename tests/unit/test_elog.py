@@ -29,6 +29,12 @@ def test_post_sends_literal_text_with_the_ticket_and_returns_the_id(monkeypatch)
     assert "files=@/p.png" in argv and argv[-1].endswith("/mfx101948627/ws/new_elog_entry")
 
 
+def test_no_klist_still_posts(monkeypatch):
+    _fake(monkeypatch, {"success": True, "value": {"_id": "abc"}})
+    monkeypatch.setattr(elog, "elog_ticket", lambda: (None, "FILE:/h/krb5cc.ticket"))
+    assert elog.post("x", "t")["value"] == "abc"
+
+
 def test_a_refusal_is_rc_refused(monkeypatch):
     _fake(monkeypatch, {"success": False, "error_msg": "no such experiment"})
     with pytest.raises(elog.ElogRefused):

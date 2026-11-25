@@ -25,7 +25,7 @@ def post(experiment: str, text: str, *, tags: list[str] | None = None,
          run: int | None = None, attach: list[str] | None = None) -> dict:
     """The new entry's id, after posting ``text`` (and files) as the ticket's owner."""
     ok, ticket = elog_ticket()
-    if not ok:
+    if ok is False:
         raise ElogError(f"no valid Kerberos ticket at {ticket}: run kinit -c {ticket} "
                         f"<user>@SLAC.STANFORD.EDU in a terminal")
     # curl, not requests+krtc: SPNEGO is built into curl, and krtc is absent from the tool python.
