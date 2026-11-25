@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -200,11 +201,35 @@ def moved(pv: str, start: str, end: str, *, timeout: int = T_QUERY) -> dict:
     }
 
 
+def grep(pattern: str, ioc: str = "*", limit: int = 200) -> dict:
+    """PVs whose name matches ``pattern`` (a Python regex), with the IOC serving each and its record type."""
+    rx = re.compile(pattern)
+    root = pathlib.Path(external_path("IOC_DATA"))
+    files = sorted(root.glob(f"{ioc}/iocInfo/IOC.pvlist"))
+    if not files:
+        raise EpicsError(f"no IOC.pvlist under {root}/{ioc}/iocInfo -- is this a hutch machine?")
+    hits = []
+    for f in files:
+        # A pvlist is rewritten when its IOC boots; one caught mid-write is skipped, not fatal.
+        try:
+            lines = f.read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            pv, _, rtyp = line.partition(",")
+            if rx.search(pv.strip()):
+                hits.append({"pv": pv.strip(), "ioc": f.parent.parent.name,
+                             "rtyp": rtyp.strip().strip('"')})
+    return {"value": hits[:limit], "truncated": len(hits) > limit, "matches": len(hits),
+            "source": f"resolved:{root}/{ioc}/iocInfo/IOC.pvlist ({len(files)} IOCs)",
+            "retrieved_at": utcnow()}
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 #: Command help, shared by build_parser() and main().
-_DOC = """hutch-epics: caget | history | moved."""
+_DOC = """hutch-epics: caget | grep | history | moved."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -214,6 +239,10 @@ def build_parser() -> argparse.ArgumentParser:
     # machine, so the hutch was never part of the question.
     caget_parser = sub.add_parser("caget", help="read PVs over Channel Access")
     caget_parser.add_argument("pv", nargs="+")
+    grep_parser = sub.add_parser("grep", help="find PVs by regex in the IOCs' pvlists")
+    grep_parser.add_argument("pattern")
+    grep_parser.add_argument("--ioc", default="*", help="glob on the IOC name, e.g. 'ioc-mfx-*'")
+    grep_parser.add_argument("--limit", type=int, default=200)
 
     for name, helptext in (
         ("history", "archived samples for one PV between two times"),
@@ -229,15 +258,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """hutch-epics: caget | history | moved."""
+    """hutch-epics: caget | grep | history | moved."""
     args = build_parser().parse_args(argv)
     try:
         if args.cmd == "caget":
             return out(pv_values(args.pv))
+        if args.cmd == "grep":
+            return out(grep(args.pattern, args.ioc, args.limit))
         if args.cmd in ("history", "moved"):
             end = args.end or datetime.datetime.now().astimezone().isoformat()
             fn = history if args.cmd == "history" else moved
             return out(fn(args.pv, args.start, end))
         return USAGE
+    except re.error as exc:
+        return fail(exc, USAGE)
     except (EpicsError, OSError) as exc:
         return fail(exc, UNREACHABLE)

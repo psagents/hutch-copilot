@@ -52,3 +52,23 @@ def test_no_launcher_is_unreachable(monkeypatch):
         raise FileNotFoundError("no mfxpython")
     monkeypatch.setattr(py.subprocess, "run", missing)
     assert py.main(["--hutch", "mfx", "run", "print(1)"]) == _cli.UNREACHABLE
+
+
+def test_devices_loads_only_those_without_the_db_or_beamline(monkeypatch):
+    """--devices drops conf.yml's db and load (47 s -> ~20 s) and loads the named happi devices."""
+    seen = _fake_run(monkeypatch, stdout=b"HUTCH_NS_SIZE: 30\n")
+    monkeypatch.setenv("HUTCH_PYTHON_APPS", "/apps")
+    assert py.main(["--hutch", "mfx", "run", "--devices", "m1,m2", "print(m1)"]) == _cli.OK
+    assert seen["argv"][:2] == ["bash", "-c"] and "source /apps/mfx/mfxenv" in seen["argv"][2]
+    assert "_conf.pop('db', None); _conf.pop('load', None)" in seen["input"]
+    assert "['m1', 'm2']" in seen["input"]
+    # A lean namespace is small by design, so the near-empty guard must not fire.
+    assert "len(globals()) > 50" not in seen["input"]
+
+
+def test_without_devices_the_full_wrapper_and_size_guard_stay(monkeypatch):
+    seen = _fake_run(monkeypatch)
+    monkeypatch.setenv("HUTCH_PYTHON_APPS", "/apps")
+    py.run_script("mfx", "print(1)")
+    assert seen["argv"] == ["/apps/mfx/mfxpython", "/dev/stdin"]
+    assert "len(globals()) > 50" in seen["input"]

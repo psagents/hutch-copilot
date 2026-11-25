@@ -35,6 +35,7 @@ TOOLS = {
     "tools.skills": "hutch-skills",
     "tools.lute": "hutch-lute",
     "tools.log": "hutch-log",
+    "tools.elog": "hutch-elog",
     "normal": "hutch-normal",
     "readiness": "hutch-ready",
     "install": "hutch-setup",

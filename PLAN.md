@@ -30,7 +30,7 @@ question, and there is never a choice to make about where a fact comes from.
 ```
 hutch-state      path get set unset audit dump
 hutch-happi      list device pv preset
-hutch-epics      caget
+hutch-epics      caget grep history moved
 hutch-lightpath  path
 hutch-python     ping install exec conf
 hutch-daq        state config logs [--sessions] (read-only)
@@ -39,6 +39,7 @@ hutch-skills     list
 hutch-lute       sbatch status watch peds readiness kerberos render
                  plan workspace dags envs register all
 hutch-log        init append
+hutch-elog       post
 ```
 
 Two shell hooks sit beside them, and are not CLIs: `bin/hutch-session-start` restores

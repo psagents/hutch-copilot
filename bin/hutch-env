@@ -75,6 +75,9 @@ if [ -z "${HUTCH_DAQ_CONFIG_DIR:-}" ]; then
     export HUTCH_DAQ_CONFIG_DIR='/sdf/home/{hutch[0]}/{hutch}opr/daq/scripts'
 fi
 
+# Per-IOC iocInfo dirs; each IOC.pvlist names every record the IOC serves.
+export HUTCH_IOC_DATA="${HUTCH_IOC_DATA:-/reg/d/iocData}"
+
 # LCLS data filesystem, and the skill roots (colon-separated, ~ allowed).
 export HUTCH_DS_ROOT="${HUTCH_DS_ROOT:-/sdf/data/lcls/ds}"
 export HUTCH_SKILL_ROOTS="${HUTCH_SKILL_ROOTS:-~/.claude/skills:/sdf/group/lcls/ds/dm/apps/dev/opencode/skills}"

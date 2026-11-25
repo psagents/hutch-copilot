@@ -23,8 +23,8 @@ def _fake_run(monkeypatch, rc=0, stdout='{"value": 1}'):
 
 def test_exposes_exactly_these_tools():
     names = {t.name for t in asyncio.run(hutch_mcp.mcp.list_tools())}
-    assert names == {"happi_list", "happi_device", "happi_pv", "epics_caget", "epics_history",
-                     "epics_moved", "lightpath_path", "daq_state", "normal_diff", "data_cat",
+    assert names == {"happi_list", "happi_device", "happi_pv", "epics_caget", "epics_grep",
+                     "epics_history", "epics_moved", "lightpath_path", "daq_state", "normal_diff", "data_cat",
                      "ready_beam", "ready_hutch", "ready_daq", "hutch_py_run"}
 
 
@@ -113,6 +113,13 @@ def test_over_ssh_any_snippet_runs_as_the_caller_with_no_policy(monkeypatch):
     assert seen == [["--hutch", "mfx", "--timeout", "300", "run", "mfx_dg1.mv(3)"]]
 
 
+def test_devices_reach_hutch_py_as_one_comma_list(monkeypatch):
+    seen = _fake_run(monkeypatch)
+    monkeypatch.delenv("AUTHZ_POLICY_FILE", raising=False)
+    hutch_mcp.hutch_py_run("print(m1)", hutch="mfx", devices=["m1", "m2"])
+    assert seen == [["--hutch", "mfx", "--timeout", "300", "run", "--devices", "m1,m2", "print(m1)"]]
+
+
 POLICY = """
 users:
   ytl: {groups: [mfx-operators]}
@@ -180,4 +187,4 @@ def test_the_example_policy_is_never_read_and_grants_no_one_openly(monkeypatch):
 def test_the_model_passes_only_the_code():
     """No approval or class in the schema: the operator's approval is the client's prompt."""
     tools = {t.name: t for t in asyncio.run(hutch_mcp.mcp.list_tools())}
-    assert set(tools["hutch_py_run"].inputSchema["properties"]) == {"code", "timeout_s", "hutch"}
+    assert set(tools["hutch_py_run"].inputSchema["properties"]) == {"code", "timeout_s", "hutch", "devices"}
