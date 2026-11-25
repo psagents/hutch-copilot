@@ -137,7 +137,7 @@ in `tools/common.py`.
   - `check` kill-reason regexes.
 - Run with `/sdf/group/lcls/ds/ana/sw/conda2/inst/envs/ps_20260504/bin/python -m pytest tests/unit -q`.
 - **Live on mfx-daq:**
-  - `bin/hutch-ready all --hutch mfx --experiment <E>` agrees with today's `/are-we-ready`
+  - `hutch-ready all --hutch mfx --experiment <E>` agrees with today's `/are-we-ready`
     output.
   - Start `hutch-watch` under Monitor while the DAQ is running. A run end should produce one
     `run_ended` event and one beamtime-log line. Killing and restarting the watcher should add
