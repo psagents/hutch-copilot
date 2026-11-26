@@ -1247,12 +1247,15 @@ def real_home() -> str:
     return pwd.getpwuid(os.getuid()).pw_dir
 
 
-def elog_ticket() -> tuple[bool, str]:
+def elog_ticket() -> tuple[bool | None, str]:
     """Is there a usable Kerberos ticket at the path the eLog path expects?
 
     Distinct from ``have_ticket()``, which asks the ambient cache whether *any*
     ticket exists. eLog registration needs one at ``FILE:~/krb5cc.ticket``
     specifically, because that is what it sets KRB5CCNAME to.
+
+    ``None`` means unknown: no ``klist`` to ask (the Cogito container has none),
+    so the server's own answer is the check.
     """
     ticket = f"FILE:{real_home()}/krb5cc.ticket"
     try:
@@ -1260,6 +1263,8 @@ def elog_ticket() -> tuple[bool, str]:
         # cache file exists; -s exits non-zero unless a ticket is still valid.
         rc = subprocess.run(["klist", "-s", "-c", ticket], capture_output=True,
                             timeout=10).returncode
+    except FileNotFoundError:
+        return None, ticket
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"klist failed: {exc}"
     return rc == 0, ticket
